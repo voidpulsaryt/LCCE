@@ -235,6 +235,7 @@ public final class LandChunkService {
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         boolean changed = savedData.clearLandChunk(chunkKey);
         ChunkUserPermissionService.onChunkUnclaimed(server, chunkKey);
+        WarpService.onChunkUnclaimed(server, chunkKey);
 
         Team team = chunk.getTeamData().getTeam();
         if (team != null) {

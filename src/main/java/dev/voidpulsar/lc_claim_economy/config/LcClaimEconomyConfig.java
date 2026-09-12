@@ -57,6 +57,13 @@ public final class LcClaimEconomyConfig {
         public final ModConfigSpec.ConfigValue<String> webLogoUrl;
         public final ModConfigSpec.ConfigValue<String> webCustomCss;
         public final ModConfigSpec.LongValue pioneerBonusAmount;
+        public final ModConfigSpec.BooleanValue warpsEnabled;
+        public final ModConfigSpec.IntValue maxWarpsPerPlayer;
+        public final ModConfigSpec.LongValue warpCreateCostCopper;
+        public final ModConfigSpec.LongValue warpTeleportCostCopper;
+        public final ModConfigSpec.BooleanValue warpRequireOwnClaim;
+        public final ModConfigSpec.IntValue warpCooldownSeconds;
+        public final ModConfigSpec.ConfigValue<List<? extends String>> warpWorldDisplayNames;
 
         Server(ModConfigSpec.Builder builder) {
             builder.comment("Lightman's Currency: FTB Claim Economy server configuration").push("general");
@@ -294,6 +301,39 @@ public final class LcClaimEconomyConfig {
             pioneerBonusAmount = builder
                     .comment("One-time reward, in copper units, paid to whichever team claims the very first chunk on this server. Default: 5 diamond coins (50000 copper). Set to 0 to disable.")
                     .defineInRange("pioneerBonusAmount", 50_000L, 0L, Long.MAX_VALUE);
+
+            builder.pop();
+            builder.comment("Player-owned warps: personal teleport points players can set inside their own team's claimed land and optionally share with others (/lcce warp).").push("warps");
+
+            warpsEnabled = builder
+                    .comment("Enable the /lcce warp system entirely.")
+                    .define("warpsEnabled", true);
+
+            maxWarpsPerPlayer = builder
+                    .comment("Maximum number of warps a single player can own at once.")
+                    .defineInRange("maxWarpsPerPlayer", 3, 0, 1000);
+
+            warpCreateCostCopper = builder
+                    .comment("Cost in copper units to create a new warp. Moving an existing warp to a new location is free. Default: 5000 copper.")
+                    .defineInRange("warpCreateCostCopper", 5_000L, 0L, Long.MAX_VALUE);
+
+            warpTeleportCostCopper = builder
+                    .comment("Toll in copper units charged when teleporting to another player's public warp, paid directly to that warp's owner. Free (0) by default. Teleporting to your own warps never costs a toll.")
+                    .defineInRange("warpTeleportCostCopper", 0L, 0L, Long.MAX_VALUE);
+
+            warpRequireOwnClaim = builder
+                    .comment("If true, a warp can only be created on a chunk claimed by the creator's own team. If that chunk is later unclaimed, any warps sitting on it are deleted.")
+                    .define("warpRequireOwnClaim", true);
+
+            warpCooldownSeconds = builder
+                    .comment("Minimum time in seconds a player must wait between two warp teleports (own or others').")
+                    .defineInRange("warpCooldownSeconds", 5, 0, 3600);
+
+            warpWorldDisplayNames = builder
+                    .comment("Optional friendly display names for dimensions shown in the warp GUI/list, as \"namespace:path=Display Name\" entries "
+                            + "(e.g. \"minecraft:the_nether=The Nether\"). A dimension not listed here falls back to its id's path, prettified "
+                            + "(underscores replaced with spaces, first letter capitalized).")
+                    .defineList("warpWorldDisplayNames", List.of(), obj -> obj instanceof String s && s.contains("="));
 
             builder.pop();
         }

@@ -2,6 +2,34 @@
 
 All notable changes to this mod are documented here.
 
+## [4.5.0]
+
+### Added
+
+- **Player Warps** *(FTB Teams only)* — personal, player-owned teleport
+  points, tied into the claim economy rather than bolted on as a standalone
+  system:
+  - `/lcce warp` opens an in-game GUI (built with FTB Library's own screen
+    toolkit, matching this mod's other custom screens) listing your warps
+    and every warp other players have made public, with buttons to create,
+    delete, toggle public/private, and teleport. `/lcce warp list` gives a
+    clickable chat-based fallback with the same information.
+  - `/lcce warp set <name>` creates or moves a warp to your current
+    position; `warpRequireOwnClaim` (default `true`) restricts this to
+    chunks your own team currently has claimed, and a warp is
+    automatically deleted the moment its chunk is unclaimed.
+  - `/lcce warp public <name> <true|false>` shares a warp so other players
+    can teleport to it via `/lcce warp tpto <player> <name>` or the GUI,
+    optionally charging them a toll (`warpTeleportCostCopper`) paid
+    straight to the owner.
+  - `/lcce warp alias add|remove <name> <alias>` gives a warp one or more
+    extra names it can also be found/teleported to by, unique per-owner.
+  - Server owners get full cost/limit control: `warpsEnabled`,
+    `maxWarpsPerPlayer`, `warpCreateCostCopper`, `warpTeleportCostCopper`,
+    `warpRequireOwnClaim`, `warpCooldownSeconds`, and
+    `warpWorldDisplayNames` (custom friendly names for dimensions shown in
+    the warp list/GUI).
+
 ## [4.4.1]
 
 ### Fixed

@@ -5,7 +5,7 @@
 <p align="center">
 <img src="https://img.shields.io/badge/Minecraft-1.21.1-4f8a3d" alt="Minecraft 1.21.1">
 <img src="https://img.shields.io/badge/Loader-NeoForge-e05d2c" alt="NeoForge">
-<img src="https://img.shields.io/badge/version-4.4.0-c98a1f" alt="Version 4.4.0">
+<img src="https://img.shields.io/badge/version-4.5.0-c98a1f" alt="Version 4.5.0">
 <img src="https://img.shields.io/badge/license-All%20Rights%20Reserved-lightgrey" alt="License: All Rights Reserved">
 </p>
 
@@ -24,6 +24,7 @@
 | Team bank accounts, mirrored roles | ✅ | — |
 | Per-chunk player permissions | ✅ | — |
 | Wars, siege mode, bounties, marketplace | ✅ | — |
+| Player Warps | ✅ | — |
 | Pioneer bonus, claim milestones | ✅ | — |
 | Web leaderboard / dashboard | ✅ | leaderboard only |
 
@@ -37,6 +38,7 @@ If both are installed, the FTB integration takes over. Full breakdown on the [Fe
 - **Wars** *(FTB only)* — declare war to raise a rival's upkeep; optional siege mode strips explosion protection from long-besieged teams; a configurable weekly declaration window and a minimum-chunk-count/peaceful opt-out protect small teams from being dragged in.
 - **Bounties** *(FTB only)* — put escrowed money on a player's or team's head, collectible in PvP.
 - **Player marketplace** *(FTB only)* — list, browse, and buy claimed chunks from other players, with an atomic unclaim → claim → payment handoff so a failed transfer never strands a chunk or charges a buyer.
+- **Player Warps** *(FTB only)* — personal teleport points set inside your own claimed land, managed and browsed from an in-game GUI, shareable publicly for an optional toll, with aliases and server-configurable world display names.
 - **Bank Dashboard** — an in-game balance/upkeep screen with transaction history, openable anywhere with **B**, working identically on both backends.
 - **Optional web leaderboard + login-gated dashboard** — a built-in HTTP server for a public read-only leaderboard, plus (FTB only) a passwordless-login player dashboard for managing land, protections, and wars from a browser.
 - **Pioneer Bonus & claim milestones** *(FTB only)* — a one-time reward for the server's first-ever claim, plus hidden advancements at claim/war milestones for FTB Quests hooks — no FTB Quests dependency required.
@@ -71,6 +73,7 @@ All commands live under `/lcce`. Full reference with permissions and backend ava
 /lcce leaderboard [land|wealth]
 /lcce bounty player|team|list <...>
 /lcce market sell|cancel|buy|browse <...>
+/lcce warp [set|delete|public|alias|list|tp|tpto] <...>
 /lcce war peaceful [on|off]
 /lcce opc_chunktype land|build|status
 /lcce web login

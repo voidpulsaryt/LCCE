@@ -81,6 +81,20 @@ Cosmetic only — no functional effect. Shared by both web pages.
 | `webLogoUrl` | `""` | Optional logo image URL next to the site name; loaded directly by each visitor's browser |
 | `webCustomCss` | `""` | Optional raw CSS appended after the built-in stylesheet |
 
+## `warps`
+
+Player-owned warps (`/lcce warp`) — see [Features](Features).
+
+| Key | Default | Description |
+|---|---|---|
+| `warpsEnabled` | `true` | Enable the `/lcce warp` system entirely |
+| `maxWarpsPerPlayer` | `3` | Maximum warps a single player can own at once |
+| `warpCreateCostCopper` | `5000` | Cost to create a new warp. Moving an existing warp to a new location is free |
+| `warpTeleportCostCopper` | `0` | Toll charged when teleporting to another player's public warp, paid to that warp's owner. Teleporting to your own warps is always free |
+| `warpRequireOwnClaim` | `true` | A warp can only be created on a chunk your own team has claimed. Warps are deleted automatically if their chunk is later unclaimed |
+| `warpCooldownSeconds` | `5` | Minimum time between two warp teleports (own or others') |
+| `warpWorldDisplayNames` | *(empty)* | Friendly dimension names shown in the warp GUI/list, as `"namespace:path=Display Name"` entries (e.g. `"minecraft:the_nether=The Nether"`). Unlisted dimensions fall back to a prettified path |
+
 ## `flavor`
 
 | Key | Default | Description |

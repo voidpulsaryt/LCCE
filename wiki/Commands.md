@@ -15,6 +15,14 @@ All commands live under `/lcce` (renamed from `/lc_claim_economy` in 4.4.0).
 | `/lcce market browse` | FTB | Anyone | List all active listings, cheapest first |
 | `/lcce war peaceful` | FTB | Solo: anyone. Party: owners/officers | Show your team's current peaceful-mode status |
 | `/lcce war peaceful on\|off` | FTB | Same as above | Opt your team in/out of the war system entirely. Can't enable while a war is active |
+| `/lcce warp` | FTB | Anyone | Open the warp GUI (your warps + everyone's public warps) |
+| `/lcce warp set <name>` | FTB | Anyone | Create a warp at your position, or move an existing one of yours |
+| `/lcce warp delete <name>` | FTB | Anyone (own warps only) | Delete one of your warps |
+| `/lcce warp public <name> <true\|false>` | FTB | Anyone (own warps only) | Share/unshare a warp with other players |
+| `/lcce warp alias add\|remove <name> <alias>` | FTB | Anyone (own warps only) | Add/remove an extra name a warp can be found under |
+| `/lcce warp list` | FTB | Anyone | Clickable chat list of your warps and public warps |
+| `/lcce warp tp <name>` | FTB | Anyone | Teleport to one of your own warps |
+| `/lcce warp tpto <player> <name>` | FTB | Anyone | Teleport to another player's public warp |
 | `/lcce leaderboard` / `leaderboard land` | Either | Anyone | Rank teams by claimed-chunk count |
 | `/lcce leaderboard wealth` | Either | Anyone | Rank teams by bank balance |
 | `/lcce web login` | FTB | Any online player | Issue a one-time login code for the web dashboard (`webEnabled` + `webDashboardEnabled` required) |

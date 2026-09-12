@@ -5,6 +5,14 @@
 > **Minecraft:** 1.21.1 · **Loader:** NeoForge · **Side:** Both (required on server and client)
 > Also available on [Modrinth](https://modrinth.com/mod/lcce). Full docs on the [wiki](https://github.com/voidpulsarteam/LCCE/wiki).
 
+## Played live on Wattz
+
+This mod runs on **Wattz**, a public server built around this claim economy:
+
+- **Modpack:** [modrinth.com/modpack/wattz](https://modrinth.com/modpack/wattz)
+- **Server IP:** `play.wattzpol.net`
+- **Live web map:** [map.wattzpol.net](https://map.wattzpol.net/)
+
 ---
 
 ## Two claim backends
@@ -17,6 +25,7 @@ Pick whichever claim mod you already use — if both are installed, FTB takes ov
 | Build/Land chunk split | ✅ | ✅ (via command) |
 | Team bank accounts, per-chunk permissions | ✅ | — |
 | Wars, siege mode, bounties, marketplace | ✅ | — |
+| Player Warps | ✅ | — |
 | Pioneer Bonus, web dashboard | ✅ | — |
 
 ## Requirements
@@ -38,6 +47,7 @@ Lightman's Currency must match exactly; the claim backends just need to meet the
 - **Wars** *(FTB)* — declare war to raise a rival's upkeep, with optional siege mode, a scheduled declaration window, and safeguards keeping small teams out.
 - **Bounties** *(FTB)* — escrow money on a player's or team's head, collectible in PvP.
 - **Player marketplace** *(FTB)* — list, browse, and buy claimed chunks from other players.
+- **Player Warps** *(FTB)* — personal teleport points set inside your own claimed land, shareable with a GUI, aliases, per-warp tolls, and claim-tied auto-cleanup.
 - **Bank Dashboard** — an in-game balance/upkeep screen with transaction history, on either backend, opened anywhere with **B**.
 - **Optional web leaderboard + dashboard** — a public read-only leaderboard, plus (FTB) a login-gated browser dashboard for managing land, protections, and wars.
 - **Pioneer Bonus & claim milestones** *(FTB)* — a one-time reward for the server's first claim, plus advancement milestones usable as FTB Quests hooks with no FTB Quests dependency.
@@ -60,6 +70,7 @@ All commands live under `/lcce` — full reference with permissions on the [Comm
 /lcce leaderboard [land|wealth]
 /lcce bounty player|team|list <...>
 /lcce market sell|cancel|buy|browse
+/lcce warp [set|delete|public|alias|list|tp|tpto] <...>
 /lcce war peaceful [on|off]
 /lcce opc_chunktype land|build|status
 /lcce web login
@@ -69,7 +80,7 @@ All commands live under `/lcce` — full reference with permissions on the [Comm
 
 **Won't load / version error?** The error names exactly which companion mod and version is wrong — see Requirements above.
 
-**Both FTB Chunks and OP&C installed?** Only the FTB integration runs the economy features (wars, bounties, marketplace, Pioneer Bonus, per-chunk permissions).
+**Both FTB Chunks and OP&C installed?** Only the FTB integration runs the economy features (wars, bounties, marketplace, player warps, Pioneer Bonus, per-chunk permissions).
 
 **Is the web leaderboard safe to leave on?** It's read-only but unauthenticated — anyone reaching the port sees player names, balances, and chunk counts. Keep it firewalled/local-only unless you want it public.
 

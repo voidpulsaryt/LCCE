@@ -118,6 +118,29 @@ List, browse, and buy claimed chunks from other players. All commands are positi
 
 Ownership transfer is sequenced safely: the seller's chunk is unclaimed and the buyer's claim confirmed successful *before* any money moves, with an automatic rollback (reclaiming for the seller) if the buyer-side claim fails — a failed transfer never charges the buyer or strands the chunk unclaimed. The buyer receives the chunk with default protection/force-load state; land/build classification and per-player chunk permissions don't carry over from the seller.
 
+## Player Warps *(FTB Teams only)*
+
+Personal, player-owned teleport points, tied into the claim economy rather than bolted on as a standalone system:
+
+```
+/lcce warp
+/lcce warp set <name>
+/lcce warp delete <name>
+/lcce warp public <name> <true|false>
+/lcce warp alias add|remove <name> <alias>
+/lcce warp list
+/lcce warp tp <name>
+/lcce warp tpto <player> <name>
+```
+
+A bare `/lcce warp` opens an in-game GUI (built with FTB Library's own screen toolkit, matching this mod's other custom screens) listing your warps and every public warp other players have shared, with buttons to create, delete, toggle public/private, and teleport — clicking TP teleports you and closes the menu. `/lcce warp list` gives the same information as a clickable chat list.
+
+- **Tied to claims:** when `warpRequireOwnClaim` (default on) is enabled, a warp can only be set inside a chunk your own team currently has claimed. Unclaim that chunk later and any warps on it are deleted automatically — a warp can never point into land nobody protects anymore.
+- **Limits and costs:** `maxWarpsPerPlayer` caps how many warps one player can own; `warpCreateCostCopper` charges for creating a new one (moving an existing warp is free); a per-teleport `warpCooldownSeconds` prevents spam.
+- **Sharing:** a warp is private until you make it public (`/lcce warp public <name> true`), after which anyone can teleport to it — optionally for a toll (`warpTeleportCostCopper`) paid directly to you.
+- **Aliases:** give a warp one or more extra names it can also be found/teleported to by (`/lcce warp alias add <name> <alias>`), unique among your own warps.
+- **World naming:** `warpWorldDisplayNames` lets a server owner give dimensions friendly display names (e.g. "The Nether" instead of a raw id) shown throughout the warp GUI and list.
+
 ## Pioneer Bonus *(FTB Chunks only)*
 
 The very first chunk ever claimed on a server triggers a one-time reward: a configurable currency deposit (`pioneerBonusAmount`, default 5 Diamond coins) straight to the claiming player's account, plus a hidden advancement usable as an FTB Quests (or any advancement-aware) task trigger. Set the amount to `0` to disable the payout while keeping the advancement.

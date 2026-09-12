@@ -53,7 +53,10 @@ If your server has a war declaration window configured, new declarations only wo
 ### Step 10 — Marketplace (optional)
 Stand in a claimed chunk you own and run `/lcce market sell <price_copper>` to list it. Anyone can browse (`/lcce market browse`) and buy (standing in that chunk, `/lcce market buy`). `/lcce market cancel` delists your own chunk.
 
-### Step 11 — Web dashboard (optional)
+### Step 11 — Player Warps (optional)
+Stand somewhere inside a chunk your team has claimed and run `/lcce warp set home` to create a warp there. Run `/lcce warp` to open the GUI — it lists your warps alongside every public warp other players have shared, with buttons to teleport, toggle public/private, or delete. To share a warp, `/lcce warp public home true`; others can then reach it with `/lcce warp tpto <yourname> home` or from their own GUI.
+
+### Step 12 — Web dashboard (optional)
 If your server has `webEnabled` and `webDashboardEnabled` on, run `/lcce web login` to get a one-time code, then enter it on the dashboard's login page to manage your land, protections, and wars from a browser.
 
 ---
@@ -70,6 +73,6 @@ To split chunks into cheaper "land" billing versus full "build" billing, stand i
 ```
 Unlike the FTB path, this takes effect immediately rather than at the next upkeep period.
 
-If upkeep can't be paid, your force-load setting is disabled until the balance is restored — claims themselves are left alone. Wars, bounties, the marketplace, and the Pioneer Bonus aren't available on this backend.
+If upkeep can't be paid, your force-load setting is disabled until the balance is restored — claims themselves are left alone. Wars, bounties, the marketplace, player warps, and the Pioneer Bonus aren't available on this backend.
 
 You can still check the web leaderboard (`/lcce leaderboard`, or the `webEnabled` HTTP page) — the login-gated dashboard is FTB-only.

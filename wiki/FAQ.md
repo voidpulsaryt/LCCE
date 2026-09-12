@@ -4,7 +4,7 @@
 This mod checks the exact version of Lightman's Currency and the minimum version of your claim backend (see [Installation](Installation)). The startup error names exactly which mod and version is wrong — install the matching version rather than just "latest."
 
 **Can I run this with both FTB Chunks and Open Parties and Claims installed?**
-Yes, but only the FTB integration will be active for the economy features (wars, siege mode, bounties, marketplace, Pioneer Bonus, per-chunk permissions). If you want the OP&C integration specifically, don't install the FTB Chunks/Teams/Library trio alongside it.
+Yes, but only the FTB integration will be active for the economy features (wars, siege mode, bounties, marketplace, player warps, Pioneer Bonus, per-chunk permissions). If you want the OP&C integration specifically, don't install the FTB Chunks/Teams/Library trio alongside it.
 
 **Why was my protection disabled?**
 Your team's bank account (FTB) or your personal/party account (OP&C) didn't have enough balance to pay upkeep. Top up the account — protections restore automatically at the next billing cycle (FTB), or force-load restores automatically once you next have sufficient funds (OP&C).

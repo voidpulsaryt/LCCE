@@ -27,6 +27,13 @@ import dev.voidpulsar.lc_claim_economy.network.SyncWarStatePayload;
 import dev.voidpulsar.lc_claim_economy.network.ToggleChunkTypeBatchPayload;
 import dev.voidpulsar.lc_claim_economy.network.ToggleChunkTypePayload;
 import dev.voidpulsar.lc_claim_economy.network.ToggleWarPayload;
+import dev.voidpulsar.lc_claim_economy.network.RequestWarpsPayload;
+import dev.voidpulsar.lc_claim_economy.network.SyncWarpsPayload;
+import dev.voidpulsar.lc_claim_economy.network.WarpCreatePayload;
+import dev.voidpulsar.lc_claim_economy.network.WarpDeletePayload;
+import dev.voidpulsar.lc_claim_economy.network.WarpSetPublicPayload;
+import dev.voidpulsar.lc_claim_economy.network.WarpTeleportOtherPayload;
+import dev.voidpulsar.lc_claim_economy.network.WarpTeleportOwnPayload;
 import dev.voidpulsar.lc_claim_economy.client.ClientPendingRefreshHandler;
 import dev.voidpulsar.lc_claim_economy.service.UpkeepService;
 import dev.voidpulsar.lc_claim_economy.teams.LandProperties;
@@ -76,6 +83,7 @@ public class LcClaimEconomy {
             NeoForge.EVENT_BUS.addListener(dev.voidpulsar.lc_claim_economy.command.BountyCommand::register);
             NeoForge.EVENT_BUS.register(new dev.voidpulsar.lc_claim_economy.handler.BountyKillHandler());
             NeoForge.EVENT_BUS.addListener(dev.voidpulsar.lc_claim_economy.command.MarketCommand::register);
+            NeoForge.EVENT_BUS.addListener(dev.voidpulsar.lc_claim_economy.command.WarpCommand::register);
         } else {
             LOGGER.info("FTB Chunks/Teams not detected - FTB Chunks integration disabled.");
         }
@@ -134,6 +142,41 @@ public class LcClaimEconomy {
                 SyncLedgerPayload.TYPE,
                 SyncLedgerPayload.STREAM_CODEC,
                 SyncLedgerPayload::handleClient
+        );
+        registrar.playToClient(
+                SyncWarpsPayload.TYPE,
+                SyncWarpsPayload.STREAM_CODEC,
+                SyncWarpsPayload::handleClient
+        );
+        registrar.playToServer(
+                RequestWarpsPayload.TYPE,
+                RequestWarpsPayload.STREAM_CODEC,
+                RequestWarpsPayload::handleServer
+        );
+        registrar.playToServer(
+                WarpCreatePayload.TYPE,
+                WarpCreatePayload.STREAM_CODEC,
+                WarpCreatePayload::handleServer
+        );
+        registrar.playToServer(
+                WarpDeletePayload.TYPE,
+                WarpDeletePayload.STREAM_CODEC,
+                WarpDeletePayload::handleServer
+        );
+        registrar.playToServer(
+                WarpSetPublicPayload.TYPE,
+                WarpSetPublicPayload.STREAM_CODEC,
+                WarpSetPublicPayload::handleServer
+        );
+        registrar.playToServer(
+                WarpTeleportOwnPayload.TYPE,
+                WarpTeleportOwnPayload.STREAM_CODEC,
+                WarpTeleportOwnPayload::handleServer
+        );
+        registrar.playToServer(
+                WarpTeleportOtherPayload.TYPE,
+                WarpTeleportOtherPayload.STREAM_CODEC,
+                WarpTeleportOtherPayload::handleServer
         );
         registrar.playToServer(
                 RequestClaimPricesPayload.TYPE,
