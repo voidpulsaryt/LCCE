@@ -14,10 +14,8 @@ import dev.voidpulsar.lc_claim_economy.handler.TeamPropertyHandler;
 import dev.voidpulsar.lc_claim_economy.network.RequestClaimPricesPayload;
 import dev.voidpulsar.lc_claim_economy.network.RequestChunkUserPermsPayload;
 import dev.voidpulsar.lc_claim_economy.network.RequestLandChunksPayload;
-import dev.voidpulsar.lc_claim_economy.network.RequestLedgerPayload;
 import dev.voidpulsar.lc_claim_economy.network.RequestPendingStatePayload;
 import dev.voidpulsar.lc_claim_economy.network.SyncClaimPricesPayload;
-import dev.voidpulsar.lc_claim_economy.network.SyncLedgerPayload;
 import dev.voidpulsar.lc_claim_economy.network.SyncChunkUserPermsPayload;
 import dev.voidpulsar.lc_claim_economy.network.SyncLandChunksPayload;
 import dev.voidpulsar.lc_claim_economy.network.SyncPendingStatePayload;
@@ -108,6 +106,7 @@ public class LcClaimEconomy {
         if (FMLEnvironment.dist == Dist.CLIENT) {
             modEventBus.addListener(dev.voidpulsar.lc_claim_economy.client.ClientDashboardKeybind::registerMapping);
             NeoForge.EVENT_BUS.register(new dev.voidpulsar.lc_claim_economy.client.ClientDashboardKeybind());
+            NeoForge.EVENT_BUS.addListener(dev.voidpulsar.lc_claim_economy.client.DashboardCommand::register);
         }
     }
 
@@ -137,11 +136,6 @@ public class LcClaimEconomy {
                 SyncChunkUserPermsPayload.TYPE,
                 SyncChunkUserPermsPayload.STREAM_CODEC,
                 SyncChunkUserPermsPayload::handleClient
-        );
-        registrar.playToClient(
-                SyncLedgerPayload.TYPE,
-                SyncLedgerPayload.STREAM_CODEC,
-                SyncLedgerPayload::handleClient
         );
         registrar.playToClient(
                 SyncWarpsPayload.TYPE,
@@ -182,11 +176,6 @@ public class LcClaimEconomy {
                 RequestClaimPricesPayload.TYPE,
                 RequestClaimPricesPayload.STREAM_CODEC,
                 RequestClaimPricesPayload::handleServer
-        );
-        registrar.playToServer(
-                RequestLedgerPayload.TYPE,
-                RequestLedgerPayload.STREAM_CODEC,
-                RequestLedgerPayload::handleServer
         );
         registrar.playToServer(
                 RequestPendingStatePayload.TYPE,

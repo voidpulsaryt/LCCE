@@ -10,6 +10,9 @@ import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
 import io.github.lightman314.lightmanscurrency.api.money.bank.reference.BankReference;
 import io.github.lightman314.lightmanscurrency.api.money.bank.reference.builtin.PlayerBankReference;
 import io.github.lightman314.lightmanscurrency.api.money.bank.reference.builtin.TeamBankReference;
+import io.github.lightman314.lightmanscurrency.api.money.value.MoneyValue;
+import io.github.lightman314.lightmanscurrency.common.notifications.types.bank.DepositWithdrawNotification;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -98,5 +101,17 @@ public final class BankAccountHelper {
 
     public static PlayerReference playerReference(ServerPlayer player) {
         return PlayerReference.of(player);
+    }
+
+    /**
+     * Records a claim-economy money movement directly into Lightman's
+     * Currency's own per-account transaction log (the same notification
+     * feed LC uses for interest, transfers, and salary payments), instead
+     * of a separate ledger this mod would have to maintain and show its
+     * own UI for. {@code label} is shown as the "who/what" in LC's
+     * standard "{label} deposited/withdrew {amount}" notification line.
+     */
+    public static void logTransaction(IBankAccount account, boolean isDeposit, MoneyValue amount, Component label) {
+        account.pushNotification(() -> new DepositWithdrawNotification.Custom(label, label, isDeposit, amount));
     }
 }

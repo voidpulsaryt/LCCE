@@ -155,7 +155,9 @@ Enabling force-load on a chunk is free, but each force-loaded chunk adds a perio
 
 ## Bank Dashboard
 
-A standalone bank/upkeep dashboard screen, openable anywhere with a keybind (default **B**). It includes a **History** tab showing a capped, newest-first transaction ledger (upkeep charges, claim purchases, unclaim refunds, the pioneer bonus, market sales/purchases). Unlike most of this mod's UI, it's built without any FTB-library dependency, so it works identically on either backend.
+A standalone bank/upkeep dashboard screen, openable anywhere with `/lcce dashboard` or a keybind (default **B**). Unlike most of this mod's UI, it's built without any FTB-library dependency, so it works identically on either backend.
+
+Every claim-economy money movement (upkeep charges, claim purchases, unclaim refunds, the pioneer bonus, market sales/purchases, and player warp costs/tolls) is recorded directly into the same account's Lightman's Currency transaction/notification log used for interest, transfers, and salary payments - there's no separate claim-economy history screen to check.
 
 ## Web leaderboard and dashboard
 

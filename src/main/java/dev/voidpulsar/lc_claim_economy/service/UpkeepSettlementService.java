@@ -92,17 +92,11 @@ public final class UpkeepSettlementService {
             }
 
             if (!cost.isEmpty() && !account.getMoneyStorage().containsValue(cost)) {
-                boolean alreadyFrozen = savedData.isProtectionLocked(teamId);
                 savedData.setPendingState(teamId, pendingState);
                 savedData.setProtectionLocked(teamId, true);
                 ProtectionService.notifyTeam(server, team, "message.lc_claim_economy.upkeep_unpaid_frozen");
                 syncState(server, team);
                 savedData.recordUpkeepMissed();
-                if (!alreadyFrozen) {
-                    // Log this once, on the transition into frozen - not every period a
-                    // still-frozen team keeps failing to pay, which would just spam its ledger.
-                    savedData.recordLedger(teamId, LcClaimEconomySavedData.LedgerKind.UPKEEP_MISSED, 0L, "message.lc_claim_economy.ledger.upkeep_missed");
-                }
                 return new SettlementResult(false, MoneyValue.empty(), pendingState, forceLoadCount(team), List.copyOf(suspended), warsSuspended[0], List.copyOf(restored), List.copyOf(restoredWarNames), List.copyOf(unaffordable));
             }
 
@@ -110,7 +104,7 @@ public final class UpkeepSettlementService {
                 account.withdrawMoney(cost);
                 long costCopper = cost.getCoreValue();
                 savedData.recordUpkeepCharged(costCopper);
-                savedData.recordLedger(teamId, LcClaimEconomySavedData.LedgerKind.UPKEEP_CHARGE, -costCopper, "message.lc_claim_economy.ledger.upkeep_charge");
+                BankAccountHelper.logTransaction(account, false, cost, Component.translatable("message.lc_claim_economy.ledger.upkeep_charge"));
             }
             savedData.setPendingState(teamId, pendingState);
             savedData.setProtectionLocked(teamId, false);

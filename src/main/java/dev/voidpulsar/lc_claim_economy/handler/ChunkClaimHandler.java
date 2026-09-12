@@ -76,8 +76,7 @@ public class ChunkClaimHandler {
         MoneyValue bonus = MoneyUtil.fromCopper(bonusCopper);
         IBankAccount account = BankAccountHelper.getAccountForPlayer(server, player);
         account.depositMoney(bonus);
-        LcClaimEconomySavedData.get(server).recordLedger(
-                BankAccountHelper.ledgerKeyForPlayer(player), LcClaimEconomySavedData.LedgerKind.PIONEER_BONUS, bonusCopper, "message.lc_claim_economy.ledger.pioneer_bonus");
+        BankAccountHelper.logTransaction(account, true, bonus, Component.translatable("message.lc_claim_economy.ledger.pioneer_bonus"));
 
         Component announcement = Component.translatable("message.lc_claim_economy.pioneer_bonus.announcement",
                 player.getDisplayName(), MoneyMessageUtil.formatValue(bonus));
@@ -155,8 +154,7 @@ public class ChunkClaimHandler {
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         savedData.recordUnclaimRefund(refundAmount);
         if (!ClaimBatchContext.isExecuting()) {
-            UUID ledgerKey = personalRefundPlayer != null ? personalRefundPlayer : team.getId();
-            savedData.recordLedger(ledgerKey, LcClaimEconomySavedData.LedgerKind.UNCLAIM_REFUND, refundAmount, "message.lc_claim_economy.ledger.unclaim_refund");
+            BankAccountHelper.logTransaction(account, true, refund, Component.translatable("message.lc_claim_economy.ledger.unclaim_refund"));
         }
 
         ServerPlayer player = source.getPlayer();
@@ -282,7 +280,7 @@ public class ChunkClaimHandler {
         if (ClaimBatchContext.isExecuting()) {
             ClaimBatchContext.recordClaimSpend(priceAmount);
         } else {
-            savedData.recordLedger(team.getId(), LcClaimEconomySavedData.LedgerKind.CLAIM_PURCHASE, -priceAmount, "message.lc_claim_economy.ledger.claim_purchase");
+            BankAccountHelper.logTransaction(account, false, price, Component.translatable("message.lc_claim_economy.ledger.claim_purchase"));
             ServerPlayer payingPlayer = source.getPlayer();
             if (payingPlayer != null) {
                 payingPlayer.displayClientMessage(

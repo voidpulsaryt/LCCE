@@ -23,6 +23,7 @@ All commands live under `/lcce` (renamed from `/lc_claim_economy` in 4.4.0).
 | `/lcce warp list` | FTB | Anyone | Clickable chat list of your warps and public warps |
 | `/lcce warp tp <name>` | FTB | Anyone | Teleport to one of your own warps |
 | `/lcce warp tpto <player> <name>` | FTB | Anyone | Teleport to another player's public warp |
+| `/lcce dashboard` | Either | Anyone | Open the Bank Dashboard screen (client-only, same as pressing **B**) |
 | `/lcce leaderboard` / `leaderboard land` | Either | Anyone | Rank teams by claimed-chunk count |
 | `/lcce leaderboard wealth` | Either | Anyone | Rank teams by bank balance |
 | `/lcce web login` | FTB | Any online player | Issue a one-time login code for the web dashboard (`webEnabled` + `webDashboardEnabled` required) |

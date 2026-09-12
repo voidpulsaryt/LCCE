@@ -1,6 +1,7 @@
 package dev.voidpulsar.lc_claim_economy.opc;
 
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
+import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.service.FreeChunkAllowance;
@@ -135,8 +136,7 @@ public final class OpcClaimEconomyListener implements IClaimsManagerListenerAPI 
         account.withdrawMoney(price);
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         savedData.recordClaimPurchase(LcClaimEconomyConfig.SERVER.claimPrice.get());
-        savedData.recordLedger(owner, LcClaimEconomySavedData.LedgerKind.CLAIM_PURCHASE,
-                -LcClaimEconomyConfig.SERVER.claimPrice.get(), "message.lc_claim_economy.ledger.claim_purchase");
+        BankAccountHelper.logTransaction(account, false, price, Component.translatable("message.lc_claim_economy.ledger.claim_purchase"));
     }
 
     private void handleUnclaim(MinecraftServer server, UUID owner) {
@@ -166,7 +166,7 @@ public final class OpcClaimEconomyListener implements IClaimsManagerListenerAPI 
         account.depositMoney(MoneyUtil.fromCopper(refundAmount));
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         savedData.recordUnclaimRefund(refundAmount);
-        savedData.recordLedger(owner, LcClaimEconomySavedData.LedgerKind.UNCLAIM_REFUND, refundAmount, "message.lc_claim_economy.ledger.unclaim_refund");
+        BankAccountHelper.logTransaction(account, true, MoneyUtil.fromCopper(refundAmount), Component.translatable("message.lc_claim_economy.ledger.unclaim_refund"));
     }
 
     private static boolean isPartyOwned(IServerClaimsManagerAPI claimsManager, UUID owner) {

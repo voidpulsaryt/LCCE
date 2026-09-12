@@ -36,8 +36,6 @@ public class LcClaimEconomySavedData extends SavedData {
     private long nextUpkeepTick = -1L;
     private long nextOpcUpkeepTick = -1L;
 
-    private static final int MAX_LEDGER_ENTRIES_PER_ACCOUNT = 50;
-    private final Map<UUID, List<LedgerEntry>> ledgers = new HashMap<>();
     private final Map<String, MarketListing> marketListings = new HashMap<>();
     private final Map<UUID, Map<String, WarpEntry>> playerWarps = new HashMap<>();
 
@@ -82,31 +80,6 @@ public class LcClaimEconomySavedData extends SavedData {
         data.statUnclaimCount = tag.getInt("StatUnclaimCount");
         data.statMarketVolumeCopper = tag.getLong("StatMarketVolumeCopper");
         data.statMarketSaleCount = tag.getInt("StatMarketSaleCount");
-
-        ListTag ledgerList = tag.getList("Ledgers", Tag.TAG_COMPOUND);
-        for (int i = 0; i < ledgerList.size(); i++) {
-            CompoundTag accountTag = ledgerList.getCompound(i);
-            UUID accountKey = accountTag.getUUID("AccountId");
-            List<LedgerEntry> entries = new ArrayList<>();
-            ListTag entryList = accountTag.getList("Entries", Tag.TAG_COMPOUND);
-            for (int j = 0; j < entryList.size(); j++) {
-                CompoundTag entryTag = entryList.getCompound(j);
-                try {
-                    LedgerKind kind = LedgerKind.valueOf(entryTag.getString("Kind"));
-                    entries.add(new LedgerEntry(
-                            entryTag.getLong("Timestamp"),
-                            kind,
-                            entryTag.getLong("CopperDelta"),
-                            entryTag.getString("Detail")
-                    ));
-                } catch (IllegalArgumentException ignored) {
-                    // Unknown ledger kind (e.g. saved by a newer/older mod version) - skip it.
-                }
-            }
-            if (!entries.isEmpty()) {
-                data.ledgers.put(accountKey, entries);
-            }
-        }
 
         ListTag marketList = tag.getList("MarketListings", Tag.TAG_COMPOUND);
         for (int i = 0; i < marketList.size(); i++) {
@@ -345,27 +318,6 @@ public class LcClaimEconomySavedData extends SavedData {
         tag.putInt("StatUnclaimCount", statUnclaimCount);
         tag.putLong("StatMarketVolumeCopper", statMarketVolumeCopper);
         tag.putInt("StatMarketSaleCount", statMarketSaleCount);
-
-        ListTag ledgerList = new ListTag();
-        for (Map.Entry<UUID, List<LedgerEntry>> entry : ledgers.entrySet()) {
-            if (entry.getValue().isEmpty()) {
-                continue;
-            }
-            CompoundTag accountTag = new CompoundTag();
-            accountTag.putUUID("AccountId", entry.getKey());
-            ListTag entryList = new ListTag();
-            for (LedgerEntry ledgerEntry : entry.getValue()) {
-                CompoundTag entryTag = new CompoundTag();
-                entryTag.putLong("Timestamp", ledgerEntry.timestamp());
-                entryTag.putString("Kind", ledgerEntry.kind().name());
-                entryTag.putLong("CopperDelta", ledgerEntry.copperDelta());
-                entryTag.putString("Detail", ledgerEntry.detail());
-                entryList.add(entryTag);
-            }
-            accountTag.put("Entries", entryList);
-            ledgerList.add(accountTag);
-        }
-        tag.put("Ledgers", ledgerList);
 
         ListTag marketList = new ListTag();
         for (Map.Entry<String, MarketListing> entry : marketListings.entrySet()) {
@@ -973,28 +925,6 @@ public class LcClaimEconomySavedData extends SavedData {
         }
     }
 
-    /**
-     * Appends a ledger entry (newest first, capped at
-     * {@value #MAX_LEDGER_ENTRIES_PER_ACCOUNT} per account) for either a
-     * player or a team account - whichever UUID the caller already used to
-     * deposit/withdraw the money. Also feeds the matching server-wide
-     * aggregate counter so the web dashboard can show totals without
-     * exposing any one account's history.
-     */
-    public void recordLedger(UUID accountKey, LedgerKind kind, long copperDelta, String detail) {
-        List<LedgerEntry> entries = ledgers.computeIfAbsent(accountKey, id -> new ArrayList<>());
-        entries.add(0, new LedgerEntry(System.currentTimeMillis(), kind, copperDelta, detail));
-        while (entries.size() > MAX_LEDGER_ENTRIES_PER_ACCOUNT) {
-            entries.remove(entries.size() - 1);
-        }
-        setDirty();
-    }
-
-    /** Newest-first ledger entries for this account, capped and read-only. */
-    public List<LedgerEntry> getLedger(UUID accountKey) {
-        return List.copyOf(ledgers.getOrDefault(accountKey, List.of()));
-    }
-
     public void recordUpkeepCharged(long copper) {
         statUpkeepChargedCopper += copper;
         statUpkeepChargedCount++;
@@ -1226,25 +1156,6 @@ public class LcClaimEconomySavedData extends SavedData {
         TeamLinkEntry withChunkAllPlayerPermissions(Map<String, Integer> permissions) {
             return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pendingState, landChunks, warTargets, chunkUserPermissions, permissions);
         }
-    }
-
-    public enum LedgerKind {
-        CLAIM_PURCHASE,
-        UNCLAIM_REFUND,
-        PIONEER_BONUS,
-        UPKEEP_CHARGE,
-        UPKEEP_MISSED,
-        MARKET_SALE,
-        MARKET_PURCHASE
-    }
-
-    /**
-     * One economy event on a player or team account's history. {@code
-     * copperDelta} is signed (negative for money leaving the account,
-     * positive for money arriving) and zero for a no-money event like
-     * {@link LedgerKind#UPKEEP_MISSED}.
-     */
-    public record LedgerEntry(long timestamp, LedgerKind kind, long copperDelta, String detail) {
     }
 
     /** A claimed chunk currently listed for sale on the public marketplace. */

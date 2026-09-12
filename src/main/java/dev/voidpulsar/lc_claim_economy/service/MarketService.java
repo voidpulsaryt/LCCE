@@ -190,10 +190,8 @@ public final class MarketService {
 
         savedData.removeMarketListing(chunkKey);
         savedData.recordMarketSale(listing.priceCopper());
-        savedData.recordLedger(sellerTeam.getId(), LcClaimEconomySavedData.LedgerKind.MARKET_SALE,
-                listing.priceCopper(), "message.lc_claim_economy.ledger.market_sale");
-        savedData.recordLedger(BankAccountHelper.ledgerKeyForPlayer(buyer), LcClaimEconomySavedData.LedgerKind.MARKET_PURCHASE,
-                -listing.priceCopper(), "message.lc_claim_economy.ledger.market_purchase");
+        BankAccountHelper.logTransaction(sellerAccount, true, price, Component.translatable("message.lc_claim_economy.ledger.market_sale"));
+        BankAccountHelper.logTransaction(buyerAccount, false, price, Component.translatable("message.lc_claim_economy.ledger.market_purchase"));
 
         Component priceText = MoneyMessageUtil.formatValue(price);
         buyer.displayClientMessage(Component.translatable("message.lc_claim_economy.market.bought", priceText), false);

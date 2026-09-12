@@ -29,6 +29,30 @@ All notable changes to this mod are documented here.
     `warpRequireOwnClaim`, `warpCooldownSeconds`, and
     `warpWorldDisplayNames` (custom friendly names for dimensions shown in
     the warp list/GUI).
+- **`/lcce dashboard`** — opens the Bank Dashboard screen directly (client-only,
+  no server round trip), as a more discoverable alternative to the default-**B**
+  keybind.
+
+### Changed
+
+- **Transaction history moved into Lightman's Currency's own account
+  notification log.** Every claim-economy money movement (upkeep charges,
+  claim purchases, unclaim refunds, the pioneer bonus, market sales/purchases,
+  and now player warp costs/tolls) is pushed straight onto the relevant
+  account via `IBankAccount.pushNotification(...)`/`DepositWithdrawNotification.Custom`,
+  the same feed LC itself uses for interest, transfers, and salary payments.
+  This mod's own separate ledger, the Bank Dashboard's **History** button,
+  and the Transaction History screen are removed - one less UI to check, and
+  transactions now show up in the same place as everything else in a
+  player's or team's account.
+
+### Fixed
+
+- **Bank Dashboard text looked blurry** when Minecraft's menu background blur
+  video setting was on. The panel background wasn't fully opaque, so a sliver
+  of the blurred world behind it bled through and washed out the text on top
+  (vanilla buttons were unaffected since their texture is opaque). The panel
+  and header backgrounds are now fully opaque.
 
 ## [4.4.1]
 

@@ -39,7 +39,7 @@ If both are installed, the FTB integration takes over. Full breakdown on the [Fe
 - **Bounties** *(FTB only)* — put escrowed money on a player's or team's head, collectible in PvP.
 - **Player marketplace** *(FTB only)* — list, browse, and buy claimed chunks from other players, with an atomic unclaim → claim → payment handoff so a failed transfer never strands a chunk or charges a buyer.
 - **Player Warps** *(FTB only)* — personal teleport points set inside your own claimed land, managed and browsed from an in-game GUI, shareable publicly for an optional toll, with aliases and server-configurable world display names.
-- **Bank Dashboard** — an in-game balance/upkeep screen with transaction history, openable anywhere with **B**, working identically on both backends.
+- **Bank Dashboard** — an in-game balance/upkeep screen, openable anywhere with **B** or `/lcce dashboard`, working identically on both backends. Transactions themselves (upkeep, claims, market, warps) show up in Lightman's Currency's own account history, alongside everything else in your account.
 - **Optional web leaderboard + login-gated dashboard** — a built-in HTTP server for a public read-only leaderboard, plus (FTB only) a passwordless-login player dashboard for managing land, protections, and wars from a browser.
 - **Pioneer Bonus & claim milestones** *(FTB only)* — a one-time reward for the server's first-ever claim, plus hidden advancements at claim/war milestones for FTB Quests hooks — no FTB Quests dependency required.
 
@@ -74,6 +74,7 @@ All commands live under `/lcce`. Full reference with permissions and backend ava
 /lcce bounty player|team|list <...>
 /lcce market sell|cancel|buy|browse <...>
 /lcce warp [set|delete|public|alias|list|tp|tpto] <...>
+/lcce dashboard
 /lcce war peaceful [on|off]
 /lcce opc_chunktype land|build|status
 /lcce web login

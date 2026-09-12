@@ -2,7 +2,6 @@ package dev.voidpulsar.lc_claim_economy.bank;
 
 import dev.ftb.mods.ftbchunks.net.RequestChunkChangePacket;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
-import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.service.ClaimPriceSync;
 import dev.voidpulsar.lc_claim_economy.util.MoneyMessageUtil;
 import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
@@ -162,11 +161,11 @@ public final class ClaimBatchContext {
             if (state.operation == RequestChunkChangePacket.ChunkChangeOp.UNCLAIM && state.unclaimCount > 0) {
                 sendUnclaimSummary(player, state);
                 if (state.refundCopper > 0) {
-                    LcClaimEconomySavedData.get(player.server).recordLedger(
-                            BankAccountHelper.ledgerKeyForPlayer(player),
-                            LcClaimEconomySavedData.LedgerKind.UNCLAIM_REFUND,
-                            state.refundCopper,
-                            state.unclaimCount == 1 ? "message.lc_claim_economy.ledger.unclaim_refund" : "message.lc_claim_economy.ledger.unclaim_refund_bulk"
+                    BankAccountHelper.logTransaction(
+                            BankAccountHelper.getAccountForPlayer(player.server, player),
+                            true,
+                            MoneyUtil.fromCopper(state.refundCopper),
+                            Component.translatable(state.unclaimCount == 1 ? "message.lc_claim_economy.ledger.unclaim_refund" : "message.lc_claim_economy.ledger.unclaim_refund_bulk")
                     );
                 }
             }
@@ -174,11 +173,11 @@ public final class ClaimBatchContext {
             if (state.operation == RequestChunkChangePacket.ChunkChangeOp.CLAIM) {
                 sendClaimSummary(player, state);
                 if (state.claimPaidCopper > 0) {
-                    LcClaimEconomySavedData.get(player.server).recordLedger(
-                            BankAccountHelper.ledgerKeyForPlayer(player),
-                            LcClaimEconomySavedData.LedgerKind.CLAIM_PURCHASE,
-                            -state.claimPaidCopper,
-                            state.claimPaidCount == 1 ? "message.lc_claim_economy.ledger.claim_purchase" : "message.lc_claim_economy.ledger.claim_purchase_bulk"
+                    BankAccountHelper.logTransaction(
+                            BankAccountHelper.getAccountForPlayer(player.server, player),
+                            false,
+                            MoneyUtil.fromCopper(state.claimPaidCopper),
+                            Component.translatable(state.claimPaidCount == 1 ? "message.lc_claim_economy.ledger.claim_purchase" : "message.lc_claim_economy.ledger.claim_purchase_bulk")
                     );
                 }
             }

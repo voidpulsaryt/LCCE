@@ -106,6 +106,7 @@ public final class WarpService {
                 return;
             }
             account.withdrawMoney(cost);
+            BankAccountHelper.logTransaction(account, false, cost, Component.translatable("message.lc_claim_economy.ledger.warp_create"));
         }
 
         WarpEntry entry = new WarpEntry(
@@ -350,8 +351,10 @@ public final class WarpService {
             }
             IBankAccount ownerAccount = resolveOwnerAccount(server, entry.ownerId());
             payerAccount.withdrawMoney(toll);
+            BankAccountHelper.logTransaction(payerAccount, false, toll, Component.translatable("message.lc_claim_economy.ledger.warp_toll_paid"));
             if (ownerAccount != null) {
                 ownerAccount.depositMoney(toll);
+                BankAccountHelper.logTransaction(ownerAccount, true, toll, Component.translatable("message.lc_claim_economy.ledger.warp_toll_received"));
             }
         }
 

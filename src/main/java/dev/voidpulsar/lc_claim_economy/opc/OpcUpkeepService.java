@@ -1,6 +1,7 @@
 package dev.voidpulsar.lc_claim_economy.opc;
 
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
+import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
@@ -120,7 +121,7 @@ public final class OpcUpkeepService {
         if (account.getMoneyStorage().containsValue(cost)) {
             account.withdrawMoney(cost);
             savedData.recordUpkeepCharged(costCopper);
-            savedData.recordLedger(owner, LcClaimEconomySavedData.LedgerKind.UPKEEP_CHARGE, -costCopper, "message.lc_claim_economy.ledger.upkeep_charge");
+            BankAccountHelper.logTransaction(account, false, cost, Component.translatable("message.lc_claim_economy.ledger.upkeep_charge"));
             if (wasLocked) {
                 restoreForceload(server, owner, partyOwned, savedData);
             }
@@ -129,7 +130,6 @@ public final class OpcUpkeepService {
 
         savedData.recordUpkeepMissed();
         if (!wasLocked) {
-            savedData.recordLedger(owner, LcClaimEconomySavedData.LedgerKind.UPKEEP_MISSED, 0L, "message.lc_claim_economy.ledger.upkeep_missed");
             boolean applied = OpcPlayerConfigAccess.setForceloadEnabled(server, owner, partyOwned, false);
             savedData.setProtectionLocked(owner, true);
             if (applied) {

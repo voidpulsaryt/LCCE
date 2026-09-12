@@ -42,8 +42,11 @@ public final class BankDashboardScreen extends Screen {
     // Hand-picked to sit alongside the Nord palette ClaimBreakdownScreen uses
     // on the FTB side (ftblibrary's NordColors), so the two screens feel like
     // the same mod even though this one can't depend on that class.
-    private static final int COLOR_PANEL_BG = 0xE62E3440;
-    private static final int COLOR_HEADER_BG = 0xF03B4252;
+    // Fully opaque - this screen calls renderTransparentBackground() to blur
+    // the world behind it, and any translucency here let that blurred world
+    // bleed faintly through the panel, washing out the text on top of it.
+    private static final int COLOR_PANEL_BG = 0xFF2E3440;
+    private static final int COLOR_HEADER_BG = 0xFF3B4252;
     private static final int COLOR_DIVIDER = 0xFF434C5E;
     private static final int COLOR_TITLE = 0xFFECEFF4;
     private static final int COLOR_LABEL = 0xFFD8DEE9;
@@ -75,7 +78,7 @@ public final class BankDashboardScreen extends Screen {
         int buttonY = panelY + panelHeight - FOOTER_HEIGHT + CONTENT_PAD;
         int buttonWidth = 88;
         int gap = 8;
-        int totalWidth = buttonWidth * 3 + gap * 2;
+        int totalWidth = buttonWidth * 2 + gap;
         int buttonsX = panelX + (PANEL_WIDTH - totalWidth) / 2;
 
         addRenderableWidget(Button.builder(
@@ -87,14 +90,9 @@ public final class BankDashboardScreen extends Screen {
         ).bounds(buttonsX, buttonY, buttonWidth, BUTTON_HEIGHT).build());
 
         addRenderableWidget(Button.builder(
-                Component.translatable("gui.lc_claim_economy.dashboard.history"),
-                button -> minecraft.setScreen(new TransactionHistoryScreen())
-        ).bounds(buttonsX + buttonWidth + gap, buttonY, buttonWidth, BUTTON_HEIGHT).build());
-
-        addRenderableWidget(Button.builder(
                 Component.translatable("gui.done"),
                 button -> onClose()
-        ).bounds(buttonsX + (buttonWidth + gap) * 2, buttonY, buttonWidth, BUTTON_HEIGHT).build());
+        ).bounds(buttonsX + buttonWidth + gap, buttonY, buttonWidth, BUTTON_HEIGHT).build());
     }
 
     private void buildRows() {
