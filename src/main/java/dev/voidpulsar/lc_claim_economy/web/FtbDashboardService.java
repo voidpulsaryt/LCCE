@@ -10,6 +10,8 @@ import dev.ftb.mods.ftbteams.api.TeamRank;
 import dev.ftb.mods.ftbteams.api.property.PrivacyMode;
 import dev.ftb.mods.ftbteams.api.property.TeamProperty;
 import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
+import dev.voidpulsar.lc_claim_economy.bluemap.BlueMapDashboardLink;
+import dev.voidpulsar.lc_claim_economy.compat.ModCompat;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
 import dev.voidpulsar.lc_claim_economy.data.ChunkPosKey;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
@@ -136,6 +138,10 @@ final class FtbDashboardService {
         long totalCopper = costs.totalUpkeepCopper() + forceLoadCopper;
         boolean canAfford = WarService.canAffordUpkeep(server, team, pendingState, account);
 
+        long nextUpkeepTick = savedData.getNextUpkeepTick(team.getTeamId());
+        long gameTime = server.overworld().getGameTime();
+        long secondsUntilNextCharge = nextUpkeepTick < 0L ? -1L : Math.max(0L, (nextUpkeepTick - gameTime) / 20L);
+
         List<JsonWriter> upkeepLines = new java.util.ArrayList<>();
         upkeepLines.add(upkeepLine("Base protection upkeep", costs.baseUpkeepCopper()));
         if (forceLoadCopper > 0) {
@@ -152,7 +158,8 @@ final class FtbDashboardService {
                 .arrayField("lines", upkeepLines)
                 .field("totalCopper", totalCopper)
                 .field("periodMinutes", LcClaimEconomyConfig.SERVER.upkeepPeriodMinutes.get())
-                .field("canAfford", canAfford);
+                .field("canAfford", canAfford)
+                .field("secondsUntilNextCharge", secondsUntilNextCharge);
 
         JsonWriter landJson = buildLandJson(chunkData, pendingState);
         JsonWriter protectionsJson = null; // placeholder replaced below (JsonWriter has no array-of-objects-at-root helper)
@@ -160,11 +167,18 @@ final class FtbDashboardService {
         List<JsonWriter> rosterEntries = buildRosterEntries(server, team);
         JsonWriter warsJson = buildWarsJson(server, team);
 
+        String blueMapWebUrl = ModCompat.isBlueMapAvailable() ? BlueMapDashboardLink.baseUrl() : null;
+        String blueMapClaimUrl = ModCompat.isBlueMapAvailable() ? BlueMapDashboardLink.resolve(server, team) : null;
+        JsonWriter mapJson = JsonWriter.object()
+                .field("webUrl", blueMapWebUrl == null ? "" : blueMapWebUrl)
+                .field("claimUrl", blueMapClaimUrl == null ? "" : blueMapClaimUrl);
+
         return JsonWriter.object()
                 .field("player", playerJson)
                 .field("team", teamJson)
                 .field("balanceCopper", balanceCopper)
                 .field("upkeep", upkeepJson)
+                .field("map", mapJson)
                 .field("land", landJson)
                 .arrayField("protections", protectionEntries)
                 .field("wars", warsJson)

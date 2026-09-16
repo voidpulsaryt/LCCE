@@ -33,8 +33,8 @@ public class LcClaimEconomySavedData extends SavedData {
     private boolean pioneerClaimGranted = false;
     private final Map<UUID, Long> playerBounties = new HashMap<>();
     private final Map<UUID, Long> teamBounties = new HashMap<>();
-    private long nextUpkeepTick = -1L;
-    private long nextOpcUpkeepTick = -1L;
+    private final Map<UUID, Long> nextUpkeepTickByTeam = new HashMap<>();
+    private final Map<UUID, Long> nextOpcUpkeepTickByOwner = new HashMap<>();
 
     private final Map<String, MarketListing> marketListings = new HashMap<>();
     private final Map<UUID, Map<String, WarpEntry>> playerWarps = new HashMap<>();
@@ -58,8 +58,8 @@ public class LcClaimEconomySavedData extends SavedData {
     private static LcClaimEconomySavedData load(CompoundTag tag, HolderLookup.Provider lookup) {
         LcClaimEconomySavedData data = new LcClaimEconomySavedData();
         data.pioneerClaimGranted = tag.getBoolean("PioneerClaimGranted");
-        data.nextUpkeepTick = tag.contains("NextUpkeepTick", Tag.TAG_LONG) ? tag.getLong("NextUpkeepTick") : -1L;
-        data.nextOpcUpkeepTick = tag.contains("NextOpcUpkeepTick", Tag.TAG_LONG) ? tag.getLong("NextOpcUpkeepTick") : -1L;
+        loadTickMap(tag, "NextUpkeepTickByTeam", data.nextUpkeepTickByTeam);
+        loadTickMap(tag, "NextOpcUpkeepTickByOwner", data.nextOpcUpkeepTickByOwner);
         loadBountyMap(tag, "PlayerBounties", data.playerBounties);
         loadBountyMap(tag, "TeamBounties", data.teamBounties);
 
@@ -203,6 +203,31 @@ public class LcClaimEconomySavedData extends SavedData {
         return data;
     }
 
+    private static void loadTickMap(CompoundTag tag, String key, Map<UUID, Long> target) {
+        ListTag list = tag.getList(key, Tag.TAG_COMPOUND);
+        for (int i = 0; i < list.size(); i++) {
+            CompoundTag entry = list.getCompound(i);
+            if (!entry.hasUUID("Id")) {
+                continue;
+            }
+            target.put(entry.getUUID("Id"), entry.getLong("Tick"));
+        }
+    }
+
+    private static void saveTickMap(CompoundTag tag, String key, Map<UUID, Long> source) {
+        if (source.isEmpty()) {
+            return;
+        }
+        ListTag list = new ListTag();
+        for (Map.Entry<UUID, Long> entry : source.entrySet()) {
+            CompoundTag entryTag = new CompoundTag();
+            entryTag.putUUID("Id", entry.getKey());
+            entryTag.putLong("Tick", entry.getValue());
+            list.add(entryTag);
+        }
+        tag.put(key, list);
+    }
+
     private static void loadBountyMap(CompoundTag tag, String key, Map<UUID, Long> target) {
         ListTag list = tag.getList(key, Tag.TAG_COMPOUND);
         for (int i = 0; i < list.size(); i++) {
@@ -293,12 +318,8 @@ public class LcClaimEconomySavedData extends SavedData {
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider lookup) {
         tag.putBoolean("PioneerClaimGranted", pioneerClaimGranted);
-        if (nextUpkeepTick >= 0L) {
-            tag.putLong("NextUpkeepTick", nextUpkeepTick);
-        }
-        if (nextOpcUpkeepTick >= 0L) {
-            tag.putLong("NextOpcUpkeepTick", nextOpcUpkeepTick);
-        }
+        saveTickMap(tag, "NextUpkeepTickByTeam", nextUpkeepTickByTeam);
+        saveTickMap(tag, "NextOpcUpkeepTickByOwner", nextOpcUpkeepTickByOwner);
         saveBountyMap(tag, "PlayerBounties", playerBounties);
         saveBountyMap(tag, "TeamBounties", teamBounties);
 
@@ -501,26 +522,26 @@ public class LcClaimEconomySavedData extends SavedData {
         return true;
     }
 
-    /** Next world-time tick (persisted so it survives server restarts) the FTB upkeep loop should fire at, or -1 if not yet scheduled. */
-    public long getNextUpkeepTick() {
-        return nextUpkeepTick;
+    /** Next world-time tick (persisted so it survives server restarts) this FTB team's upkeep should fire at, or -1 if not yet scheduled. */
+    public long getNextUpkeepTick(UUID teamId) {
+        return nextUpkeepTickByTeam.getOrDefault(teamId, -1L);
     }
 
-    public void setNextUpkeepTick(long tick) {
-        if (this.nextUpkeepTick != tick) {
-            this.nextUpkeepTick = tick;
+    public void setNextUpkeepTick(UUID teamId, long tick) {
+        if (!Long.valueOf(tick).equals(nextUpkeepTickByTeam.get(teamId))) {
+            nextUpkeepTickByTeam.put(teamId, tick);
             setDirty();
         }
     }
 
-    /** Next world-time tick (persisted so it survives server restarts) the OP&C upkeep loop should fire at, or -1 if not yet scheduled. */
-    public long getNextOpcUpkeepTick() {
-        return nextOpcUpkeepTick;
+    /** Next world-time tick (persisted so it survives server restarts) this OP&C claim owner's upkeep should fire at, or -1 if not yet scheduled. */
+    public long getNextOpcUpkeepTick(UUID ownerId) {
+        return nextOpcUpkeepTickByOwner.getOrDefault(ownerId, -1L);
     }
 
-    public void setNextOpcUpkeepTick(long tick) {
-        if (this.nextOpcUpkeepTick != tick) {
-            this.nextOpcUpkeepTick = tick;
+    public void setNextOpcUpkeepTick(UUID ownerId, long tick) {
+        if (!Long.valueOf(tick).equals(nextOpcUpkeepTickByOwner.get(ownerId))) {
+            nextOpcUpkeepTickByOwner.put(ownerId, tick);
             setDirty();
         }
     }

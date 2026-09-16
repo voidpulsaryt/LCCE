@@ -2,6 +2,45 @@
 
 All notable changes to this mod are documented here.
 
+## [4.6.0]
+
+### Added
+
+- **`upkeepOnlineRequirement`** config option — controls when a team's (or
+  OP&C claim owner's) upkeep countdown is allowed to advance: `ANYONE_ONLINE`
+  (default, matches prior behavior) counts down only while someone is online
+  anywhere on the server; `TEAM_MEMBER_ONLINE` counts down for a team/owner
+  only while one of its own members is online, independently of every other
+  team and player; `ALWAYS_CHARGE` counts down off server uptime alone
+  regardless of who (if anyone) is online, so teams can be billed - and lose
+  protections for non-payment - while everyone is offline. Each FTB team and
+  OP&C claim owner now tracks its own upkeep countdown (rather than one
+  shared server-wide clock) so `TEAM_MEMBER_ONLINE` can gate them
+  independently.
+- **`/lcce upkeep_details`** (FTB) and **`/lcce opc_upkeep_details`** (OP&C)
+  now report the time remaining until the next upkeep charge, so players can
+  see exactly when they'll be billed instead of only finding out after the
+  fact.
+- **Web dashboard: live "next charge" countdown** in the summary strip,
+  ticking down client-side between the dashboard's new ~30-second background
+  refresh (previously the dashboard only reloaded after an action).
+- **Web dashboard: Map tab** *(requires `blueMapWebUrl`)* — an embedded
+  BlueMap iframe deep-linked and centered on the team's claim, plus a direct
+  "open in a new tab" link to the same spot.
+- **Optional BlueMap integration** (`blueMapClaimOverlaysEnabled`, on by
+  default when BlueMap is installed) — draws each FTB team's claimed chunks
+  as colored area markers on the live map, refreshed periodically, with a
+  popup showing the team's name, balance, and next upkeep charge. FTB Chunks
+  only; there is no OP&C claim overlay yet, and no Dynmap equivalent since
+  Dynmap has no NeoForge build for this Minecraft version.
+
+### Removed
+
+- **Bank Dashboard screen** (`/lcce dashboard`, default-**B** keybind, added
+  in 4.5.0) — removed entirely, along with its command and keybind. Claim/
+  upkeep/protection info it surfaced is still available through this mod's
+  other commands and the FTB claim breakdown screen.
+
 ## [4.5.0]
 
 ### Added

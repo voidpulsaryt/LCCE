@@ -3,6 +3,7 @@ package dev.voidpulsar.lc_claim_economy.opc;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
 import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
+import dev.voidpulsar.lc_claim_economy.config.UpkeepOnlineRequirement;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
@@ -15,6 +16,7 @@ import xaero.pac.common.claims.player.api.IPlayerClaimInfoAPI;
 import xaero.pac.common.server.api.OpenPACServerAPI;
 import xaero.pac.common.server.claims.api.IServerClaimsManagerAPI;
 import xaero.pac.common.server.claims.player.api.IServerPlayerClaimInfoAPI;
+import xaero.pac.common.server.parties.party.api.IServerPartyAPI;
 import xaero.pac.common.server.player.config.api.v2.IPlayerConfigAPI;
 
 import java.util.List;
@@ -57,22 +59,7 @@ public final class OpcUpkeepService {
         long periodTicks = LcClaimEconomyConfig.SERVER.upkeepPeriodMinutes.get() * 60L * 20L;
         long gameTime = server.overworld().getGameTime();
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        long nextUpkeepTick = savedData.getNextOpcUpkeepTick();
-
-        if (nextUpkeepTick < 0L) {
-            savedData.setNextOpcUpkeepTick(gameTime + periodTicks);
-            return;
-        }
-
-        if (server.getPlayerList().getPlayerCount() <= 0) {
-            savedData.setNextOpcUpkeepTick(nextUpkeepTick + 1);
-            return;
-        }
-
-        if (gameTime < nextUpkeepTick) {
-            return;
-        }
-        savedData.setNextOpcUpkeepTick(gameTime + periodTicks);
+        UpkeepOnlineRequirement requirement = LcClaimEconomyConfig.SERVER.upkeepOnlineRequirement.get();
 
         IServerClaimsManagerAPI claimsManager = OpenPACServerAPI.get(server).getServerClaimsManager();
         List<IPlayerClaimInfoAPI> owners;
@@ -82,11 +69,61 @@ public final class OpcUpkeepService {
 
         for (IPlayerClaimInfoAPI info : owners) {
             try {
-                processOwnerUpkeep(server, info);
+                tickOwner(server, info, savedData, requirement, gameTime, periodTicks);
             } catch (Exception e) {
                 LcClaimEconomy.LOGGER.error("Failed to process OP&C upkeep for owner {}", info.getPlayerId(), e);
             }
         }
+    }
+
+    /**
+     * Each owner (solo player or party) gets its own countdown - see the FTB side's
+     * {@code UpkeepService#tickTeam} for why a single shared clock can't support
+     * {@link UpkeepOnlineRequirement#TEAM_MEMBER_ONLINE}.
+     */
+    private void tickOwner(
+            MinecraftServer server,
+            IPlayerClaimInfoAPI info,
+            LcClaimEconomySavedData savedData,
+            UpkeepOnlineRequirement requirement,
+            long gameTime,
+            long periodTicks
+    ) {
+        UUID owner = info.getPlayerId();
+        long nextUpkeepTick = savedData.getNextOpcUpkeepTick(owner);
+
+        if (nextUpkeepTick < 0L) {
+            savedData.setNextOpcUpkeepTick(owner, gameTime + periodTicks);
+            return;
+        }
+
+        if (isPaused(server, owner, info.isPartyOwned(), requirement)) {
+            savedData.setNextOpcUpkeepTick(owner, nextUpkeepTick + 1);
+            return;
+        }
+
+        if (gameTime < nextUpkeepTick) {
+            return;
+        }
+        savedData.setNextOpcUpkeepTick(owner, gameTime + periodTicks);
+
+        processOwnerUpkeep(server, info);
+    }
+
+    private static boolean isPaused(MinecraftServer server, UUID owner, boolean partyOwned, UpkeepOnlineRequirement requirement) {
+        return switch (requirement) {
+            case ALWAYS_CHARGE -> false;
+            case ANYONE_ONLINE -> server.getPlayerList().getPlayerCount() <= 0;
+            case TEAM_MEMBER_ONLINE -> !hasOnlineMember(server, owner, partyOwned);
+        };
+    }
+
+    private static boolean hasOnlineMember(MinecraftServer server, UUID owner, boolean partyOwned) {
+        if (!partyOwned) {
+            return server.getPlayerList().getPlayer(owner) != null;
+        }
+        IServerPartyAPI party = OpcAccountResolver.resolveParty(server, owner);
+        return party != null && party.getOnlineMemberStream().findAny().isPresent();
     }
 
     private void processOwnerUpkeep(MinecraftServer server, IPlayerClaimInfoAPI info) {

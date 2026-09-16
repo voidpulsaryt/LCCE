@@ -18,7 +18,7 @@ world/serverconfig/lc_claim_economy-server.toml
 | `unclaimRefundRatio` | `0.8` | Fraction of claim price refunded on unclaim (`0`–`1`) |
 | `forceLoadUpkeepPrice` | `100000` | Upkeep cost per force-loaded chunk per period (100000 copper = 1 Netherite coin) |
 | `upkeepPeriodMinutes` | `60` | How often upkeep is charged, in real-time minutes (`1`–`10080`) |
-| `chargeUpkeepWhileEmpty` | `false` | If `false`, the upkeep countdown pauses while no players are online, so a period only elapses across time players were actually connected. If `true`, it keeps running off server uptime alone, so teams can be billed (and lose protections for non-payment) while everyone is offline |
+| `upkeepOnlineRequirement` | `ANYONE_ONLINE` | Controls when a team's (or OP&C claim owner's) upkeep countdown is allowed to advance. `ANYONE_ONLINE`: counts down only while at least one player is online anywhere on the server. `TEAM_MEMBER_ONLINE`: counts down for a team/owner only while one of its own members is online, independently of everyone else. `ALWAYS_CHARGE`: counts down off server uptime alone regardless of who (if anyone) is online, so teams can be billed — and lose protections for non-payment — while everyone is offline |
 | `disableCoinMint` | `false` | Blocks use of Lightman's Currency's Coin Mint block server-wide |
 
 ## `protectionPrices`
@@ -81,6 +81,15 @@ Cosmetic only — no functional effect. Shared by both web pages.
 | `webAccentColor` | `"#88C0D0"` | Accent color (CSS hex) for headings, highlights, and buttons |
 | `webLogoUrl` | `""` | Optional logo image URL next to the site name; loaded directly by each visitor's browser |
 | `webCustomCss` | `""` | Optional raw CSS appended after the built-in stylesheet |
+
+## `blueMap`
+
+Only takes effect if the [BlueMap](https://bluemap.bluecolored.de/) mod is also installed alongside this mod.
+
+| Key | Default | Description |
+|---|---|---|
+| `blueMapClaimOverlaysEnabled` | `true` | Draws each FTB team's claimed chunks as colored area markers on the live BlueMap map, refreshed every ~10 seconds. FTB Chunks only — there is no OP&C claim overlay yet |
+| `blueMapWebUrl` | `""` | Externally-reachable base URL of your BlueMap web app (e.g. `"http://myserver.com:8100"`), used to embed a live map view and a direct "view on map" link on the web dashboard's Map tab. This mod can't auto-detect BlueMap's externally reachable address (reverse proxy, different port/domain, etc.), so it must be set explicitly. Leave blank to hide the Map tab entirely |
 
 ## `warps`
 

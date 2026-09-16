@@ -7,6 +7,7 @@ import dev.ftb.mods.ftbteams.api.Team;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
 import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
+import dev.voidpulsar.lc_claim_economy.config.UpkeepOnlineRequirement;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.data.TeamPendingState;
 import dev.voidpulsar.lc_claim_economy.teams.FtbTeamCatalog;
@@ -15,23 +16,54 @@ import net.minecraft.server.MinecraftServer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
+import java.util.UUID;
+
 public class UpkeepService {
 
     @SubscribeEvent
     public void onServerTick(ServerTickEvent.Post event) {
         MinecraftServer server = event.getServer();
-        long periodTicks = LcClaimEconomyConfig.SERVER.upkeepPeriodMinutes.get() * 60L * 20L;
-        long gameTime = server.overworld().getGameTime();
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        long nextUpkeepTick = savedData.getNextUpkeepTick();
-
-        if (nextUpkeepTick < 0L) {
-            savedData.setNextUpkeepTick(gameTime + periodTicks);
+        if (!FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
             return;
         }
 
-        if (!LcClaimEconomyConfig.SERVER.chargeUpkeepWhileEmpty.get() && server.getPlayerList().getPlayerCount() <= 0) {
-            savedData.setNextUpkeepTick(nextUpkeepTick + 1);
+        long periodTicks = LcClaimEconomyConfig.SERVER.upkeepPeriodMinutes.get() * 60L * 20L;
+        long gameTime = server.overworld().getGameTime();
+        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
+        UpkeepOnlineRequirement requirement = LcClaimEconomyConfig.SERVER.upkeepOnlineRequirement.get();
+
+        for (Team team : FtbTeamCatalog.trackedTeams(server)) {
+            try {
+                tickTeam(server, team, savedData, requirement, gameTime, periodTicks);
+            } catch (Exception e) {
+                LcClaimEconomy.LOGGER.error("Failed to process upkeep for team {}", team.getId(), e);
+            }
+        }
+    }
+
+    /**
+     * Each team gets its own countdown (rather than one shared server-wide clock) so that
+     * {@link UpkeepOnlineRequirement#TEAM_MEMBER_ONLINE} can pause a single team's billing
+     * independently of every other team's online members.
+     */
+    private void tickTeam(
+            MinecraftServer server,
+            Team team,
+            LcClaimEconomySavedData savedData,
+            UpkeepOnlineRequirement requirement,
+            long gameTime,
+            long periodTicks
+    ) {
+        UUID teamId = team.getTeamId();
+        long nextUpkeepTick = savedData.getNextUpkeepTick(teamId);
+
+        if (nextUpkeepTick < 0L) {
+            savedData.setNextUpkeepTick(teamId, gameTime + periodTicks);
+            return;
+        }
+
+        if (isPaused(server, team, requirement)) {
+            savedData.setNextUpkeepTick(teamId, nextUpkeepTick + 1);
             return;
         }
 
@@ -39,19 +71,25 @@ public class UpkeepService {
             return;
         }
 
-        savedData.setNextUpkeepTick(gameTime + periodTicks);
+        savedData.setNextUpkeepTick(teamId, gameTime + periodTicks);
+        processTeamUpkeep(server, team);
+    }
 
-        if (!FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
-            return;
-        }
+    private static boolean isPaused(MinecraftServer server, Team team, UpkeepOnlineRequirement requirement) {
+        return switch (requirement) {
+            case ALWAYS_CHARGE -> false;
+            case ANYONE_ONLINE -> server.getPlayerList().getPlayerCount() <= 0;
+            case TEAM_MEMBER_ONLINE -> !hasOnlineMember(server, team);
+        };
+    }
 
-        for (Team team : FtbTeamCatalog.trackedTeams(server)) {
-            try {
-                processTeamUpkeep(server, team);
-            } catch (Exception e) {
-                LcClaimEconomy.LOGGER.error("Failed to process upkeep for team {}", team.getId(), e);
+    private static boolean hasOnlineMember(MinecraftServer server, Team team) {
+        for (UUID memberId : team.getMembers()) {
+            if (server.getPlayerList().getPlayer(memberId) != null) {
+                return true;
             }
         }
+        return false;
     }
 
     private void processTeamUpkeep(MinecraftServer server, Team team) {

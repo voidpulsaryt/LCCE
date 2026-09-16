@@ -134,6 +134,12 @@ repositories {
             includeGroup('curse.maven')
         }
     }
+    maven {
+        url = 'https://repo.bluecolored.de/releases'
+        content {
+            includeGroup('de.bluecolored')
+        }
+    }
 }
 
 dependencies {
@@ -143,6 +149,12 @@ dependencies {
 
     compileOnly "maven.modrinth:lightmans-currency:${lightmanscurrency_version}"
     localRuntime "maven.modrinth:lightmans-currency:${lightmanscurrency_version}"
+
+    // BlueMap: optional soft dependency, same pattern as Lightman's Currency above - this
+    // mod's own code only touches BlueMap API types when ModCompat.isBlueMapAvailable() is
+    // true, so servers without BlueMap installed are unaffected. The API jar is
+    // platform-independent (no NeoForge-specific build needed).
+    compileOnly "de.bluecolored:bluemap-api:${bluemap_api_version}"
 
     // Open Parties and Claims: no source or tagged releases are published upstream
     // (see https://github.com/thexaero/open-parties-and-claims), and the exact

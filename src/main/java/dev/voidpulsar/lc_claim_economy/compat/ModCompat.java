@@ -35,6 +35,7 @@ public final class ModCompat {
     private static final String FTB_TEAMS_MOD_ID = "ftbteams";
     private static final String FTB_CHUNKS_MOD_ID = "ftbchunks";
     private static final String OPC_MOD_ID = "openpartiesandclaims";
+    private static final String BLUEMAP_MOD_ID = "bluemap";
 
     private ModCompat() {
     }
@@ -45,6 +46,11 @@ public final class ModCompat {
 
     public static boolean isOpcAvailable() {
         return isLoaded(OPC_MOD_ID);
+    }
+
+    /** True if the (optional, soft-dependency) BlueMap mod is installed - see the {@code bluemap} package. */
+    public static boolean isBlueMapAvailable() {
+        return isLoaded(BLUEMAP_MOD_ID);
     }
 
     /** True if FTB is installed, or FTB is absent but OP&C is present (OP&C used as the active backend). */

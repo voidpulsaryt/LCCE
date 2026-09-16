@@ -153,9 +153,11 @@ Hidden, toast-free advancements fire automatically at 5 / 10 / 25 / 50 / 100 / 2
 
 Enabling force-load on a chunk is free, but each force-loaded chunk adds a periodic charge (`forceLoadUpkeepPrice`).
 
-## Bank Dashboard
+## Upkeep timing
 
-A standalone bank/upkeep dashboard screen, openable anywhere with `/lcce dashboard` or a keybind (default **B**). Unlike most of this mod's UI, it's built without any FTB-library dependency, so it works identically on either backend.
+`upkeepOnlineRequirement` controls when a team's (or OP&C owner's) upkeep countdown is allowed to advance: only while someone is online anywhere on the server (`ANYONE_ONLINE`, default), only while one of that specific team's own members is online (`TEAM_MEMBER_ONLINE`), or continuously off server uptime regardless of who's online (`ALWAYS_CHARGE`, for servers that want upkeep - and protection suspension for non-payment - to keep running even while everyone's offline).
+
+`/lcce upkeep_details` (FTB) and `/lcce opc_upkeep_details` (OP&C) report the time remaining until your next charge, and the FTB command also shows the latest cost breakdown.
 
 Every claim-economy money movement (upkeep charges, claim purchases, unclaim refunds, the pioneer bonus, market sales/purchases, and player warp costs/tolls) is recorded directly into the same account's Lightman's Currency transaction/notification log used for interest, transfers, and salary payments - there's no separate claim-economy history screen to check.
 
@@ -170,10 +172,16 @@ A small, optional built-in HTTP server (`webEnabled`, off by default) serves:
   - **Protections** — view and toggle all six build protections with live pricing and "pending until next period" state, routed through the same pricing/queueing path as the in-game GUI.
   - **Wars** — incoming/outgoing/available lists, declare/end actions, and the declaration-window banner when one applies and is currently closed.
   - **Team** — roster with rank/online status (view-only), plus the peaceful-mode toggle.
+  - **Map** *(requires `blueMapWebUrl`, see [Configuration](Configuration))* — a live BlueMap view embedded in an iframe, deep-linked and centered on the team's claim, plus a direct "open in a new tab" link to the same spot.
+  - A **live countdown to the next upkeep charge** sits in the summary strip alongside team balance, ticking down client-side between the dashboard's ~30-second background refreshes.
   - Actions that need to act as the player in FTB's own APIs (unclaim, force-load, wars) require that player to be online; protection and peaceful-mode toggles work regardless.
   - This server has no built-in HTTPS — if it's reachable from outside your LAN, put a reverse proxy with TLS in front of it, since session cookies otherwise travel in plain HTTP.
 - **Economy Activity panel** on the dashboard — server-wide aggregate counters (total upkeep charged/missed, claim spend, unclaim refunds, market volume), without exposing any individual account's history over the unauthenticated leaderboard.
 - **Cosmetic theming** (`webTheme` config section) — site name, accent color, logo URL, and raw custom CSS, applied at runtime and shared by both pages, so a server can reskin without touching mod files.
+
+## BlueMap integration *(optional, FTB Chunks only)*
+
+If [BlueMap](https://bluemap.bluecolored.de/) is installed alongside this mod, each tracked team's claimed chunks are drawn as colored area markers on the live map (`blueMapClaimOverlaysEnabled`, on by default), refreshed roughly every 10 seconds and cleaned up automatically as teams unclaim land or disband. Clicking a claim shows the team's name, balance, and time until its next upkeep charge. Setting `blueMapWebUrl` to your BlueMap web app's externally-reachable address also unlocks the web dashboard's Map tab above. There is no Dynmap equivalent — Dynmap has no NeoForge build for this Minecraft version.
 
 ## Coin Mint restriction *(optional)*
 

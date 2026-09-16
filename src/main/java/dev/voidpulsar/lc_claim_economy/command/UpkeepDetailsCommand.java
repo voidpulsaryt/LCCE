@@ -6,6 +6,7 @@ import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
 import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
+import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.service.UpkeepBreakdown;
 import dev.voidpulsar.lc_claim_economy.service.UpkeepBreakdownStore;
 import dev.voidpulsar.lc_claim_economy.service.UpkeepMessageBuilder;
@@ -46,13 +47,17 @@ public final class UpkeepDetailsCommand {
             return 0;
         }
 
+        long gameTime = source.getServer().overworld().getGameTime();
+        long nextUpkeepTick = LcClaimEconomySavedData.get(source.getServer()).getNextUpkeepTick(team.getTeamId());
+        player.displayClientMessage(UpkeepMessageBuilder.buildNextChargeLine(nextUpkeepTick, gameTime), false);
+
         UpkeepBreakdown breakdown = UpkeepBreakdownStore.get(team.getTeamId());
         if (breakdown == null) {
             player.displayClientMessage(
                     Component.translatable("message.lc_claim_economy.upkeep_detail.unavailable"),
                     false
             );
-            return 0;
+            return 1;
         }
 
         player.displayClientMessage(UpkeepMessageBuilder.buildDetails(breakdown), false);

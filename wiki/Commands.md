@@ -4,7 +4,8 @@ All commands live under `/lcce` (renamed from `/lc_claim_economy` in 4.4.0).
 
 | Command | Backend | Who can use it | Description |
 |---|---|---|---|
-| `/lcce upkeep_details` | FTB | Solo: anyone. Party: owners/officers (or ranked members with purchase permission) | Show the latest upkeep cost breakdown |
+| `/lcce upkeep_details` | FTB | Solo: anyone. Party: owners/officers (or ranked members with purchase permission) | Show the time until the next upkeep charge and the latest upkeep cost breakdown |
+| `/lcce opc_upkeep_details` | OP&C | Anyone | Show the time until your next upkeep charge |
 | `/lcce upkeep_priority` | FTB | Same as above | Show the protection dismantle order and current active costs |
 | `/lcce bounty player <target> <amount>` | FTB | Anyone | Place an escrowed bounty on a player |
 | `/lcce bounty team <target> <amount>` | FTB | Anyone | Place an escrowed bounty on a team |
@@ -23,7 +24,6 @@ All commands live under `/lcce` (renamed from `/lc_claim_economy` in 4.4.0).
 | `/lcce warp list` | FTB | Anyone | Clickable chat list of your warps and public warps |
 | `/lcce warp tp <name>` | FTB | Anyone | Teleport to one of your own warps |
 | `/lcce warp tpto <player> <name>` | FTB | Anyone | Teleport to another player's public warp |
-| `/lcce dashboard` | Either | Anyone | Open the Bank Dashboard screen (client-only, same as pressing **B**) |
 | `/lcce leaderboard` / `leaderboard land` | Either | Anyone | Rank teams by claimed-chunk count |
 | `/lcce leaderboard wealth` | Either | Anyone | Rank teams by bank balance |
 | `/lcce web login` | FTB | Any online player | Issue a one-time login code for the web dashboard (`webEnabled` + `webDashboardEnabled` required) |

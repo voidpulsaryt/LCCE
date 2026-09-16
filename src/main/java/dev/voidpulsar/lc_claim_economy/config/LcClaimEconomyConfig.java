@@ -24,7 +24,7 @@ public final class LcClaimEconomyConfig {
         public final ModConfigSpec.DoubleValue unclaimRefundRatio;
         public final ModConfigSpec.LongValue forceLoadUpkeepPrice;
         public final ModConfigSpec.IntValue upkeepPeriodMinutes;
-        public final ModConfigSpec.BooleanValue chargeUpkeepWhileEmpty;
+        public final ModConfigSpec.EnumValue<UpkeepOnlineRequirement> upkeepOnlineRequirement;
         public final ModConfigSpec.LongValue mobGriefProtectionPrice;
         public final ModConfigSpec.LongValue explosionProtectionPrice;
         public final ModConfigSpec.LongValue pvpDisablePrice;
@@ -65,6 +65,8 @@ public final class LcClaimEconomyConfig {
         public final ModConfigSpec.BooleanValue warpRequireOwnClaim;
         public final ModConfigSpec.IntValue warpCooldownSeconds;
         public final ModConfigSpec.ConfigValue<List<? extends String>> warpWorldDisplayNames;
+        public final ModConfigSpec.BooleanValue blueMapClaimOverlaysEnabled;
+        public final ModConfigSpec.ConfigValue<String> blueMapWebUrl;
 
         Server(ModConfigSpec.Builder builder) {
             builder.comment("Lightman's Currency: FTB Claim Economy server configuration").push("general");
@@ -93,12 +95,16 @@ public final class LcClaimEconomyConfig {
                     .comment("How often upkeep is charged, in real-time minutes")
                     .defineInRange("upkeepPeriodMinutes", 60, 1, 10080);
 
-            chargeUpkeepWhileEmpty = builder
-                    .comment("If false (default), the upkeep countdown pauses whenever no players are online, so a period "
-                            + "only elapses across time players actually spent on the server. If true, the countdown keeps "
-                            + "running off server uptime alone regardless of whether anyone is connected, so teams can be "
-                            + "billed - and have protections suspended for non-payment - while every player is offline.")
-                    .define("chargeUpkeepWhileEmpty", false);
+            upkeepOnlineRequirement = builder
+                    .comment("Controls when a team's (or OP&C claim owner's) upkeep countdown is allowed to advance:",
+                            "ANYONE_ONLINE (default) - counts down only while at least one player is online anywhere on "
+                                    + "the server, matching prior behavior.",
+                            "TEAM_MEMBER_ONLINE - counts down for a team/owner only while one of its own members is "
+                                    + "online, independently of every other team and player.",
+                            "ALWAYS_CHARGE - counts down off server uptime alone regardless of who (if anyone) is "
+                                    + "online, so teams can be billed - and have protections suspended for non-payment - "
+                                    + "while everyone is offline.")
+                    .defineEnum("upkeepOnlineRequirement", UpkeepOnlineRequirement.ANYONE_ONLINE);
 
             disableCoinMint = builder
                     .comment("If true, prevents use of Lightman's Currency's Coin Mint block server-wide, "
@@ -302,6 +308,22 @@ public final class LcClaimEconomyConfig {
                     .comment("Optional raw CSS appended after the built-in stylesheet on both web pages, for customization "
                             + "beyond the accent color above (fonts, layout tweaks, etc.). Empty by default.")
                     .define("webCustomCss", "");
+
+            builder.pop();
+            builder.comment("Optional BlueMap integration (only takes effect if the BlueMap mod is also installed).").push("blueMap");
+
+            blueMapClaimOverlaysEnabled = builder
+                    .comment("If true, draws each FTB team's claimed chunks as colored area markers on the live BlueMap "
+                            + "map, refreshed periodically. FTB Chunks only - there is no OP&C claim overlay yet.")
+                    .define("blueMapClaimOverlaysEnabled", true);
+
+            blueMapWebUrl = builder
+                    .comment("Externally-reachable base URL of your BlueMap web app (e.g. \"http://myserver.com:8100\"), "
+                            + "used to embed a live map view and a direct \"view on map\" link on the web dashboard's Map "
+                            + "tab. This mod cannot auto-detect BlueMap's externally reachable address (it may be behind a "
+                            + "reverse proxy, a different port, or a different domain than this mod's own web server), so "
+                            + "it must be set explicitly. Leave blank to hide the Map tab entirely.")
+                    .define("blueMapWebUrl", "");
 
             builder.pop();
             builder.comment("Server flavor: one-time bonus for claiming first (FTB Chunks only)").push("flavor");

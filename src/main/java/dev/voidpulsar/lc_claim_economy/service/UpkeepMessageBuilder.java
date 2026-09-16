@@ -2,6 +2,7 @@ package dev.voidpulsar.lc_claim_economy.service;
 
 import dev.ftb.mods.ftbteams.api.property.TeamProperty;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
+import dev.voidpulsar.lc_claim_economy.util.DurationFormat;
 import dev.voidpulsar.lc_claim_economy.util.MoneyMessageUtil;
 import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
 import dev.voidpulsar.lc_claim_economy.util.UpkeepPeriodFormat;
@@ -98,6 +99,20 @@ public final class UpkeepMessageBuilder {
         message.append(Component.literal(" "));
         message.append(buildSeeMoreButton());
         return message;
+    }
+
+    /** Countdown line for {@code /lcce upkeep_details} and its OP&C equivalent - reports when the next charge fires. */
+    public static Component buildNextChargeLine(long nextUpkeepTick, long gameTime) {
+        if (nextUpkeepTick < 0L) {
+            return Component.translatable("message.lc_claim_economy.upkeep_detail.next_charge_unknown")
+                    .withStyle(ChatFormatting.GRAY);
+        }
+        long ticksRemaining = Math.max(0L, nextUpkeepTick - gameTime);
+        Component eta = ticksRemaining <= 0L
+                ? Component.translatable("message.lc_claim_economy.upkeep_detail.next_charge_imminent").withStyle(ChatFormatting.GOLD)
+                : Component.literal(DurationFormat.ticksToShortString(ticksRemaining)).withStyle(ChatFormatting.AQUA);
+        return Component.translatable("message.lc_claim_economy.upkeep_detail.next_charge_in", eta)
+                .withStyle(ChatFormatting.GRAY);
     }
 
     public static Component buildDetails(UpkeepBreakdown breakdown) {

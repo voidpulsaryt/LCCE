@@ -496,6 +496,7 @@
     <button data-panel="protections">Protections</button>
     <button data-panel="wars">Wars</button>
     <button data-panel="team">Team</button>
+    <button data-panel="map" id="map-tab-btn" style="display:none;">Map</button>
   </nav>
 
   <main>
@@ -572,6 +573,16 @@
         </table>
       </div>
     </section>
+
+    <section class="panel" id="panel-map">
+      <div class="card">
+        <h2>Live map <span class="card-note" id="map-note"></span></h2>
+        <div id="map-frame-wrap" style="display:none;">
+          <p style="margin:0 0 10px;"><a id="map-open-link" href="#" target="_blank" rel="noopener">Open in a new tab &#8599;</a></p>
+          <iframe id="map-iframe" title="Live map" style="width:100%; height:70vh; border:1px solid var(--border); border-radius:10px; background:#10151d;" loading="lazy"></iframe>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer>Claim Economy dashboard &middot; session active</footer>
@@ -626,6 +637,35 @@ function formatMinutes(minutes) {
   return minutes + "m";
 }
 
+function formatDuration(totalSeconds) {
+  if (totalSeconds == null || totalSeconds < 0) return "?";
+  if (totalSeconds <= 0) return "any moment now";
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = Math.floor(totalSeconds % 60);
+  let parts = [];
+  if (days > 0) parts.push(days + "d");
+  if (days > 0 || hours > 0) parts.push(hours + "h");
+  if (days > 0 || hours > 0 || minutes > 0) parts.push(minutes + "m");
+  if (days === 0 && hours === 0) parts.push(seconds + "s");
+  return parts.join(" ");
+}
+
+// Live countdown state, ticked client-side between polls so the tile doesn't sit frozen.
+let nextChargeSeconds = null;
+let nextChargeTimer = null;
+function startNextChargeCountdown(seconds) {
+  nextChargeSeconds = seconds;
+  clearInterval(nextChargeTimer);
+  if (nextChargeSeconds == null || nextChargeSeconds < 0) return;
+  nextChargeTimer = setInterval(() => {
+    if (nextChargeSeconds > 0) nextChargeSeconds--;
+    const el = document.getElementById("next-charge-value");
+    if (el) el.textContent = formatDuration(nextChargeSeconds);
+  }, 1000);
+}
+
 function showToast(message, isError) {
   let toast = document.getElementById("toast");
   if (!toast) {
@@ -669,17 +709,19 @@ function renderSummary(data) {
   const strip = document.getElementById("summary-strip");
   const activeWars = data.wars.incoming.length + data.wars.outgoing.length;
   const tiles = [
-    ["Team balance", formatCopper(data.balanceCopper), null, null],
-    ["Upkeep / " + formatMinutes(data.upkeep.periodMinutes), formatCopper(data.upkeep.totalCopper), data.upkeep.canAfford ? "good" : "bad", data.upkeep.canAfford ? "Fully funded" : "Cannot afford next charge"],
-    ["Claimed chunks", data.land.entries.length, null, data.land.freeChunks + " free allowance"],
-    ["Active wars", activeWars, null, data.wars.incoming.length + " in / " + data.wars.outgoing.length + " out"]
+    ["Team balance", formatCopper(data.balanceCopper), null, null, null],
+    ["Upkeep / " + formatMinutes(data.upkeep.periodMinutes), formatCopper(data.upkeep.totalCopper), data.upkeep.canAfford ? "good" : "bad", data.upkeep.canAfford ? "Fully funded" : "Cannot afford next charge", null],
+    ["Next charge", formatDuration(data.upkeep.secondsUntilNextCharge), null, null, "next-charge-value"],
+    ["Claimed chunks", data.land.entries.length, null, data.land.freeChunks + " free allowance", null],
+    ["Active wars", activeWars, null, data.wars.incoming.length + " in / " + data.wars.outgoing.length + " out", null]
   ];
-  strip.innerHTML = tiles.map(([label, value, cls, sub]) => `
+  strip.innerHTML = tiles.map(([label, value, cls, sub, valueId]) => `
     <div class="stat-tile">
       <div class="stat-label">${escapeHtml(label)}</div>
-      <div class="stat-value${cls ? " " + cls : ""}">${escapeHtml(value)}</div>
+      <div class="stat-value${cls ? " " + cls : ""}"${valueId ? ` id="${valueId}"` : ""}>${escapeHtml(value)}</div>
       ${sub ? `<div class="stat-sub">${escapeHtml(sub)}</div>` : ""}
     </div>`).join("");
+  startNextChargeCountdown(data.upkeep.secondsUntilNextCharge);
 }
 
 function renderOverview(data) {
@@ -776,6 +818,31 @@ function renderTeam(data) {
   `).join("") : `<tr><td colspan="3" class="empty-note">No roster data.</td></tr>`;
 }
 
+function renderMap(data) {
+  const tabBtn = document.getElementById("map-tab-btn");
+  const map = data.map || { webUrl: "", claimUrl: "" };
+  const linkUrl = map.claimUrl || map.webUrl;
+
+  if (!linkUrl) {
+    tabBtn.style.display = "none";
+    return;
+  }
+  tabBtn.style.display = "";
+
+  const frame = document.getElementById("map-iframe");
+  const openLink = document.getElementById("map-open-link");
+  document.getElementById("map-frame-wrap").style.display = "";
+
+  if (frame.dataset.src !== linkUrl) {
+    frame.src = linkUrl;
+    frame.dataset.src = linkUrl;
+  }
+  openLink.href = linkUrl;
+  // If only the base map URL is available (e.g. no claims yet), there's no claim to
+  // center the iframe on - it just opens BlueMap's own default view instead.
+  document.getElementById("map-note").textContent = map.claimUrl ? "centered on your claim" : "";
+}
+
 function renderDashboard(data) {
   document.getElementById("team-chip-label").textContent = data.team.name;
   document.getElementById("team-avatar").textContent = data.team.name.trim().charAt(0).toUpperCase();
@@ -785,6 +852,7 @@ function renderDashboard(data) {
   renderProtections(data);
   renderWars(data);
   renderTeam(data);
+  renderMap(data);
 }
 
 function initTabs() {
@@ -898,6 +966,14 @@ async function loadTheme() {
   initActions();
   await loadTheme();
   await loadDashboard();
+  // Periodic background resync (balances, land, wars, roster online status, etc.) - the
+  // per-second countdown above is purely client-side and would otherwise drift from the
+  // server, and other tabs/panels never refresh on their own between manual actions.
+  setInterval(() => {
+    if (document.getElementById("app").classList.contains("active")) {
+      loadDashboard();
+    }
+  }, 30000);
 })();
 </script>
 </body>

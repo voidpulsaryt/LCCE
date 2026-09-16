@@ -86,10 +86,17 @@ public class LcClaimEconomy {
             LOGGER.info("FTB Chunks/Teams not detected - FTB Chunks integration disabled.");
         }
 
+        if (dev.voidpulsar.lc_claim_economy.compat.ModCompat.isFtbAvailable()
+                && dev.voidpulsar.lc_claim_economy.compat.ModCompat.isBlueMapAvailable()) {
+            NeoForge.EVENT_BUS.register(new dev.voidpulsar.lc_claim_economy.bluemap.BlueMapClaimIntegration());
+            LOGGER.info("BlueMap detected - claim overlay integration enabled.");
+        }
+
         if (dev.voidpulsar.lc_claim_economy.compat.ModCompat.isOpcAvailable()) {
             NeoForge.EVENT_BUS.register(new dev.voidpulsar.lc_claim_economy.opc.OpcIntegration());
             NeoForge.EVENT_BUS.register(new dev.voidpulsar.lc_claim_economy.opc.OpcUpkeepService());
             NeoForge.EVENT_BUS.addListener(dev.voidpulsar.lc_claim_economy.opc.OpcChunkTypeCommand::register);
+            NeoForge.EVENT_BUS.addListener(dev.voidpulsar.lc_claim_economy.opc.OpcUpkeepDetailsCommand::register);
             LOGGER.info("Open Parties and Claims detected - OP&C claim economy integration enabled.");
         }
 
