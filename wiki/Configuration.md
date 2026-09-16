@@ -18,6 +18,7 @@ world/serverconfig/lc_claim_economy-server.toml
 | `unclaimRefundRatio` | `0.8` | Fraction of claim price refunded on unclaim (`0`–`1`) |
 | `forceLoadUpkeepPrice` | `100000` | Upkeep cost per force-loaded chunk per period (100000 copper = 1 Netherite coin) |
 | `upkeepPeriodMinutes` | `60` | How often upkeep is charged, in real-time minutes (`1`–`10080`) |
+| `chargeUpkeepWhileEmpty` | `false` | If `false`, the upkeep countdown pauses while no players are online, so a period only elapses across time players were actually connected. If `true`, it keeps running off server uptime alone, so teams can be billed (and lose protections for non-payment) while everyone is offline |
 | `disableCoinMint` | `false` | Blocks use of Lightman's Currency's Coin Mint block server-wide |
 
 ## `protectionPrices`

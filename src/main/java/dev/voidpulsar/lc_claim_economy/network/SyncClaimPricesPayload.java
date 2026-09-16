@@ -1,7 +1,6 @@
 package dev.voidpulsar.lc_claim_economy.network;
 
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.client.BankDashboardUiRefresh;
 import dev.voidpulsar.lc_claim_economy.client.ClientClaimPrices;
 import dev.voidpulsar.lc_claim_economy.client.ClientWarState;
 import dev.voidpulsar.lc_claim_economy.client.PendingStateUiRefresh;
@@ -104,7 +103,6 @@ public record SyncClaimPricesPayload(
                 PendingStateUiRefresh.refreshOpenScreens();
                 TeamUiRefresh.refreshMyTeamScreenIfOpen();
             }
-            BankDashboardUiRefresh.refreshIfOpen();
         });
     }
 }

@@ -24,6 +24,7 @@ public final class LcClaimEconomyConfig {
         public final ModConfigSpec.DoubleValue unclaimRefundRatio;
         public final ModConfigSpec.LongValue forceLoadUpkeepPrice;
         public final ModConfigSpec.IntValue upkeepPeriodMinutes;
+        public final ModConfigSpec.BooleanValue chargeUpkeepWhileEmpty;
         public final ModConfigSpec.LongValue mobGriefProtectionPrice;
         public final ModConfigSpec.LongValue explosionProtectionPrice;
         public final ModConfigSpec.LongValue pvpDisablePrice;
@@ -91,6 +92,13 @@ public final class LcClaimEconomyConfig {
             upkeepPeriodMinutes = builder
                     .comment("How often upkeep is charged, in real-time minutes")
                     .defineInRange("upkeepPeriodMinutes", 60, 1, 10080);
+
+            chargeUpkeepWhileEmpty = builder
+                    .comment("If false (default), the upkeep countdown pauses whenever no players are online, so a period "
+                            + "only elapses across time players actually spent on the server. If true, the countdown keeps "
+                            + "running off server uptime alone regardless of whether anyone is connected, so teams can be "
+                            + "billed - and have protections suspended for non-payment - while every player is offline.")
+                    .define("chargeUpkeepWhileEmpty", false);
 
             disableCoinMint = builder
                     .comment("If true, prevents use of Lightman's Currency's Coin Mint block server-wide, "

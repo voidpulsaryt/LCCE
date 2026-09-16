@@ -102,12 +102,6 @@ public class LcClaimEconomy {
         if (FMLEnvironment.dist == Dist.CLIENT && dev.voidpulsar.lc_claim_economy.compat.ModCompat.isFtbAvailable()) {
             new ClientPendingRefreshHandler();
         }
-
-        if (FMLEnvironment.dist == Dist.CLIENT) {
-            modEventBus.addListener(dev.voidpulsar.lc_claim_economy.client.ClientDashboardKeybind::registerMapping);
-            NeoForge.EVENT_BUS.register(new dev.voidpulsar.lc_claim_economy.client.ClientDashboardKeybind());
-            NeoForge.EVENT_BUS.addListener(dev.voidpulsar.lc_claim_economy.client.DashboardCommand::register);
-        }
     }
 
     private void registerPayloads(RegisterPayloadHandlersEvent event) {

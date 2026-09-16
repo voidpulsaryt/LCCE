@@ -30,7 +30,7 @@ public class UpkeepService {
             return;
         }
 
-        if (server.getPlayerList().getPlayerCount() <= 0) {
+        if (!LcClaimEconomyConfig.SERVER.chargeUpkeepWhileEmpty.get() && server.getPlayerList().getPlayerCount() <= 0) {
             savedData.setNextUpkeepTick(nextUpkeepTick + 1);
             return;
         }
