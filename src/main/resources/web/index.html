@@ -4,24 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claim Economy Leaderboard</title>
+<link rel="stylesheet" href="/web/shared.css">
 <style>
   :root {
-    --bg: #1B2029;
-    --bg-2: #232A38;
-    --panel: rgba(59, 66, 82, 0.5);
-    --panel-alt: rgba(67, 76, 94, 0.55);
-    --border: rgba(255, 255, 255, 0.08);
-    --border-soft: rgba(255, 255, 255, 0.06);
-    --text: #ECEFF4;
-    --text-muted: #D8DEE9;
-    --text-dim: #8892A6;
-    --accent: #88C0D0;
-    --accent-deep: #5E81AC;
     --accent-2: #A3BE8C;
     --gold: #EBCB8B;
-    --glow-teal: rgba(136, 192, 208, 0.22);
-    --glow-blue: rgba(94, 129, 172, 0.28);
-    --glow-purple: rgba(180, 142, 173, 0.16);
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -196,32 +183,10 @@
 </main>
 <footer>Auto-refreshes every 10 seconds &middot; Lightman's Currency Claim Economy</footer>
 
+<script src="/web/shared.js"></script>
 <script>
 const REFRESH_MS = 10000;
-const COIN_NAMES = ["Copper", "Iron", "Gold", "Emerald", "Diamond", "Netherite"];
-const COIN_STEP = 10;
-
-function formatCopper(amount) {
-  if (amount <= 0) return "0c";
-  let parts = [];
-  let remaining = amount;
-  for (let i = COIN_NAMES.length - 1; i >= 0; i--) {
-    const unit = Math.pow(COIN_STEP, i);
-    const count = Math.floor(remaining / unit);
-    if (count > 0) {
-      parts.push(count + " " + COIN_NAMES[i][0]);
-      remaining -= count * unit;
-    }
-  }
-  return parts.length ? parts.join(" ") : amount + "c";
-}
-
-function formatMinutes(minutes) {
-  if (!minutes || minutes <= 0) return "?";
-  if (minutes % 1440 === 0) return (minutes / 1440) + "d";
-  if (minutes % 60 === 0) return (minutes / 60) + "h";
-  return minutes + "m";
-}
+const { formatCopper, formatMinutes, escapeHtml } = LcceShared;
 
 function rankClass(i) {
   return i === 0 ? "rank gold" : "rank";
@@ -281,12 +246,6 @@ function renderBoard(elementId, entries, valueFormatter) {
   ).join("");
 }
 
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
-}
-
 function setStatus(ok) {
   const dot = document.getElementById("status-dot");
   const text = document.getElementById("status-text");
@@ -315,29 +274,26 @@ async function refresh() {
 }
 
 async function loadTheme() {
-  try {
-    const res = await fetch("api/theme", { cache: "no-store" });
-    if (!res.ok) return;
-    const theme = await res.json();
-    if (theme.accentColor) {
-      document.documentElement.style.setProperty("--accent", theme.accentColor);
-    }
-    document.title = theme.siteName + " Leaderboard";
-    document.getElementById("site-title").lastChild.textContent = theme.siteName;
-    if (theme.logoUrl) {
-      const logo = document.getElementById("site-logo");
-      logo.src = theme.logoUrl;
-      logo.style.display = "inline";
-    }
-    if (theme.dashboardEnabled) {
-      document.getElementById("dashboard-link").style.display = "block";
-    }
-    if (theme.customCss) {
-      const style = document.createElement("style");
-      style.textContent = theme.customCss;
-      document.head.appendChild(style);
-    }
-  } catch (e) { /* keep built-in defaults */ }
+  const theme = await LcceShared.fetchTheme();
+  if (!theme) return; // keep built-in defaults
+  if (theme.accentColor) {
+    document.documentElement.style.setProperty("--accent", theme.accentColor);
+  }
+  document.title = theme.siteName + " Leaderboard";
+  document.getElementById("site-title").lastChild.textContent = theme.siteName;
+  if (theme.logoUrl) {
+    const logo = document.getElementById("site-logo");
+    logo.src = theme.logoUrl;
+    logo.style.display = "inline";
+  }
+  if (theme.dashboardEnabled) {
+    document.getElementById("dashboard-link").style.display = "block";
+  }
+  if (theme.customCss) {
+    const style = document.createElement("style");
+    style.textContent = theme.customCss;
+    document.head.appendChild(style);
+  }
 }
 
 loadTheme();

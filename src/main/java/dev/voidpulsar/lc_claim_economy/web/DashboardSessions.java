@@ -9,7 +9,7 @@ import dev.voidpulsar.lc_claim_economy.web.auth.SessionManager;
  * (redeems codes, resolves sessions). A static holder is simpler than
  * plumbing an instance through command/event registration, and matches this
  * codebase's existing pattern for cross-cutting server-lifetime state (see
- * {@code UpkeepBreakdownStore}).
+ * {@code BillingBreakdownStore}).
  */
 public final class DashboardSessions {
     public static final LoginCodeService LOGIN_CODES = new LoginCodeService();

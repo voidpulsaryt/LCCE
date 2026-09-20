@@ -13,14 +13,14 @@ import dev.ftb.mods.ftbchunks.api.FTBChunksAPI;
 import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
+import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
-import dev.voidpulsar.lc_claim_economy.service.WarService;
-import dev.voidpulsar.lc_claim_economy.teams.FtbTeamCatalog;
+import dev.voidpulsar.lc_claim_economy.service.ConflictService;
+import dev.voidpulsar.lc_claim_economy.teams.TeamRegistry;
 import dev.voidpulsar.lc_claim_economy.util.DurationFormat;
-import dev.voidpulsar.lc_claim_economy.util.MoneyMessageUtil;
-import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -116,7 +116,7 @@ public final class BlueMapClaimIntegration {
         }
 
         Set<UUID> currentTeamIds = new HashSet<>();
-        for (Team team : FtbTeamCatalog.trackedTeams(currentServer)) {
+        for (Team team : TeamRegistry.trackedTeams(currentServer)) {
             try {
                 currentTeamIds.add(team.getTeamId());
                 refreshTeam(currentApi, currentServer, team);
@@ -179,7 +179,7 @@ public final class BlueMapClaimIntegration {
 
     private static MarkerSet buildMarkerSet(Team team, List<ClaimedChunk> chunks, int[] rgb, String detail) {
         MarkerSet markerSet = MarkerSet.builder()
-                .label(WarService.displayName(team))
+                .label(ConflictService.displayName(team))
                 .defaultHidden(false)
                 .build();
 
@@ -190,7 +190,7 @@ public final class BlueMapClaimIntegration {
             int minX = chunk.getPos().x() * 16;
             int minZ = chunk.getPos().z() * 16;
             ShapeMarker marker = ShapeMarker.builder()
-                    .label(WarService.displayName(team))
+                    .label(ConflictService.displayName(team))
                     .detail(detail)
                     .shape(Shape.createRect(minX, minZ, minX + 16, minZ + 16), 65f)
                     .fillColor(fillColor)
@@ -205,9 +205,9 @@ public final class BlueMapClaimIntegration {
     }
 
     private static String buildDetail(MinecraftServer server, Team team) {
-        BankAccountHelper.ensurePartyAccountExists(server, team);
-        IBankAccount account = BankAccountHelper.getAccountForTeam(server, team);
-        long balanceCopper = account == null ? 0L : MoneyUtil.totalCopper(account);
+        BankLedgerAccess.ensurePartyAccountExists(server, team);
+        IBankAccount account = BankLedgerAccess.getAccountForTeam(server, team);
+        long balanceCopper = account == null ? 0L : CurrencyAmounts.totalCopper(account);
 
         long gameTime = server.overworld().getGameTime();
         long nextUpkeepTick = LcClaimEconomySavedData.get(server).getNextUpkeepTick(team.getTeamId());
@@ -215,8 +215,8 @@ public final class BlueMapClaimIntegration {
                 ? "unknown"
                 : DurationFormat.ticksToShortString(Math.max(0L, nextUpkeepTick - gameTime));
 
-        return "<div><strong>" + escapeHtml(WarService.displayName(team)) + "</strong><br>"
-                + "Balance: " + escapeHtml(MoneyMessageUtil.formatPrice(balanceCopper).getString()) + "<br>"
+        return "<div><strong>" + escapeHtml(ConflictService.displayName(team)) + "</strong><br>"
+                + "Balance: " + escapeHtml(CurrencyTextFormat.formatPrice(balanceCopper).getString()) + "<br>"
                 + "Next upkeep charge: " + escapeHtml(nextCharge) + "</div>";
     }
 

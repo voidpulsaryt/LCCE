@@ -9,19 +9,19 @@ import dev.ftb.mods.ftbteams.api.Team;
 import dev.ftb.mods.ftbteams.api.TeamRank;
 import dev.ftb.mods.ftbteams.api.property.PrivacyMode;
 import dev.ftb.mods.ftbteams.api.property.TeamProperty;
-import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
+import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
 import dev.voidpulsar.lc_claim_economy.bluemap.BlueMapDashboardLink;
 import dev.voidpulsar.lc_claim_economy.compat.ModCompat;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
-import dev.voidpulsar.lc_claim_economy.data.ChunkPosKey;
+import dev.voidpulsar.lc_claim_economy.data.ChunkCoordKey;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
-import dev.voidpulsar.lc_claim_economy.data.TeamPendingState;
+import dev.voidpulsar.lc_claim_economy.data.TeamQueuedChanges;
 import dev.voidpulsar.lc_claim_economy.service.LandChunkService;
-import dev.voidpulsar.lc_claim_economy.service.ProtectionPricing;
+import dev.voidpulsar.lc_claim_economy.service.SafeguardPricing;
 import dev.voidpulsar.lc_claim_economy.service.WarDeclarationWindow;
-import dev.voidpulsar.lc_claim_economy.service.WarService;
-import dev.voidpulsar.lc_claim_economy.teams.FtbTeamCatalog;
-import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
+import dev.voidpulsar.lc_claim_economy.service.ConflictService;
+import dev.voidpulsar.lc_claim_economy.teams.TeamRegistry;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.server.MinecraftServer;
@@ -114,29 +114,29 @@ final class FtbDashboardService {
         }
 
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        TeamPendingState pendingState = savedData.getPendingState(team.getTeamId());
-        BankAccountHelper.ensurePartyAccountExists(server, team);
-        IBankAccount account = BankAccountHelper.getAccountForTeam(server, team);
-        long balanceCopper = MoneyUtil.totalCopper(account);
+        TeamQueuedChanges pendingState = savedData.getPendingState(team.getTeamId());
+        BankLedgerAccess.ensurePartyAccountExists(server, team);
+        IBankAccount account = BankLedgerAccess.getAccountForTeam(server, team);
+        long balanceCopper = CurrencyAmounts.totalCopper(account);
 
         JsonWriter playerJson = JsonWriter.object()
                 .field("name", playerName(server, playerId))
                 .field("uuid", playerId.toString());
 
         JsonWriter teamJson = JsonWriter.object()
-                .field("name", WarService.displayName(team))
+                .field("name", ConflictService.displayName(team))
                 .field("isParty", team.isPartyTeam())
                 .field("rank", team.getRankForPlayer(playerId).name())
-                .field("peaceful", WarService.isPeaceful(server, team.getTeamId()));
+                .field("peaceful", ConflictService.isPeaceful(server, team.getTeamId()));
 
-        WarService.WarCostBreakdown costs = WarService.calculateWarCosts(server, team, pendingState);
+        ConflictService.WarCostBreakdown costs = ConflictService.calculateWarCosts(server, team, pendingState);
         ChunkTeamData chunkData = FTBChunksAPI.api().isManagerLoaded()
                 ? FTBChunksAPI.api().getManager().getOrCreateData(team)
                 : null;
-        int effectiveForceLoads = chunkData == null ? 0 : ProtectionPricing.countEffectiveForceLoads(chunkData, pendingState);
-        long forceLoadCopper = ProtectionPricing.calculateForceLoadCopper(effectiveForceLoads);
+        int effectiveForceLoads = chunkData == null ? 0 : SafeguardPricing.countEffectiveForceLoads(chunkData, pendingState);
+        long forceLoadCopper = SafeguardPricing.calculateForceLoadCopper(effectiveForceLoads);
         long totalCopper = costs.totalUpkeepCopper() + forceLoadCopper;
-        boolean canAfford = WarService.canAffordUpkeep(server, team, pendingState, account);
+        boolean canAfford = ConflictService.canAffordUpkeep(server, team, pendingState, account);
 
         long nextUpkeepTick = savedData.getNextUpkeepTick(team.getTeamId());
         long gameTime = server.overworld().getGameTime();
@@ -190,11 +190,11 @@ final class FtbDashboardService {
         return JsonWriter.object().field("label", label).field("copper", copper);
     }
 
-    private static JsonWriter buildLandJson(ChunkTeamData chunkData, TeamPendingState pendingState) {
+    private static JsonWriter buildLandJson(ChunkTeamData chunkData, TeamQueuedChanges pendingState) {
         List<JsonWriter> entries = new java.util.ArrayList<>();
         if (chunkData != null) {
             for (ClaimedChunk chunk : chunkData.getClaimedChunks()) {
-                String key = ChunkPosKey.encode(chunk.getPos());
+                String key = ChunkCoordKey.encode(chunk.getPos());
                 String pending = pendingState.isPendingForceLoad(key) ? "forceload"
                         : pendingState.isPendingForceUnload(key) ? "unload"
                         : null;
@@ -215,7 +215,7 @@ final class FtbDashboardService {
                 .arrayField("entries", entries);
     }
 
-    private static List<JsonWriter> buildProtectionEntries(Team team, TeamPendingState pendingState) {
+    private static List<JsonWriter> buildProtectionEntries(Team team, TeamQueuedChanges pendingState) {
         List<JsonWriter> entries = new java.util.ArrayList<>();
         for (var entry : protectionCatalog().entrySet()) {
             TeamProperty<?> property = entry.getKey();
@@ -223,7 +223,7 @@ final class FtbDashboardService {
             Object liveValue = team.getProperty(property);
             boolean active = isActive(team, property, liveValue);
 
-            String key = ProtectionPricing.propertyKey(property);
+            String key = SafeguardPricing.propertyKey(property);
             String pendingRaw = pendingState.pendingProperties().get(key);
             JsonWriter json = JsonWriter.object()
                     .field("key", key)
@@ -243,7 +243,7 @@ final class FtbDashboardService {
     private static <T> boolean pendingValueIsActive(TeamProperty<T> property, String pendingRaw, Object liveValue) {
         @SuppressWarnings("unchecked")
         T fallback = (T) liveValue;
-        T deserialized = ProtectionPricing.deserializePropertyValue(property, pendingRaw, fallback);
+        T deserialized = SafeguardPricing.deserializePropertyValue(property, pendingRaw, fallback);
         return isActive(null, property, deserialized);
     }
 
@@ -261,21 +261,21 @@ final class FtbDashboardService {
     }
 
     private static JsonWriter buildWarsJson(MinecraftServer server, Team team) {
-        List<JsonWriter> incoming = WarService.buildIncomingViews(server, team).stream()
+        List<JsonWriter> incoming = ConflictService.buildIncomingViews(server, team).stream()
                 .map(v -> JsonWriter.object()
                         .field("teamId", v.teamId().toString())
                         .field("name", v.displayName())
                         .field("costCopper", v.warCostCopper())
-                        .field("pending", v.status() == dev.voidpulsar.lc_claim_economy.network.WarEntryStatus.PENDING_DECLARE))
+                        .field("pending", v.status() == dev.voidpulsar.lc_claim_economy.network.ConflictEntryStatus.PENDING_DECLARE))
                 .toList();
-        List<JsonWriter> outgoing = WarService.buildOutgoingViews(server, team).stream()
+        List<JsonWriter> outgoing = ConflictService.buildOutgoingViews(server, team).stream()
                 .map(v -> JsonWriter.object()
                         .field("teamId", v.teamId().toString())
                         .field("name", v.displayName())
                         .field("costCopper", v.warCostCopper())
-                        .field("pending", v.status() != dev.voidpulsar.lc_claim_economy.network.WarEntryStatus.ACTIVE))
+                        .field("pending", v.status() != dev.voidpulsar.lc_claim_economy.network.ConflictEntryStatus.ACTIVE))
                 .toList();
-        List<JsonWriter> available = WarService.buildAvailableTargets(server, team).stream()
+        List<JsonWriter> available = ConflictService.buildAvailableTargets(server, team).stream()
                 .map(v -> JsonWriter.object()
                         .field("teamId", v.teamId().toString())
                         .field("name", v.displayName())
@@ -283,7 +283,7 @@ final class FtbDashboardService {
                 .toList();
 
         return JsonWriter.object()
-                .field("enabled", WarService.isEnabled())
+                .field("enabled", ConflictService.isEnabled())
                 .field("windowOpen", WarDeclarationWindow.isOpenNow())
                 .field("windowDescription", WarDeclarationWindow.isEnabled() ? WarDeclarationWindow.describeWindow() : "")
                 .arrayField("incoming", incoming)
@@ -298,11 +298,11 @@ final class FtbDashboardService {
         if (team == null) {
             return ActionResult.failure("No team found.");
         }
-        if (!BankAccountHelper.canPurchaseForTeam(team, playerId)) {
+        if (!BankLedgerAccess.canPurchaseForTeam(team, playerId)) {
             return ActionResult.failure("Only team owners and officers can manage protections.");
         }
         TeamProperty<?> property = protectionCatalog().keySet().stream()
-                .filter(p -> ProtectionPricing.propertyKey(p).equals(propertyKey))
+                .filter(p -> SafeguardPricing.propertyKey(p).equals(propertyKey))
                 .findFirst()
                 .orElse(null);
         if (property == null) {
@@ -317,10 +317,10 @@ final class FtbDashboardService {
         if (team == null) {
             return ActionResult.failure("No team found.");
         }
-        if (!BankAccountHelper.canPurchaseForTeam(team, playerId)) {
+        if (!BankLedgerAccess.canPurchaseForTeam(team, playerId)) {
             return ActionResult.failure("Only team owners and officers can manage this.");
         }
-        boolean applied = WarService.setPeaceful(server, team.getTeamId(), peaceful);
+        boolean applied = ConflictService.setPeaceful(server, team.getTeamId(), peaceful);
         if (!applied) {
             return ActionResult.failure("Cannot become peaceful while your team has an active war.");
         }
@@ -342,8 +342,8 @@ final class FtbDashboardService {
         ChunkTeamData chunkData = FTBChunksAPI.api().getManager().getOrCreateData(team);
         CommandSourceStack source = player.createCommandSourceStack();
         var result = load
-                ? chunkData.forceLoad(source, ChunkPosKey.toChunkDimPos(chunkKey), false)
-                : chunkData.unForceLoad(source, ChunkPosKey.toChunkDimPos(chunkKey), false);
+                ? chunkData.forceLoad(source, ChunkCoordKey.toChunkDimPos(chunkKey), false)
+                : chunkData.unForceLoad(source, ChunkCoordKey.toChunkDimPos(chunkKey), false);
         return result.isSuccess() ? ActionResult.success("Updated.") : ActionResult.failure("Could not update force-load state.");
     }
 
@@ -361,7 +361,7 @@ final class FtbDashboardService {
         }
         ChunkTeamData chunkData = FTBChunksAPI.api().getManager().getOrCreateData(team);
         CommandSourceStack source = player.createCommandSourceStack();
-        var result = chunkData.unclaim(source, ChunkPosKey.toChunkDimPos(chunkKey), false);
+        var result = chunkData.unclaim(source, ChunkCoordKey.toChunkDimPos(chunkKey), false);
         return result.isSuccess() ? ActionResult.success("Unclaimed.") : ActionResult.failure("Could not unclaim that chunk.");
     }
 
@@ -370,7 +370,7 @@ final class FtbDashboardService {
         if (player == null) {
             return ActionResult.failure("You must be online in-game to manage wars.");
         }
-        var message = WarService.toggleWar(server, player, targetTeamId);
+        var message = ConflictService.toggleWar(server, player, targetTeamId);
         return message == null ? ActionResult.success("Updated.") : ActionResult.success(message.getString());
     }
 }

@@ -2,11 +2,11 @@ package dev.voidpulsar.lc_claim_economy.mixin.client;
 
 import dev.ftb.mods.ftblibrary.config.ui.EditConfigScreen;
 import dev.voidpulsar.lc_claim_economy.client.EditConfigScreenUiHelper;
-import dev.voidpulsar.lc_claim_economy.client.PendingStateUiRefresh;
-import dev.voidpulsar.lc_claim_economy.network.RequestClaimPricesPayload;
+import dev.voidpulsar.lc_claim_economy.client.QueuedStateUiRefresh;
+import dev.voidpulsar.lc_claim_economy.network.PricingRequestPayload;
 import dev.voidpulsar.lc_claim_economy.network.RequestLandChunksPayload;
-import dev.voidpulsar.lc_claim_economy.network.RequestPendingStatePayload;
-import dev.voidpulsar.lc_claim_economy.network.RequestWarStatePayload;
+import dev.voidpulsar.lc_claim_economy.network.QueuedStateRequestPayload;
+import dev.voidpulsar.lc_claim_economy.network.ConflictStateRequestPayload;
 import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.network.PacketDistributor;
 import org.spongepowered.asm.mixin.Final;
@@ -34,14 +34,14 @@ public class EditConfigScreenMixin {
     @Inject(method = "onInit", at = @At("RETURN"), remap = false)
     private void lcClaimEconomy$requestPendingState(CallbackInfoReturnable<Boolean> callback) {
         if (Boolean.TRUE.equals(callback.getReturnValue())) {
-            PacketDistributor.sendToServer(new RequestClaimPricesPayload());
-            PacketDistributor.sendToServer(new RequestPendingStatePayload());
+            PacketDistributor.sendToServer(new PricingRequestPayload());
+            PacketDistributor.sendToServer(new QueuedStateRequestPayload());
             PacketDistributor.sendToServer(new RequestLandChunksPayload());
-            PacketDistributor.sendToServer(new RequestWarStatePayload());
+            PacketDistributor.sendToServer(new ConflictStateRequestPayload());
             // Pre-fill from the already-cached pending state right away so the
             // screen shows the queued (new) values from the first frame. The
             // request above refreshes this once the server's reply arrives.
-            PendingStateUiRefresh.syncScreenValues((EditConfigScreen) (Object) this);
+            QueuedStateUiRefresh.syncScreenValues((EditConfigScreen) (Object) this);
         }
     }
 
@@ -65,10 +65,10 @@ public class EditConfigScreenMixin {
             lcClaimEconomy$suppressedAutoclose = false;
             changed = false;
         }
-        PacketDistributor.sendToServer(new RequestClaimPricesPayload());
-        PacketDistributor.sendToServer(new RequestPendingStatePayload());
+        PacketDistributor.sendToServer(new PricingRequestPayload());
+        PacketDistributor.sendToServer(new QueuedStateRequestPayload());
         PacketDistributor.sendToServer(new RequestLandChunksPayload());
-        PacketDistributor.sendToServer(new RequestWarStatePayload());
+        PacketDistributor.sendToServer(new ConflictStateRequestPayload());
     }
 
     @Inject(method = "doCancel", at = @At("HEAD"), remap = false)

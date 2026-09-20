@@ -10,9 +10,10 @@ import dev.ftb.mods.ftblibrary.ui.SimpleButton;
 import dev.ftb.mods.ftblibrary.ui.Theme;
 import dev.ftb.mods.ftblibrary.ui.Widget;
 import dev.ftb.mods.ftblibrary.ui.misc.NordColors;
-import dev.voidpulsar.lc_claim_economy.client.ClientClaimPrices;
-import dev.voidpulsar.lc_claim_economy.service.ProtectionPricing;
-import dev.voidpulsar.lc_claim_economy.util.MoneyMessageUtil;
+import dev.voidpulsar.lc_claim_economy.client.ClientPricingCache;
+import dev.voidpulsar.lc_claim_economy.client.gui.widget.LcScreenChrome;
+import dev.voidpulsar.lc_claim_economy.service.SafeguardPricing;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -30,14 +31,14 @@ import java.util.List;
  * breakdown (force-loading, build protections, land protections).
  * <p>
  * Everything shown here comes from data the server already syncs to the
- * client via {@code SyncClaimPricesPayload} ({@link ClientClaimPrices}), so
+ * client via {@code PricingBroadcastPayload} ({@link ClientPricingCache}), so
  * opening this screen requires no extra network round trip.
  */
 public class ClaimBreakdownScreen extends BaseScreen {
-    private static final int HEADER_HEIGHT = 22;
-    private static final int HEADER_BUTTON_SIZE = 16;
-    private static final int CONTENT_PAD = 8;
-    private static final int SCROLLBAR_WIDTH = 8;
+    private static final int HEADER_HEIGHT = LcScreenChrome.HEADER_HEIGHT;
+    private static final int HEADER_BUTTON_SIZE = LcScreenChrome.HEADER_BUTTON_SIZE;
+    private static final int CONTENT_PAD = LcScreenChrome.CONTENT_PAD;
+    private static final int SCROLLBAR_WIDTH = LcScreenChrome.SCROLLBAR_WIDTH;
     private static final int ROW_HEIGHT = 16;
     private static final int SECTION_HEADER_HEIGHT = 18;
     private static final int LINK_ROW_HEIGHT = 22;
@@ -55,8 +56,8 @@ public class ClaimBreakdownScreen extends BaseScreen {
 
     @Override
     public boolean onInit() {
-        setWidth(Math.min(getScreen().getGuiScaledWidth() - 20, 340));
-        setHeight(Math.min(getScreen().getGuiScaledHeight() - 20, 280));
+        setWidth(LcScreenChrome.clamped(getScreen().getGuiScaledWidth(), 340));
+        setHeight(LcScreenChrome.clamped(getScreen().getGuiScaledHeight(), 280));
         return true;
     }
 
@@ -95,8 +96,7 @@ public class ClaimBreakdownScreen extends BaseScreen {
     @Override
     public void drawBackground(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
         super.drawBackground(graphics, theme, x, y, w, h);
-        NordColors.POLAR_NIGHT_0.draw(graphics, x + 4, y + HEADER_HEIGHT + 2, w - 8, h - HEADER_HEIGHT - 6);
-        NordColors.POLAR_NIGHT_2.draw(graphics, x + 4, y + HEADER_HEIGHT + 2, w - 8, 1);
+        LcScreenChrome.drawContentBackground(graphics, x, y, w, h);
     }
 
     @Override
@@ -128,33 +128,33 @@ public class ClaimBreakdownScreen extends BaseScreen {
             widgets.clear();
             rows.clear();
 
-            if (!ClientClaimPrices.isSynced()) {
+            if (!ClientPricingCache.isSynced()) {
                 addTextRow("gui.lc_claim_economy.claim_breakdown.not_synced");
                 return;
             }
 
             addSectionHeader("gui.lc_claim_economy.claim_breakdown.section_claim");
-            addValueRow("gui.lc_claim_economy.claim_breakdown.claim_price", ClientClaimPrices.currentEffectiveClaimPrice());
+            addValueRow("gui.lc_claim_economy.claim_breakdown.claim_price", ClientPricingCache.currentEffectiveClaimPrice());
             addValueRow("gui.lc_claim_economy.claim_breakdown.free_chunks_left",
-                    Component.literal(String.valueOf(ClientClaimPrices.remainingFreeChunks())));
+                    Component.literal(String.valueOf(ClientPricingCache.remainingFreeChunks())));
             addValueRow("gui.lc_claim_economy.claim_breakdown.claimed_chunks",
-                    Component.literal(String.valueOf(ClientClaimPrices.claimedChunks())));
-            addValueRow("gui.lc_claim_economy.claim_breakdown.balance", ClientClaimPrices.currentBalanceText());
+                    Component.literal(String.valueOf(ClientPricingCache.claimedChunks())));
+            addValueRow("gui.lc_claim_economy.claim_breakdown.balance", ClientPricingCache.currentBalanceText());
 
             addSectionHeader("gui.lc_claim_economy.claim_breakdown.section_bulk");
             for (int size : PROJECTION_SIZES) {
-                long cost = ClientClaimPrices.projectedBulkClaimCopper(size);
+                long cost = ClientPricingCache.projectedBulkClaimCopper(size);
                 addValueRow(
                         Component.translatable("gui.lc_claim_economy.claim_breakdown.bulk_claim_n", size),
-                        MoneyMessageUtil.formatPrice(cost)
+                        CurrencyTextFormat.formatPrice(cost)
                 );
             }
 
             addSectionHeader("gui.lc_claim_economy.claim_breakdown.section_upkeep");
             addValueRow(Component.translatable("gui.lc_claim_economy.claim_breakdown.upkeep_period"),
-                    Component.literal(periodLabel(ClientClaimPrices.upkeepPeriodMinutes())));
+                    Component.literal(periodLabel(ClientPricingCache.upkeepPeriodMinutes())));
             addValueRow("gui.lc_claim_economy.claim_breakdown.forceload_price",
-                    MoneyMessageUtil.formatPrice(ClientClaimPrices.forceLoadUpkeepPrice()));
+                    CurrencyTextFormat.formatPrice(ClientPricingCache.forceLoadUpkeepPrice()));
 
             addSectionHeader("gui.lc_claim_economy.claim_breakdown.section_build_protection");
             addProtectionRow("allow_mob_griefing", "message.lc_claim_economy.upkeep_detail.mob_grief");
@@ -167,7 +167,7 @@ public class ClaimBreakdownScreen extends BaseScreen {
             addSectionHeader("gui.lc_claim_economy.claim_breakdown.section_land_protection");
             addValueRow(
                     Component.translatable("gui.lc_claim_economy.claim_breakdown.land_group_size",
-                            ProtectionPricing.landChunkGroupSize()),
+                            SafeguardPricing.landChunkGroupSize()),
                     Component.empty()
             );
             addProtectionRow("block_interact_mode", "gui.lc_claim_economy.claim_breakdown.block_interact");
@@ -193,16 +193,16 @@ public class ClaimBreakdownScreen extends BaseScreen {
         }
 
         private void addProtectionRow(String propertyKey, String labelKey) {
-            Long price = ClientClaimPrices.protectionPrice(propertyKey);
+            Long price = ClientPricingCache.protectionPrice(propertyKey);
             if (price == null) {
-                price = ClientClaimPrices.defaultProtectionPrice(propertyKey);
+                price = ClientPricingCache.defaultProtectionPrice(propertyKey);
             }
             if (price == null) {
                 return;
             }
             addValueRow(Component.translatable(labelKey),
                     Component.translatable("gui.lc_claim_economy.protection_price_active",
-                            MoneyMessageUtil.formatPrice(price)));
+                            CurrencyTextFormat.formatPrice(price)));
         }
 
         private void addRow(Row row) {

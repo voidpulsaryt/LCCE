@@ -72,8 +72,8 @@ public final class LcClaimEconomyConfig {
             builder.comment("Lightman's Currency: FTB Claim Economy server configuration").push("general");
 
             claimPrice = builder
-                    .comment("Cost in copper units (main coin chain) to claim one chunk. Default: 10000 copper = 1 Diamond coin.")
-                    .defineInRange("claimPrice", 10_000L, 0L, Long.MAX_VALUE);
+                    .comment("Cost in copper units (main coin chain) to claim one chunk. Default: 7500 copper.")
+                    .defineInRange("claimPrice", 7_500L, 0L, Long.MAX_VALUE);
 
             freeChunks = builder
                     .comment("The first N claimed chunks per team or player are free to claim and exempt from protection upkeep")
@@ -84,16 +84,16 @@ public final class LcClaimEconomyConfig {
                     .defineInRange("landChunkGroupSize", 5, 1, Integer.MAX_VALUE);
 
             unclaimRefundRatio = builder
-                    .comment("Fraction of the claim price refunded when unclaiming a chunk (0 = none, 1 = full refund, 0.8 = 80%)")
-                    .defineInRange("unclaimRefundRatio", 0.8D, 0.0D, 1.0D);
+                    .comment("Fraction of the claim price refunded when unclaiming a chunk (0 = none, 1 = full refund, 0.7 = 70%)")
+                    .defineInRange("unclaimRefundRatio", 0.7D, 0.0D, 1.0D);
 
             forceLoadUpkeepPrice = builder
-                    .comment("Upkeep cost in copper units per force-loaded chunk per upkeep period (force-loading itself is free). Default: 1 Netherite coin (100000 copper).")
-                    .defineInRange("forceLoadUpkeepPrice", 100_000L, 0L, Long.MAX_VALUE);
+                    .comment("Upkeep cost in copper units per force-loaded chunk per upkeep period (force-loading itself is free). Default: 80000 copper.")
+                    .defineInRange("forceLoadUpkeepPrice", 80_000L, 0L, Long.MAX_VALUE);
 
             upkeepPeriodMinutes = builder
                     .comment("How often upkeep is charged, in real-time minutes")
-                    .defineInRange("upkeepPeriodMinutes", 60, 1, 10080);
+                    .defineInRange("upkeepPeriodMinutes", 45, 1, 10080);
 
             upkeepOnlineRequirement = builder
                     .comment("Controls when a team's (or OP&C claim owner's) upkeep countdown is allowed to advance:",
@@ -117,28 +117,28 @@ public final class LcClaimEconomyConfig {
             builder.comment("Per-protection base prices added to upkeep calculation (b in c = b * n)").push("protectionPrices");
 
             mobGriefProtectionPrice = builder
-                    .comment("Price when mob griefing protection is enabled (Allow Mob Griefing = false). Default: 80 copper.")
-                    .defineInRange("mobGriefProtectionPrice", 80L, 0L, Long.MAX_VALUE);
+                    .comment("Price when mob griefing protection is enabled (Allow Mob Griefing = false). Default: 60 copper.")
+                    .defineInRange("mobGriefProtectionPrice", 60L, 0L, Long.MAX_VALUE);
 
             explosionProtectionPrice = builder
-                    .comment("Price when explosion protection is enabled (Allow Explosion Damage = false). Default: 70 copper (second cheapest).")
-                    .defineInRange("explosionProtectionPrice", 70L, 0L, Long.MAX_VALUE);
+                    .comment("Price when explosion protection is enabled (Allow Explosion Damage = false). Default: 55 copper (second cheapest).")
+                    .defineInRange("explosionProtectionPrice", 55L, 0L, Long.MAX_VALUE);
 
             pvpDisablePrice = builder
-                    .comment("Price when PvP is disabled (Allow PvP Combat = false). Default: 50 copper (cheapest protection).")
-                    .defineInRange("pvpDisablePrice", 50L, 0L, Long.MAX_VALUE);
+                    .comment("Price when PvP is disabled (Allow PvP Combat = false). Default: 35 copper (cheapest protection).")
+                    .defineInRange("pvpDisablePrice", 35L, 0L, Long.MAX_VALUE);
 
             blockInteractProtectionPrice = builder
-                    .comment("Price when block interact mode is not public. Default: 100 copper.")
-                    .defineInRange("blockInteractProtectionPrice", 100L, 0L, Long.MAX_VALUE);
+                    .comment("Price when block interact mode is not public. Default: 90 copper.")
+                    .defineInRange("blockInteractProtectionPrice", 90L, 0L, Long.MAX_VALUE);
 
             blockEditProtectionPrice = builder
-                    .comment("Price when block edit mode is not public. Default: 100 copper.")
-                    .defineInRange("blockEditProtectionPrice", 100L, 0L, Long.MAX_VALUE);
+                    .comment("Price when block edit mode is not public. Default: 120 copper.")
+                    .defineInRange("blockEditProtectionPrice", 120L, 0L, Long.MAX_VALUE);
 
             entityInteractProtectionPrice = builder
-                    .comment("Price when entity interact mode is not public. Default: 100 copper.")
-                    .defineInRange("entityInteractProtectionPrice", 100L, 0L, Long.MAX_VALUE);
+                    .comment("Price when entity interact mode is not public. Default: 85 copper.")
+                    .defineInRange("entityInteractProtectionPrice", 85L, 0L, Long.MAX_VALUE);
 
             builder.pop();
             builder.comment("War declarations between claim teams (teams or solo players with claimed chunks)").push("war");
@@ -149,11 +149,11 @@ public final class LcClaimEconomyConfig {
 
             warOutgoingCostMultiplier = builder
                     .comment("Flat multiplier x for outgoing war cost. Declaring war on a team costs x * their base upkeep per period, regardless of how many wars you have declared.")
-                    .defineInRange("warOutgoingCostMultiplier", 2.0D, 0.0D, 100.0D);
+                    .defineInRange("warOutgoingCostMultiplier", 2.5D, 0.0D, 100.0D);
 
             warCostMultiplier = builder
-                    .comment("Incoming war exponent l. With base upkeep b and k incoming wars, the incoming surcharge is b * sum(l^n for n=0..k-1). First incoming war uses l^0 = 1.")
-                    .defineInRange("warCostMultiplier", 1.2D, 1.0D, 100.0D);
+                    .comment("Incoming war step s. With base upkeep b and k incoming wars, the incoming surcharge is b * (1 + k * s). Each additional incoming war adds a flat s of base upkeep rather than compounding.")
+                    .defineInRange("warCostMultiplier", 0.35D, 0.0D, 100.0D);
 
             warDeclarationWindowEnabled = builder
                     .comment("If true, new wars can only be declared during a recurring weekly window (e.g. weekends only). "

@@ -1,0 +1,22 @@
+/* Shared design tokens for the Claim Economy web pages (leaderboard + dashboard).
+   Only variables that were byte-identical between both pages live here - each
+   page's own <style> still declares its own extra tokens and every
+   component-level rule (.card, table, etc.), since those turned out to have
+   small but real per-page differences (padding, font-size, margin) that must
+   not be merged without changing how either page actually renders. */
+:root {
+  --bg: #1B2029;
+  --bg-2: #232A38;
+  --panel: rgba(59, 66, 82, 0.5);
+  --panel-alt: rgba(67, 76, 94, 0.55);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-soft: rgba(255, 255, 255, 0.06);
+  --text: #ECEFF4;
+  --text-muted: #D8DEE9;
+  --text-dim: #8892A6;
+  --accent: #88C0D0;
+  --accent-deep: #5E81AC;
+  --glow-teal: rgba(136, 192, 208, 0.22);
+  --glow-blue: rgba(94, 129, 172, 0.28);
+  --glow-purple: rgba(180, 142, 173, 0.16);
+}

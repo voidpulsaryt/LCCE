@@ -5,8 +5,8 @@ import com.mojang.brigadier.context.CommandContext;
 import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
-import dev.voidpulsar.lc_claim_economy.service.WarService;
+import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
+import dev.voidpulsar.lc_claim_economy.service.ConflictService;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
@@ -40,7 +40,7 @@ public final class WarPeacefulCommand {
             return 0;
         }
 
-        String key = WarService.isPeaceful(player.server, team.getTeamId())
+        String key = ConflictService.isPeaceful(player.server, team.getTeamId())
                 ? "message.lc_claim_economy.war_peaceful_status_on"
                 : "message.lc_claim_economy.war_peaceful_status_off";
         player.displayClientMessage(Component.translatable(key), false);
@@ -55,12 +55,12 @@ public final class WarPeacefulCommand {
             return 0;
         }
 
-        if (!BankAccountHelper.canPurchaseForTeam(team, player.getUUID())) {
+        if (!BankLedgerAccess.canPurchaseForTeam(team, player.getUUID())) {
             player.displayClientMessage(Component.translatable("message.lc_claim_economy.war_denied"), false);
             return 0;
         }
 
-        boolean applied = WarService.setPeaceful(player.server, team.getTeamId(), peaceful);
+        boolean applied = ConflictService.setPeaceful(player.server, team.getTeamId(), peaceful);
         if (!applied) {
             player.displayClientMessage(Component.translatable("message.lc_claim_economy.war_peaceful_blocked_active_war"), false);
             return 0;

@@ -17,11 +17,11 @@ import java.util.UUID;
  * toggles the {@link PlayerConfigOptions#FORCELOAD} option on it.
  * <p>
  * OP&C has no team-level "protection locked" switch like FTB Chunks does
- * (see {@code ProtectionService} on the FTB side); {@code FORCELOAD} is the
+ * (see {@code SafeguardEnforcementService} on the FTB side); {@code FORCELOAD} is the
  * closest per-owner equivalent exposed by its public config API, so
- * {@link OpcUpkeepService} toggles it off in place of a real protection
+ * {@link OpcBillingCycleService} toggles it off in place of a real protection
  * lock when upkeep can't be paid, and restores it once the owner's balance
- * recovers. {@link OpcProtectionPricing} reads the same resolved config to
+ * recovers. {@link OpcSafeguardPricing} reads the same resolved config to
  * price protection upkeep.
  */
 final class OpcPlayerConfigAccess {

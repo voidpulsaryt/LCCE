@@ -15,9 +15,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * Adds a button to the FTB Chunks map/claim screen itself that opens the same
  * {@link ClaimBreakdownScreen} otherwise only reachable via the emerald button
- * on the My Team screen. This mirrors {@code MyTeamScreenMixin}'s approach,
+ * on the My Team screen. This mirrors {@code TeamHubScreenMixin}'s approach,
  * but is injected via {@code onInit} (the same confirmed-working injection
- * point already used by {@code ChunkScreenMixin}) rather than addWidgets/
+ * point already used by {@code ClaimMapScreenMixin}) rather than addWidgets/
  * alignWidgets, since those method names are not confirmed for this screen.
  * <p>
  * The button is placed at a fixed, self-computed position in the top-left

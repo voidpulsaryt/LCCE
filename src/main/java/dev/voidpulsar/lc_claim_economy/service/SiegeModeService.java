@@ -26,7 +26,7 @@ public final class SiegeModeService {
      * not per-attacker.
      */
     public static boolean explosionsBypassed(ClaimedChunk chunk) {
-        if (!LcClaimEconomyConfig.SERVER.siegeModeEnabled.get() || !WarService.isEnabled()) {
+        if (!LcClaimEconomyConfig.SERVER.siegeModeEnabled.get() || !ConflictService.isEnabled()) {
             return false;
         }
         Team team = chunk.getTeamData().getTeam();

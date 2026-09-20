@@ -21,7 +21,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 /**
- * OP&C equivalent of {@link LcTeamSyncService}. Reuses the same
+ * OP&C equivalent of {@link CurrencyTeamLinkService}. Reuses the same
  * {@link LcClaimEconomySavedData} link storage as FTB parties, since it is
  * already keyed purely by a UUID - here, the OP&C party's own ID rather
  * than an FTB team ID. FTB and OP&C party UUIDs share no meaningful
@@ -30,7 +30,7 @@ import java.util.stream.Stream;
  * Covers bank account creation and owner/admin/member role sync; periodic
  * protection (force-load + land/build) upkeep billing against the linked
  * LC team account is handled separately by
- * {@code dev.voidpulsar.lc_claim_economy.opc.OpcUpkeepService}. OP&C
+ * {@code dev.voidpulsar.lc_claim_economy.opc.OpcBillingCycleService}. OP&C
  * parties never participate in wars - out of scope by design, not just
  * missing.
  */
@@ -41,7 +41,7 @@ public final class OpcPartySyncService {
     }
 
     public static void ensureLinked(MinecraftServer server, IServerPartyAPI party) {
-        if (LcTeamAccess.cache() == null) {
+        if (CurrencyTeamAccess.cache() == null) {
             return;
         }
 
@@ -101,10 +101,10 @@ public final class OpcPartySyncService {
             return;
         }
 
-        io.github.lightman314.lightmanscurrency.common.data.types.TeamDataCache cache = LcTeamAccess.cache();
+        io.github.lightman314.lightmanscurrency.common.data.types.TeamDataCache cache = CurrencyTeamAccess.cache();
         if (cache != null) {
             long lcTeamId = entry.lcTeamId();
-            LcTeamDeletionGuard.runAllowed(() -> cache.removeTeam(lcTeamId));
+            CurrencyTeamPurgeGuard.runAllowed(() -> cache.removeTeam(lcTeamId));
         }
         data.removeLink(partyId);
         LcClaimEconomy.LOGGER.info("Removed LC team {} for deleted OP&C party {}", entry.lcTeamId(), partyId);
@@ -130,7 +130,7 @@ public final class OpcPartySyncService {
     ) {
         String name = truncateName(party.getDefaultName());
         PlayerReference ownerRef = playerRef(server, party.getOwner().getUUID(), party.getOwner().getUsername());
-        return LcTeamAccess.registerTeam(ownerRef, name);
+        return CurrencyTeamAccess.registerTeam(ownerRef, name);
     }
 
     private static void syncTeamState(
@@ -141,12 +141,12 @@ public final class OpcPartySyncService {
         IPartyMemberAPI owner = party.getOwner();
         PlayerReference ownerRef = playerRef(server, owner.getUUID(), owner.getUsername());
         if (!ownerRef.is(lcTeam.getOwner())) {
-            LcTeamAccess.setOwner(lcTeam, ownerRef);
+            CurrencyTeamAccess.setOwner(lcTeam, ownerRef);
         }
 
         String name = truncateName(party.getDefaultName());
         if (!name.equals(lcTeam.getName())) {
-            LcTeamAccess.setName(lcTeam, name);
+            CurrencyTeamAccess.setName(lcTeam, name);
         }
 
         syncMembers(server, party, lcTeam);
@@ -179,8 +179,8 @@ public final class OpcPartySyncService {
             }
         }
 
-        List<PlayerReference> admins = LcTeamAccess.admins(lcTeam);
-        List<PlayerReference> members = LcTeamAccess.members(lcTeam);
+        List<PlayerReference> admins = CurrencyTeamAccess.admins(lcTeam);
+        List<PlayerReference> members = CurrencyTeamAccess.members(lcTeam);
 
         for (PlayerReference admin : List.copyOf(admins)) {
             if (!targetAdmins.contains(admin.id)) {
@@ -217,7 +217,7 @@ public final class OpcPartySyncService {
         if (ownerPlayer != null) {
             lcTeam.createBankAccount(ownerPlayer);
         } else {
-            LcTeamAccess.createBankAccount(lcTeam);
+            CurrencyTeamAccess.createBankAccount(lcTeam);
         }
     }
 

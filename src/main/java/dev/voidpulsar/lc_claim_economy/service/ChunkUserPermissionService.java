@@ -7,7 +7,7 @@ import dev.ftb.mods.ftbchunks.api.Protection;
 import dev.ftb.mods.ftblibrary.math.ChunkDimPos;
 import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
-import dev.voidpulsar.lc_claim_economy.data.ChunkPosKey;
+import dev.voidpulsar.lc_claim_economy.data.ChunkCoordKey;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.network.ChunkUserPermissionEntry;
 import dev.voidpulsar.lc_claim_economy.network.SyncChunkUserPermsPayload;
@@ -39,7 +39,7 @@ public final class ChunkUserPermissionService {
 
         ChunkDimPos pos;
         try {
-            pos = ChunkPosKey.toChunkDimPos(chunkKey);
+            pos = ChunkCoordKey.toChunkDimPos(chunkKey);
         } catch (RuntimeException ex) {
             PacketDistributor.sendToPlayer(player, SyncChunkUserPermsPayload.empty(chunkKey));
             return;
@@ -52,7 +52,7 @@ public final class ChunkUserPermissionService {
         }
 
         Team ownerTeam = chunk.getTeamData().getTeam();
-        String normalizedKey = ChunkPosKey.encode(chunk.getPos());
+        String normalizedKey = ChunkCoordKey.encode(chunk.getPos());
         boolean canManage = canManageChunkPermissions(player, ownerTeam);
 
         LcClaimEconomySavedData data = LcClaimEconomySavedData.get(server);
@@ -92,7 +92,7 @@ public final class ChunkUserPermissionService {
 
         ChunkDimPos pos;
         try {
-            pos = ChunkPosKey.toChunkDimPos(chunkKey);
+            pos = ChunkCoordKey.toChunkDimPos(chunkKey);
         } catch (RuntimeException ex) {
             actor.displayClientMessage(Component.translatable("message.lc_claim_economy.chunk_user_perm_invalid_chunk"), false);
             return;
@@ -110,7 +110,7 @@ public final class ChunkUserPermissionService {
             return;
         }
 
-        String normalizedKey = ChunkPosKey.encode(chunk.getPos());
+        String normalizedKey = ChunkCoordKey.encode(chunk.getPos());
         int sanitized = ChunkPermissionFlags.sanitize(flags);
 
         LcClaimEconomySavedData data = LcClaimEconomySavedData.get(server);
@@ -169,7 +169,7 @@ public final class ChunkUserPermissionService {
         }
 
         MinecraftServer server = player.server;
-        String key = ChunkPosKey.encode(chunk.getPos());
+        String key = ChunkCoordKey.encode(chunk.getPos());
         LcClaimEconomySavedData data = LcClaimEconomySavedData.get(server);
         int flags = data.getChunkUserPermissionFlags(team.getTeamId(), key, player.getUUID())
             | data.getChunkAllPlayerPermissionFlags(team.getTeamId(), key);

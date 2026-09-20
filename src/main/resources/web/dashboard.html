@@ -4,29 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Claim Economy Dashboard</title>
+<link rel="stylesheet" href="/web/shared.css">
 <style>
   :root {
-    --bg: #1B2029;
-    --bg-2: #232A38;
-    --panel: rgba(59, 66, 82, 0.5);
     --panel-solid: #333B4B;
-    --panel-alt: rgba(67, 76, 94, 0.55);
     --panel-raised: #4C566A;
-    --border: rgba(255, 255, 255, 0.08);
-    --border-soft: rgba(255, 255, 255, 0.06);
-    --text: #ECEFF4;
-    --text-muted: #D8DEE9;
-    --text-dim: #8892A6;
-    --accent: #88C0D0;
     --accent-strong: #8FBCBB;
-    --accent-deep: #5E81AC;
     --aurora-purple: #B48EAD;
     --good: #A3BE8C;
     --warn: #EBCB8B;
     --bad: #BF616A;
-    --glow-teal: rgba(136, 192, 208, 0.22);
-    --glow-blue: rgba(94, 129, 172, 0.28);
-    --glow-purple: rgba(180, 142, 173, 0.16);
     --font-body: "Segoe UI", Roboto, Arial, sans-serif;
     --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   }
@@ -588,7 +575,10 @@
   <footer>Claim Economy dashboard &middot; session active</footer>
 </div>
 
+<script src="/web/shared.js"></script>
 <script>
+const { formatCopper, formatMinutes, escapeHtml, fetchTheme } = LcceShared;
+
 function applyTheme(theme) {
   if (theme.accentColor) {
     document.documentElement.style.setProperty("--accent", theme.accentColor);
@@ -610,31 +600,6 @@ function applyTheme(theme) {
     style.textContent = theme.customCss;
     document.head.appendChild(style);
   }
-}
-
-const COIN_NAMES = ["Copper", "Iron", "Gold", "Emerald", "Diamond", "Netherite"];
-function formatCopper(amount) {
-  if (!amount || amount <= 0) return "0c";
-  let parts = [];
-  let remaining = amount;
-  for (let i = COIN_NAMES.length - 1; i >= 0; i--) {
-    const unit = Math.pow(10, i);
-    const count = Math.floor(remaining / unit);
-    if (count > 0) { parts.push(count + " " + COIN_NAMES[i][0]); remaining -= count * unit; }
-  }
-  return parts.length ? parts.join(" ") : amount + "c";
-}
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str == null ? "" : String(str);
-  return div.innerHTML;
-}
-
-function formatMinutes(minutes) {
-  if (!minutes || minutes <= 0) return "?";
-  if (minutes % 1440 === 0) return (minutes / 1440) + "d";
-  if (minutes % 60 === 0) return (minutes / 60) + "h";
-  return minutes + "m";
 }
 
 function formatDuration(totalSeconds) {
@@ -953,12 +918,8 @@ document.getElementById("logout-btn").addEventListener("click", async () => {
 });
 
 async function loadTheme() {
-  try {
-    const result = await api("/api/theme");
-    if (result.ok && result.body) {
-      applyTheme(result.body);
-    }
-  } catch (e) { /* keep built-in defaults */ }
+  const theme = await fetchTheme();
+  if (theme) applyTheme(theme);
 }
 
 (async function init() {

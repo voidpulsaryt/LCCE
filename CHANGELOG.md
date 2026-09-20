@@ -34,6 +34,25 @@ All notable changes to this mod are documented here.
   only; there is no OP&C claim overlay yet, and no Dynmap equivalent since
   Dynmap has no NeoForge build for this Minecraft version.
 
+### Changed
+
+- **Balance retuning** — claim price, all six protection prices, the unclaim
+  refund ratio, force-load upkeep price, and the upkeep period now default to
+  different values than previous releases (e.g. `claimPrice` 10,000 → 7,500
+  copper, `unclaimRefundRatio` 0.8 → 0.7, `upkeepPeriodMinutes` 60 → 45). Pure
+  default-value changes: a server with an existing generated config is
+  unaffected until that value is edited or the config is regenerated.
+- **Incoming war cost formula changed from geometric to linear.** With `k`
+  incoming wars and base upkeep `b`, the incoming surcharge used to compound
+  as `b * sum(l^n for n=0..k-1)` (each additional attacker multiplying the
+  prior total). It's now `b * k * s` — every incoming war adds the same flat
+  `s` fraction of base upkeep, so a team facing many attackers pays
+  proportionally rather than exponentially more. `warCostMultiplier` is
+  reinterpreted as this flat step `s` (default lowered from `1.2` to `0.35`
+  to fit the new scale) and `warOutgoingCostMultiplier` default raised
+  `2.0` → `2.5` to compensate. Outgoing war cost is unchanged (flat,
+  independent of war count).
+
 ### Removed
 
 - **Bank Dashboard screen** (`/lcce dashboard`, default-**B** keybind, added

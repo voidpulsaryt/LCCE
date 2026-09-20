@@ -7,7 +7,7 @@ import xaero.pac.common.server.player.config.api.v2.IPlayerConfigOptionSpecAPI;
 import xaero.pac.common.server.player.config.api.v2.PlayerConfigOptions;
 
 /**
- * OP&C equivalent of the FTB {@code ProtectionPricing}, adapted to OP&C's
+ * OP&C equivalent of the FTB {@code SafeguardPricing}, adapted to OP&C's
  * per-owner protection model. FTB Chunks has a handful of team-level
  * public/private toggles; OP&C instead has per-owner "exceptions" that name
  * which player group (Nobody/Party/Allies/Everyone/a custom group) is let
@@ -27,8 +27,8 @@ import xaero.pac.common.server.player.config.api.v2.PlayerConfigOptions;
  * block-edit and block-interact ("item use") exceptions are priced, since
  * those are the only two land protections FTB Chunks itself exposes.
  */
-final class OpcProtectionPricing {
-    private OpcProtectionPricing() {
+final class OpcSafeguardPricing {
+    private OpcSafeguardPricing() {
     }
 
     static long calculateBuildBasePrice(IPlayerConfigAPI config) {

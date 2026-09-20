@@ -17,7 +17,7 @@ import java.util.UUID;
  * owner ID (a plain player UUID for solo claims, or the party's own UUID
  * for party-owned claims - OP&C uses the party ID as the claim "owner" in
  * that case, see {@link xaero.pac.common.claims.player.api.IPlayerClaimInfoAPI#isPartyOwned()}).
- * Shared by {@link OpcClaimEconomyListener} and {@link OpcUpkeepService} so
+ * Shared by {@link OpcClaimEconomyListener} and {@link OpcBillingCycleService} so
  * both bill against the same account.
  */
 public final class OpcAccountResolver {

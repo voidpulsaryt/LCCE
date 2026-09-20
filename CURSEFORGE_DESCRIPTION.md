@@ -4,6 +4,7 @@
 
 > **Minecraft:** 1.21.1 · **Loader:** NeoForge · **Side:** Both (required on server and client)
 > Also available on [Modrinth](https://modrinth.com/mod/lcce). Full docs on the [wiki](https://github.com/voidpulsarteam/LCCE/wiki).
+> Forked from [LC: FTB Chunks](https://www.curseforge.com/minecraft/mc-mods/lc-ftb-chunks).
 
 ## Played live on Wattz
 
@@ -48,8 +49,8 @@ Lightman's Currency must match exactly; the claim backends just need to meet the
 - **Bounties** *(FTB)* — escrow money on a player's or team's head, collectible in PvP.
 - **Player marketplace** *(FTB)* — list, browse, and buy claimed chunks from other players.
 - **Player Warps** *(FTB)* — personal teleport points set inside your own claimed land, shareable with a GUI, aliases, per-warp tolls, and claim-tied auto-cleanup.
-- **Bank Dashboard** — an in-game balance/upkeep screen, on either backend, opened anywhere with **B** or `/lcce dashboard`. Transactions show up in Lightman's Currency's own account history.
-- **Optional web leaderboard + dashboard** — a public read-only leaderboard, plus (FTB) a login-gated browser dashboard for managing land, protections, and wars.
+- **`/lcce upkeep_details`** — shows the time remaining until your next upkeep charge (plus a full cost breakdown on FTB), so you always know when you'll be billed. Transactions show up in Lightman's Currency's own account history.
+- **Optional web leaderboard + dashboard** — a public read-only leaderboard, plus (FTB) a login-gated browser dashboard for managing land, protections, and wars, with a live "next charge" countdown and an optional embedded BlueMap view of your claim.
 - **Pioneer Bonus & claim milestones** *(FTB)* — a one-time reward for the server's first claim, plus advancement milestones usable as FTB Quests hooks with no FTB Quests dependency.
 
 Full detail on every system: [Features wiki page](https://github.com/voidpulsarteam/LCCE/wiki/Features).
@@ -71,9 +72,9 @@ All commands live under `/lcce` — full reference with permissions on the [Comm
 /lcce bounty player|team|list <...>
 /lcce market sell|cancel|buy|browse
 /lcce warp [set|delete|public|alias|list|tp|tpto] <...>
-/lcce dashboard
 /lcce war peaceful [on|off]
 /lcce opc_chunktype land|build|status
+/lcce opc_upkeep_details
 /lcce web login
 ```
 

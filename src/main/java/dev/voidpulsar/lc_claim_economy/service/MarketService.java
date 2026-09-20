@@ -8,13 +8,13 @@ import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
 import dev.ftb.mods.ftblibrary.math.ChunkDimPos;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
-import dev.voidpulsar.lc_claim_economy.bank.ClaimBatchContext;
-import dev.voidpulsar.lc_claim_economy.data.ChunkPosKey;
+import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
+import dev.voidpulsar.lc_claim_economy.bank.ClaimTransferContext;
+import dev.voidpulsar.lc_claim_economy.data.ChunkCoordKey;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
-import dev.voidpulsar.lc_claim_economy.teams.FtbTeamCatalog;
-import dev.voidpulsar.lc_claim_economy.util.MoneyMessageUtil;
-import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
+import dev.voidpulsar.lc_claim_economy.teams.TeamRegistry;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
 import io.github.lightman314.lightmanscurrency.api.money.value.MoneyValue;
 import net.minecraft.ChatFormatting;
@@ -32,8 +32,8 @@ import java.util.Map;
  * Player-to-player chunk sales: list the chunk you're standing in for a
  * price, another player buys it by standing in it and paying that price
  * directly to you. Ownership transfers via a suppressed claim/unclaim pair
- * (see {@link ClaimBatchContext#runAsInternalTransfer}) so {@link
- * dev.voidpulsar.lc_claim_economy.handler.ChunkClaimHandler} doesn't also
+ * (see {@link ClaimTransferContext#runAsInternalTransfer}) so {@link
+ * dev.voidpulsar.lc_claim_economy.handler.ChunkAcquisitionHandler} doesn't also
  * charge the buyer the normal claim price or pay the seller an unclaim
  * refund on top of the agreed sale price.
  * <p>
@@ -61,7 +61,7 @@ public final class MarketService {
         if (team == null) {
             return;
         }
-        if (!BankAccountHelper.canPurchaseForTeam(team, player.getUUID())) {
+        if (!BankLedgerAccess.canPurchaseForTeam(team, player.getUUID())) {
             player.displayClientMessage(Component.translatable("message.lc_claim_economy.market.rank_denied"), false);
             return;
         }
@@ -74,13 +74,13 @@ public final class MarketService {
             return;
         }
 
-        String chunkKey = ChunkPosKey.encode(pos);
+        String chunkKey = ChunkCoordKey.encode(pos);
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(source.getServer());
         savedData.setMarketListing(chunkKey, new LcClaimEconomySavedData.MarketListing(
                 team.getId(), team.getName().getString(), priceCopper, System.currentTimeMillis()));
 
         player.displayClientMessage(Component.translatable("message.lc_claim_economy.market.listed",
-                MoneyMessageUtil.formatValue(MoneyUtil.fromCopper(priceCopper))), false);
+                CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(priceCopper))), false);
     }
 
     public static void cancel(CommandSourceStack source) {
@@ -91,7 +91,7 @@ public final class MarketService {
 
         Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
         ChunkDimPos pos = new ChunkDimPos(player.level(), player.blockPosition());
-        String chunkKey = ChunkPosKey.encode(pos);
+        String chunkKey = ChunkCoordKey.encode(pos);
 
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(source.getServer());
         LcClaimEconomySavedData.MarketListing listing = savedData.getMarketListing(chunkKey);
@@ -112,7 +112,7 @@ public final class MarketService {
         MinecraftServer server = source.getServer();
 
         ChunkDimPos pos = new ChunkDimPos(buyer.level(), buyer.blockPosition());
-        String chunkKey = ChunkPosKey.encode(pos);
+        String chunkKey = ChunkCoordKey.encode(pos);
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         LcClaimEconomySavedData.MarketListing listing = savedData.getMarketListing(chunkKey);
         if (listing == null) {
@@ -120,7 +120,7 @@ public final class MarketService {
             return;
         }
 
-        Team sellerTeam = FtbTeamCatalog.resolve(server, listing.sellerTeamId());
+        Team sellerTeam = TeamRegistry.resolve(server, listing.sellerTeamId());
         ClaimedChunk claimed = FTBChunksAPI.api().getManager().getChunk(pos);
         if (sellerTeam == null || claimed == null || claimed.getTeamData().getTeam() == null
                 || !claimed.getTeamData().getTeam().getId().equals(sellerTeam.getId())) {
@@ -138,7 +138,7 @@ public final class MarketService {
             buyer.displayClientMessage(Component.translatable("message.lc_claim_economy.market.no_self"), false);
             return;
         }
-        if (!BankAccountHelper.canPurchaseForTeam(buyerTeam, buyer.getUUID())) {
+        if (!BankLedgerAccess.canPurchaseForTeam(buyerTeam, buyer.getUUID())) {
             buyer.displayClientMessage(Component.translatable("message.lc_claim_economy.market.rank_denied"), false);
             return;
         }
@@ -149,12 +149,12 @@ public final class MarketService {
             return;
         }
 
-        MoneyValue price = MoneyUtil.fromCopper(listing.priceCopper());
-        BankAccountHelper.ensurePartyAccountExists(server, buyerTeam);
-        IBankAccount buyerAccount = BankAccountHelper.getAccountForPlayer(server, buyer);
+        MoneyValue price = CurrencyAmounts.fromCopper(listing.priceCopper());
+        BankLedgerAccess.ensurePartyAccountExists(server, buyerTeam);
+        IBankAccount buyerAccount = BankLedgerAccess.getAccountForPlayer(server, buyer);
         if (!buyerAccount.getMoneyStorage().containsValue(price)) {
             buyer.displayClientMessage(Component.translatable("message.lc_claim_economy.insufficient_funds",
-                    MoneyMessageUtil.formatValue(price), MoneyMessageUtil.formatBalance(buyerAccount)), false);
+                    CurrencyTextFormat.formatValue(price), CurrencyTextFormat.formatBalance(buyerAccount)), false);
             return;
         }
 
@@ -164,18 +164,18 @@ public final class MarketService {
         CommandSourceStack serverSource = server.createCommandSourceStack().withSuppressedOutput();
 
         ClaimResult[] unclaimResult = new ClaimResult[1];
-        ClaimBatchContext.runAsInternalTransfer(() -> unclaimResult[0] = sellerData.unclaim(serverSource, pos, true, true));
+        ClaimTransferContext.runAsInternalTransfer(() -> unclaimResult[0] = sellerData.unclaim(serverSource, pos, true, true));
         if (unclaimResult[0] == null || !unclaimResult[0].isSuccess()) {
             buyer.displayClientMessage(Component.translatable("message.lc_claim_economy.market.transfer_failed"), false);
             return;
         }
 
         ClaimResult[] claimResult = new ClaimResult[1];
-        ClaimBatchContext.runAsInternalTransfer(() -> claimResult[0] = buyerData.claim(serverSource, pos, true));
+        ClaimTransferContext.runAsInternalTransfer(() -> claimResult[0] = buyerData.claim(serverSource, pos, true));
         if (claimResult[0] == null || !claimResult[0].isSuccess()) {
             // Try to give the chunk back to the seller so it isn't left unclaimed.
             ClaimResult[] rollback = new ClaimResult[1];
-            ClaimBatchContext.runAsInternalTransfer(() -> rollback[0] = sellerData.claim(serverSource, pos, true));
+            ClaimTransferContext.runAsInternalTransfer(() -> rollback[0] = sellerData.claim(serverSource, pos, true));
             if (rollback[0] == null || !rollback[0].isSuccess()) {
                 LcClaimEconomy.LOGGER.error("Market transfer failed and rollback also failed - chunk {} may be left unclaimed", chunkKey);
             }
@@ -183,19 +183,19 @@ public final class MarketService {
             return;
         }
 
-        BankAccountHelper.ensurePartyAccountExists(server, sellerTeam);
-        IBankAccount sellerAccount = BankAccountHelper.getAccountForTeam(server, sellerTeam);
+        BankLedgerAccess.ensurePartyAccountExists(server, sellerTeam);
+        IBankAccount sellerAccount = BankLedgerAccess.getAccountForTeam(server, sellerTeam);
         buyerAccount.withdrawMoney(price);
         sellerAccount.depositMoney(price);
 
         savedData.removeMarketListing(chunkKey);
         savedData.recordMarketSale(listing.priceCopper());
-        BankAccountHelper.logTransaction(sellerAccount, true, price, Component.translatable("message.lc_claim_economy.ledger.market_sale"));
-        BankAccountHelper.logTransaction(buyerAccount, false, price, Component.translatable("message.lc_claim_economy.ledger.market_purchase"));
+        BankLedgerAccess.logTransaction(sellerAccount, true, price, Component.translatable("message.lc_claim_economy.ledger.market_sale"));
+        BankLedgerAccess.logTransaction(buyerAccount, false, price, Component.translatable("message.lc_claim_economy.ledger.market_purchase"));
 
-        Component priceText = MoneyMessageUtil.formatValue(price);
+        Component priceText = CurrencyTextFormat.formatValue(price);
         buyer.displayClientMessage(Component.translatable("message.lc_claim_economy.market.bought", priceText), false);
-        ClaimPriceSync.syncToPlayer(buyer);
+        ClaimPricingBroadcast.syncToPlayer(buyer);
         notifySeller(server, sellerTeam, Component.translatable("message.lc_claim_economy.market.sold", buyer.getDisplayName(), priceText));
     }
 
@@ -219,14 +219,14 @@ public final class MarketService {
                 break;
             }
             LcClaimEconomySavedData.MarketListing listing = entry.getValue();
-            Team sellerTeam = FtbTeamCatalog.resolve(server, listing.sellerTeamId());
+            Team sellerTeam = TeamRegistry.resolve(server, listing.sellerTeamId());
             Component sellerName = sellerTeam != null ? sellerTeam.getName() : Component.literal(listing.sellerName());
-            var dimPos = ChunkPosKey.toChunkDimPos(entry.getKey());
+            var dimPos = ChunkCoordKey.toChunkDimPos(entry.getKey());
             message.append("\n").append(Component.translatable(
                     "message.lc_claim_economy.market.browse_line",
                     dimPos.x(), dimPos.z(),
                     Component.literal(dimPos.dimension().location().getPath()),
-                    MoneyMessageUtil.formatValue(MoneyUtil.fromCopper(listing.priceCopper())),
+                    CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(listing.priceCopper())),
                     sellerName.copy().withStyle(ChatFormatting.AQUA)
             ));
             shown++;
@@ -243,7 +243,7 @@ public final class MarketService {
     private static void notifySeller(MinecraftServer server, Team sellerTeam, Component message) {
         for (ServerPlayer member : sellerTeam.getOnlineMembers()) {
             member.displayClientMessage(message, false);
-            ClaimPriceSync.syncToPlayer(member);
+            ClaimPricingBroadcast.syncToPlayer(member);
         }
     }
 }

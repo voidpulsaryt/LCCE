@@ -1,7 +1,7 @@
 package dev.voidpulsar.lc_claim_economy.opc;
 
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
 import dev.voidpulsar.lc_claim_economy.web.LeaderboardEntry;
 import io.github.lightman314.lightmanscurrency.api.misc.player.PlayerReference;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
@@ -46,7 +46,7 @@ public final class OpcWebDataSource {
         String name = partyOwned ? partyName(server, owner) : playerName(server, owner);
 
         IBankAccount account = OpcAccountResolver.resolveAccount(server, owner, partyOwned);
-        long balance = account != null ? MoneyUtil.totalCopper(account) : 0L;
+        long balance = account != null ? CurrencyAmounts.totalCopper(account) : 0L;
 
         return new LeaderboardEntry(name, balance, info.getClaimCount());
     }

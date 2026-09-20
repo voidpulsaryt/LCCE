@@ -9,13 +9,13 @@ import dev.ftb.mods.ftbteams.api.property.TeamProperty;
 import dev.ftb.mods.ftbteams.api.property.TeamPropertyCollection;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
-import dev.voidpulsar.lc_claim_economy.data.TeamPendingState;
-import dev.voidpulsar.lc_claim_economy.network.PendingStateSync;
-import dev.voidpulsar.lc_claim_economy.service.ClaimVisibilityService;
-import dev.voidpulsar.lc_claim_economy.service.ProtectionRollbackService;
-import dev.voidpulsar.lc_claim_economy.service.ProtectionPricing;
-import dev.voidpulsar.lc_claim_economy.service.ProtectionService;
-import dev.voidpulsar.lc_claim_economy.service.WarStateSync;
+import dev.voidpulsar.lc_claim_economy.data.TeamQueuedChanges;
+import dev.voidpulsar.lc_claim_economy.network.QueuedStateBroadcast;
+import dev.voidpulsar.lc_claim_economy.service.ClaimVisibilityRules;
+import dev.voidpulsar.lc_claim_economy.service.SafeguardRollbackService;
+import dev.voidpulsar.lc_claim_economy.service.SafeguardPricing;
+import dev.voidpulsar.lc_claim_economy.service.SafeguardEnforcementService;
+import dev.voidpulsar.lc_claim_economy.service.ConflictSyncCoordinator;
 import dev.voidpulsar.lc_claim_economy.teams.LandProperties;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -28,9 +28,9 @@ public class TeamPropertyHandler {
     }
 
     private void onTeamPropertiesChanged(TeamPropertiesChangedEvent event) {
-        if (ProtectionService.isReverting() || ProtectionService.isApplying()) {
+        if (SafeguardEnforcementService.isReverting() || SafeguardEnforcementService.isApplying()) {
             LcClaimEconomy.LOGGER.info("[PendingDebug] PROPERTIES_CHANGED ignored (reverting={}, applying={})",
-                    ProtectionService.isReverting(), ProtectionService.isApplying());
+                    SafeguardEnforcementService.isReverting(), SafeguardEnforcementService.isApplying());
             return;
         }
 
@@ -46,24 +46,24 @@ public class TeamPropertyHandler {
 
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         TeamPropertyCollection previous = event.getPreviousProperties();
-        TeamPendingState pendingState = savedData.getPendingState(team.getTeamId());
-        ProtectionPricing.ChunkCounts counts = ProtectionPricing.countBillableChunks(server, team);
+        TeamQueuedChanges pendingState = savedData.getPendingState(team.getTeamId());
+        SafeguardPricing.ChunkCounts counts = SafeguardPricing.countBillableChunks(server, team);
 
-        ProtectionService.tryUnlock(server, team);
+        SafeguardEnforcementService.tryUnlock(server, team);
 
         if (hasPropertyChanged(previous, team, FTBChunksProperties.CLAIM_VISIBILITY)
                 && team.getProperty(FTBChunksProperties.CLAIM_VISIBILITY) != PrivacyMode.PUBLIC) {
             LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: claim_visibility change to {} rejected (always public)",
                     team.getShortName(), team.getProperty(FTBChunksProperties.CLAIM_VISIBILITY));
-            ProtectionService.runReverting(() -> {
+            SafeguardEnforcementService.runReverting(() -> {
                 team.setProperty(FTBChunksProperties.CLAIM_VISIBILITY, PrivacyMode.PUBLIC);
                 team.syncOnePropertyToTeam(FTBChunksProperties.CLAIM_VISIBILITY, PrivacyMode.PUBLIC);
             });
             notifyTeam(team, "message.lc_claim_economy.claim_visibility_locked");
         }
 
-        for (TeamProperty<?> property : ProtectionPricing.PROTECTION_PROPERTIES) {
-            String key = ProtectionPricing.propertyKey(property);
+        for (TeamProperty<?> property : SafeguardPricing.PROTECTION_PROPERTIES) {
+            String key = SafeguardPricing.propertyKey(property);
 
             if (!hasPropertyChanged(previous, team, property)) {
                 // The submitted value matches the live server value. Untouched
@@ -87,12 +87,12 @@ public class TeamPropertyHandler {
             LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: {} changed {} -> {}",
                     team.getShortName(), key, previousValue, newValue);
 
-            if (ProtectionRollbackService.isDismantled(team, property, pendingState)) {
+            if (SafeguardRollbackService.isDismantled(team, property, pendingState)) {
                 pendingState = handleDismantledPropertyChange(server, team, property, pendingState, savedData, newValue);
                 continue;
             }
 
-            String serializedNew = ProtectionPricing.serializePropertyValue(property, newValue);
+            String serializedNew = SafeguardPricing.serializePropertyValue(property, newValue);
             String existingPending = pendingState.pendingProperties().get(key);
 
             if (existingPending != null) {
@@ -105,9 +105,9 @@ public class TeamPropertyHandler {
                 }
 
                 // Replace queued value. Cost-neutral vs the active value → apply immediately.
-                TeamPendingState droppedState = pendingState.withoutPendingProperty(key);
-                long activePrice = ProtectionPricing.calculateProtectionCopper(previous, droppedState.pendingProperties(), counts);
-                long submittedPrice = ProtectionPricing.calculateProtectionCopper(
+                TeamQueuedChanges droppedState = pendingState.withoutPendingProperty(key);
+                long activePrice = SafeguardPricing.calculateProtectionCopper(previous, droppedState.pendingProperties(), counts);
+                long submittedPrice = SafeguardPricing.calculateProtectionCopper(
                         previous, droppedState.withPendingProperty(key, serializedNew).pendingProperties(), counts);
                 if (activePrice == submittedPrice) {
                     pendingState = droppedState;
@@ -129,9 +129,9 @@ public class TeamPropertyHandler {
             // Prices must be calculated from the PREVIOUS property collection:
             // when this event fires the team already carries the new values,
             // so using the team would always yield oldPrice == newPrice.
-            TeamPendingState simulatedState = pendingState.withPendingProperty(key, serializedNew);
-            long oldPrice = ProtectionPricing.calculateProtectionCopper(previous, pendingState.pendingProperties(), counts);
-            long newPrice = ProtectionPricing.calculateProtectionCopper(previous, simulatedState.pendingProperties(), counts);
+            TeamQueuedChanges simulatedState = pendingState.withPendingProperty(key, serializedNew);
+            long oldPrice = SafeguardPricing.calculateProtectionCopper(previous, pendingState.pendingProperties(), counts);
+            long newPrice = SafeguardPricing.calculateProtectionCopper(previous, simulatedState.pendingProperties(), counts);
             LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: {} base price {} -> {}",
                     team.getShortName(), key, oldPrice, newPrice);
 
@@ -155,24 +155,24 @@ public class TeamPropertyHandler {
             notifyProtectionPending(team);
         }
 
-        PendingStateSync.syncTeam(server, team);
-        WarStateSync.onUpkeepFactorsChanged(server, team);
+        QueuedStateBroadcast.syncTeam(server, team);
+        ConflictSyncCoordinator.onUpkeepFactorsChanged(server, team);
     }
 
-    private static TeamPendingState handleDismantledPropertyChange(
+    private static TeamQueuedChanges handleDismantledPropertyChange(
             MinecraftServer server,
             Team team,
             TeamProperty<?> property,
-            TeamPendingState pendingState,
+            TeamQueuedChanges pendingState,
             LcClaimEconomySavedData savedData,
             Object newValue
     ) {
-        String key = ProtectionPricing.propertyKey(property);
-        String serializedNew = ProtectionPricing.serializePropertyValue(property, newValue);
-        ProtectionService.runReverting(() -> ProtectionRollbackService.revertLiveToMinimum(team, property));
+        String key = SafeguardPricing.propertyKey(property);
+        String serializedNew = SafeguardPricing.serializePropertyValue(property, newValue);
+        SafeguardEnforcementService.runReverting(() -> SafeguardRollbackService.revertLiveToMinimum(team, property));
 
-        TeamPendingState updated;
-        if (ProtectionRollbackService.isSerializedMinimum(property, serializedNew)) {
+        TeamQueuedChanges updated;
+        if (SafeguardRollbackService.isSerializedMinimum(property, serializedNew)) {
             updated = pendingState.withoutPendingProperty(key);
             if (pendingState.hasPendingProperty(key)) {
                 notifyTeam(team, "message.lc_claim_economy.protection_pending_cancelled");
@@ -195,16 +195,16 @@ public class TeamPropertyHandler {
     private static boolean shouldQueueProtectionPendingWhenTotalUnchanged(
             TeamProperty<?> property,
             TeamPropertyCollection previous,
-            TeamPendingState pendingState,
-            TeamPendingState simulatedState
+            TeamQueuedChanges pendingState,
+            TeamQueuedChanges simulatedState
     ) {
         if (LandProperties.isLandProperty(property)) {
-            long oldBase = ProtectionPricing.calculateLandBasePrice(previous, pendingState.pendingProperties());
-            long newBase = ProtectionPricing.calculateLandBasePrice(previous, simulatedState.pendingProperties());
+            long oldBase = SafeguardPricing.calculateLandBasePrice(previous, pendingState.pendingProperties());
+            long newBase = SafeguardPricing.calculateLandBasePrice(previous, simulatedState.pendingProperties());
             return oldBase != newBase;
         }
-        long oldBase = ProtectionPricing.calculateBuildBasePrice(previous, pendingState.pendingProperties());
-        long newBase = ProtectionPricing.calculateBuildBasePrice(previous, simulatedState.pendingProperties());
+        long oldBase = SafeguardPricing.calculateBuildBasePrice(previous, pendingState.pendingProperties());
+        long newBase = SafeguardPricing.calculateBuildBasePrice(previous, simulatedState.pendingProperties());
         return oldBase != newBase;
     }
 
@@ -214,7 +214,7 @@ public class TeamPropertyHandler {
 
     private static <T> void revertProperty(MinecraftServer server, Team team, TeamPropertyCollection previous, TeamProperty<T> property) {
         T value = previous.get(property);
-        ProtectionService.runReverting(() -> {
+        SafeguardEnforcementService.runReverting(() -> {
             team.setProperty(property, value);
             // setProperty alone does not sync to clients, and
             // syncOnePropertyToAll is a no-op for protection properties (not
@@ -224,7 +224,7 @@ public class TeamPropertyHandler {
             team.syncOnePropertyToTeam(property, value);
         });
         LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: reverted {} to {} (synced to team)",
-                team.getShortName(), ProtectionPricing.propertyKey(property), value);
+                team.getShortName(), SafeguardPricing.propertyKey(property), value);
     }
 
     private static void notifyProtectionPending(Team team) {

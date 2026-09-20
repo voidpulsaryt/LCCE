@@ -6,12 +6,8 @@ import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
 import net.minecraft.server.MinecraftServer;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executors;
@@ -31,31 +27,44 @@ import java.util.concurrent.atomic.AtomicInteger;
  *   by {@link DashboardApi}, {@link DashboardSessions}, and short-lived
  *   session cookies. FTB Chunks/Teams only.</li>
  * </ul>
+ * Route table and per-endpoint request/response shaping live here; the
+ * transport-level I/O plumbing (reading bodies, writing responses, loading
+ * mod resources) is {@link WebResponses}, and session-cookie handling is
+ * {@link WebSessionCookies} - kept separate so each stays single-purpose.
  */
 public final class EmbeddedWebServer {
     private static final String INDEX_RESOURCE = "/web/index.html";
     private static final String DASHBOARD_RESOURCE = "/web/dashboard.html";
-    private static final String SESSION_COOKIE = "lce_session";
-    private static final int MAX_BODY_BYTES = 8192;
+    private static final String SHARED_CSS_RESOURCE = "/web/shared.css";
+    private static final String SHARED_JS_RESOURCE = "/web/shared.js";
 
     private HttpServer httpServer;
     private byte[] indexHtml;
     private byte[] dashboardHtml;
+    private byte[] sharedCss;
+    private byte[] sharedJs;
 
     public void start(MinecraftServer server) {
         if (!LcClaimEconomyConfig.SERVER.webEnabled.get()) {
             return;
         }
 
-        indexHtml = loadResource(INDEX_RESOURCE);
+        indexHtml = WebResponses.loadResource(INDEX_RESOURCE);
         if (indexHtml == null) {
             LcClaimEconomy.LOGGER.error("Claim Economy web server: could not load {} from mod resources, not starting.", INDEX_RESOURCE);
             return;
         }
 
+        sharedCss = WebResponses.loadResource(SHARED_CSS_RESOURCE);
+        sharedJs = WebResponses.loadResource(SHARED_JS_RESOURCE);
+        if (sharedCss == null || sharedJs == null) {
+            LcClaimEconomy.LOGGER.error("Claim Economy web server: could not load {}/{} from mod resources, not starting.", SHARED_CSS_RESOURCE, SHARED_JS_RESOURCE);
+            return;
+        }
+
         boolean dashboardEnabled = LcClaimEconomyConfig.SERVER.webDashboardEnabled.get();
         if (dashboardEnabled) {
-            dashboardHtml = loadResource(DASHBOARD_RESOURCE);
+            dashboardHtml = WebResponses.loadResource(DASHBOARD_RESOURCE);
             if (dashboardHtml == null) {
                 LcClaimEconomy.LOGGER.error("Claim Economy web server: could not load {}, dashboard disabled for this session.", DASHBOARD_RESOURCE);
                 dashboardEnabled = false;
@@ -70,6 +79,8 @@ public final class EmbeddedWebServer {
             httpServer.createContext("/", this::handleIndex);
             httpServer.createContext("/api/data", exchange -> handleData(exchange, server));
             httpServer.createContext("/api/theme", this::handleTheme);
+            httpServer.createContext("/web/shared.css", exchange -> handleStaticResource(exchange, sharedCss, "text/css; charset=utf-8"));
+            httpServer.createContext("/web/shared.js", exchange -> handleStaticResource(exchange, sharedJs, "application/javascript; charset=utf-8"));
 
             if (dashboardEnabled) {
                 httpServer.createContext("/dashboard", this::handleDashboardPage);
@@ -108,36 +119,44 @@ public final class EmbeddedWebServer {
 
     private void handleIndex(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendPlain(exchange, 405, "Method Not Allowed");
+            WebResponses.sendPlain(exchange, 405, "Method Not Allowed");
             return;
         }
-        sendHtml(exchange, 200, indexHtml);
+        WebResponses.sendResource(exchange, 200, indexHtml, "text/html; charset=utf-8");
     }
 
     private void handleDashboardPage(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendPlain(exchange, 405, "Method Not Allowed");
+            WebResponses.sendPlain(exchange, 405, "Method Not Allowed");
             return;
         }
-        sendHtml(exchange, 200, dashboardHtml);
+        WebResponses.sendResource(exchange, 200, dashboardHtml, "text/html; charset=utf-8");
+    }
+
+    private void handleStaticResource(HttpExchange exchange, byte[] body, String contentType) throws IOException {
+        if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
+            WebResponses.sendPlain(exchange, 405, "Method Not Allowed");
+            return;
+        }
+        WebResponses.sendResource(exchange, 200, body, contentType);
     }
 
     private void handleData(HttpExchange exchange, MinecraftServer server) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendPlain(exchange, 405, "Method Not Allowed");
+            WebResponses.sendPlain(exchange, 405, "Method Not Allowed");
             return;
         }
         try {
-            sendJson(exchange, 200, WebApiJson.buildDataPayload(server));
+            WebResponses.sendJson(exchange, 200, WebApiJson.buildDataPayload(server));
         } catch (Exception e) {
             LcClaimEconomy.LOGGER.error("Claim Economy web server: failed to build /api/data response", e);
-            sendPlain(exchange, 500, "Internal error building leaderboard data");
+            WebResponses.sendPlain(exchange, 500, "Internal error building leaderboard data");
         }
     }
 
     private void handleTheme(HttpExchange exchange) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendPlain(exchange, 405, "Method Not Allowed");
+            WebResponses.sendPlain(exchange, 405, "Method Not Allowed");
             return;
         }
         var config = LcClaimEconomyConfig.SERVER;
@@ -148,68 +167,68 @@ public final class EmbeddedWebServer {
                 .field("customCss", config.webCustomCss.get())
                 .field("dashboardEnabled", config.webDashboardEnabled.get())
                 .build();
-        sendJson(exchange, 200, json);
+        WebResponses.sendJson(exchange, 200, json);
     }
 
     // ---------------- Auth ----------------
 
     private void handleLogin(HttpExchange exchange, MinecraftServer server) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendPlain(exchange, 405, "Method Not Allowed");
+            WebResponses.sendPlain(exchange, 405, "Method Not Allowed");
             return;
         }
-        JsonReader body = JsonReader.parse(readBody(exchange));
+        JsonReader body = JsonReader.parse(WebResponses.readBody(exchange));
         Optional<UUID> playerId = DashboardSessions.LOGIN_CODES.redeem(body.getString("code"));
         if (playerId.isEmpty()) {
-            sendJson(exchange, 401, resultJson(false, "Invalid or expired code."));
+            WebResponses.sendJson(exchange, 401, WebResponses.resultJson(false, "Invalid or expired code."));
             return;
         }
 
         int ttlMinutes = LcClaimEconomyConfig.SERVER.webSessionMinutes.get();
         String token = DashboardSessions.SESSIONS.create(playerId.get(), ttlMinutes);
         exchange.getResponseHeaders().add("Set-Cookie",
-                SESSION_COOKIE + "=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + (ttlMinutes * 60));
-        sendJson(exchange, 200, resultJson(true, "Logged in."));
+                WebSessionCookies.SESSION_COOKIE + "=" + token + "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" + (ttlMinutes * 60));
+        WebResponses.sendJson(exchange, 200, WebResponses.resultJson(true, "Logged in."));
     }
 
     private void handleLogout(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendPlain(exchange, 405, "Method Not Allowed");
+            WebResponses.sendPlain(exchange, 405, "Method Not Allowed");
             return;
         }
-        String token = sessionToken(exchange);
+        String token = WebSessionCookies.sessionToken(exchange);
         DashboardSessions.SESSIONS.invalidate(token);
-        exchange.getResponseHeaders().add("Set-Cookie", SESSION_COOKIE + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
-        sendJson(exchange, 200, resultJson(true, "Logged out."));
+        exchange.getResponseHeaders().add("Set-Cookie", WebSessionCookies.SESSION_COOKIE + "=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0");
+        WebResponses.sendJson(exchange, 200, WebResponses.resultJson(true, "Logged out."));
     }
 
     private void handleMe(HttpExchange exchange, MinecraftServer server) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendPlain(exchange, 405, "Method Not Allowed");
+            WebResponses.sendPlain(exchange, 405, "Method Not Allowed");
             return;
         }
-        Optional<UUID> playerId = resolveSession(exchange);
+        Optional<UUID> playerId = WebSessionCookies.resolveSession(exchange);
         if (playerId.isEmpty()) {
-            sendJson(exchange, 401, resultJson(false, "Not logged in."));
+            WebResponses.sendJson(exchange, 401, WebResponses.resultJson(false, "Not logged in."));
             return;
         }
         String json = JsonWriter.object()
                 .field("name", DashboardApi.playerName(server, playerId.get()))
                 .field("uuid", playerId.get().toString())
                 .build();
-        sendJson(exchange, 200, json);
+        WebResponses.sendJson(exchange, 200, json);
     }
 
     // ---------------- Dashboard data + actions ----------------
 
     private void handleDashboardData(HttpExchange exchange, MinecraftServer server) throws IOException {
         if (!"GET".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendPlain(exchange, 405, "Method Not Allowed");
+            WebResponses.sendPlain(exchange, 405, "Method Not Allowed");
             return;
         }
-        Optional<UUID> playerId = resolveSession(exchange);
+        Optional<UUID> playerId = WebSessionCookies.resolveSession(exchange);
         if (playerId.isEmpty()) {
-            sendJson(exchange, 401, resultJson(false, "Not logged in."));
+            WebResponses.sendJson(exchange, 401, WebResponses.resultJson(false, "Not logged in."));
             return;
         }
         String json;
@@ -217,166 +236,74 @@ public final class EmbeddedWebServer {
             json = DashboardApi.buildDashboardJson(server, playerId.get());
         } catch (Exception e) {
             LcClaimEconomy.LOGGER.error("Claim Economy web server: failed to build dashboard data", e);
-            sendJson(exchange, 500, resultJson(false, "Internal error building dashboard data."));
+            WebResponses.sendJson(exchange, 500, WebResponses.resultJson(false, "Internal error building dashboard data."));
             return;
         }
         if (json == null) {
-            sendJson(exchange, 404, resultJson(false, "No team found for this player."));
+            WebResponses.sendJson(exchange, 404, WebResponses.resultJson(false, "No team found for this player."));
             return;
         }
-        sendJson(exchange, 200, json);
+        WebResponses.sendJson(exchange, 200, json);
     }
 
     private void handleProtection(HttpExchange exchange, MinecraftServer server) throws IOException {
-        Optional<UUID> playerId = requirePostSession(exchange);
+        Optional<UUID> playerId = WebSessionCookies.requirePostSession(exchange);
         if (playerId.isEmpty()) {
             return;
         }
-        JsonReader body = JsonReader.parse(readBody(exchange));
+        JsonReader body = JsonReader.parse(WebResponses.readBody(exchange));
         ActionResult result = DashboardApi.applyProtection(server, playerId.get(), body.getString("key"), body.getBoolean("active", false));
-        sendJson(exchange, result.success() ? 200 : 400, resultJson(result.success(), result.message()));
+        WebResponses.sendJson(exchange, result.success() ? 200 : 400, WebResponses.resultJson(result.success(), result.message()));
     }
 
     private void handlePeaceful(HttpExchange exchange, MinecraftServer server) throws IOException {
-        Optional<UUID> playerId = requirePostSession(exchange);
+        Optional<UUID> playerId = WebSessionCookies.requirePostSession(exchange);
         if (playerId.isEmpty()) {
             return;
         }
-        JsonReader body = JsonReader.parse(readBody(exchange));
+        JsonReader body = JsonReader.parse(WebResponses.readBody(exchange));
         ActionResult result = DashboardApi.setPeaceful(server, playerId.get(), body.getBoolean("active", false));
-        sendJson(exchange, result.success() ? 200 : 400, resultJson(result.success(), result.message()));
+        WebResponses.sendJson(exchange, result.success() ? 200 : 400, WebResponses.resultJson(result.success(), result.message()));
     }
 
     private void handleForceLoad(HttpExchange exchange, MinecraftServer server) throws IOException {
-        Optional<UUID> playerId = requirePostSession(exchange);
+        Optional<UUID> playerId = WebSessionCookies.requirePostSession(exchange);
         if (playerId.isEmpty()) {
             return;
         }
-        JsonReader body = JsonReader.parse(readBody(exchange));
+        JsonReader body = JsonReader.parse(WebResponses.readBody(exchange));
         ActionResult result = DashboardApi.toggleForceLoad(server, playerId.get(), body.getString("key"), body.getBoolean("load", false));
-        sendJson(exchange, result.success() ? 200 : 400, resultJson(result.success(), result.message()));
+        WebResponses.sendJson(exchange, result.success() ? 200 : 400, WebResponses.resultJson(result.success(), result.message()));
     }
 
     private void handleUnclaim(HttpExchange exchange, MinecraftServer server) throws IOException {
-        Optional<UUID> playerId = requirePostSession(exchange);
+        Optional<UUID> playerId = WebSessionCookies.requirePostSession(exchange);
         if (playerId.isEmpty()) {
             return;
         }
-        JsonReader body = JsonReader.parse(readBody(exchange));
+        JsonReader body = JsonReader.parse(WebResponses.readBody(exchange));
         ActionResult result = DashboardApi.unclaimChunk(server, playerId.get(), body.getString("key"));
-        sendJson(exchange, result.success() ? 200 : 400, resultJson(result.success(), result.message()));
+        WebResponses.sendJson(exchange, result.success() ? 200 : 400, WebResponses.resultJson(result.success(), result.message()));
     }
 
     private void handleWar(HttpExchange exchange, MinecraftServer server) throws IOException {
-        Optional<UUID> playerId = requirePostSession(exchange);
+        Optional<UUID> playerId = WebSessionCookies.requirePostSession(exchange);
         if (playerId.isEmpty()) {
             return;
         }
-        JsonReader body = JsonReader.parse(readBody(exchange));
+        JsonReader body = JsonReader.parse(WebResponses.readBody(exchange));
         UUID targetTeamId;
         try {
             targetTeamId = UUID.fromString(body.getString("teamId"));
         } catch (Exception e) {
-            sendJson(exchange, 400, resultJson(false, "Invalid team id."));
+            WebResponses.sendJson(exchange, 400, WebResponses.resultJson(false, "Invalid team id."));
             return;
         }
         ActionResult result = DashboardApi.toggleWar(server, playerId.get(), targetTeamId);
-        sendJson(exchange, result.success() ? 200 : 400, resultJson(result.success(), result.message()));
-    }
-
-    /** Checks method + session for a POST action endpoint; sends the error response itself if either fails. */
-    private Optional<UUID> requirePostSession(HttpExchange exchange) throws IOException {
-        if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
-            sendPlain(exchange, 405, "Method Not Allowed");
-            return Optional.empty();
-        }
-        Optional<UUID> playerId = resolveSession(exchange);
-        if (playerId.isEmpty()) {
-            sendJson(exchange, 401, resultJson(false, "Not logged in."));
-        }
-        return playerId;
+        WebResponses.sendJson(exchange, result.success() ? 200 : 400, WebResponses.resultJson(result.success(), result.message()));
     }
 
     // ---------------- Helpers ----------------
-
-    private Optional<UUID> resolveSession(HttpExchange exchange) {
-        return DashboardSessions.SESSIONS.resolve(sessionToken(exchange));
-    }
-
-    private String sessionToken(HttpExchange exchange) {
-        String cookieHeader = exchange.getRequestHeaders().getFirst("Cookie");
-        if (cookieHeader == null) {
-            return null;
-        }
-        for (String part : cookieHeader.split(";")) {
-            String trimmed = part.trim();
-            if (trimmed.startsWith(SESSION_COOKIE + "=")) {
-                return trimmed.substring(SESSION_COOKIE.length() + 1);
-            }
-        }
-        return null;
-    }
-
-    private String readBody(HttpExchange exchange) throws IOException {
-        try (InputStream in = exchange.getRequestBody()) {
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            byte[] chunk = new byte[512];
-            int read;
-            int total = 0;
-            while ((read = in.read(chunk)) != -1) {
-                total += read;
-                if (total > MAX_BODY_BYTES) {
-                    break;
-                }
-                buffer.write(chunk, 0, read);
-            }
-            return buffer.toString(StandardCharsets.UTF_8);
-        }
-    }
-
-    private String resultJson(boolean ok, String message) {
-        return JsonWriter.object().field("ok", ok).field("message", message == null ? "" : message).build();
-    }
-
-    private void sendPlain(HttpExchange exchange, int status, String message) throws IOException {
-        byte[] body = message.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=utf-8");
-        exchange.sendResponseHeaders(status, body.length);
-        try (OutputStream out = exchange.getResponseBody()) {
-            out.write(body);
-        }
-    }
-
-    private void sendHtml(HttpExchange exchange, int status, byte[] body) throws IOException {
-        exchange.getResponseHeaders().add("Content-Type", "text/html; charset=utf-8");
-        exchange.sendResponseHeaders(status, body.length);
-        try (OutputStream out = exchange.getResponseBody()) {
-            out.write(body);
-        }
-    }
-
-    private void sendJson(HttpExchange exchange, int status, String json) throws IOException {
-        byte[] body = json.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("Content-Type", "application/json; charset=utf-8");
-        exchange.getResponseHeaders().add("Cache-Control", "no-store");
-        exchange.sendResponseHeaders(status, body.length);
-        try (OutputStream out = exchange.getResponseBody()) {
-            out.write(body);
-        }
-    }
-
-    private static byte[] loadResource(String path) {
-        try (InputStream in = EmbeddedWebServer.class.getResourceAsStream(path)) {
-            if (in == null) {
-                return null;
-            }
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            in.transferTo(buffer);
-            return buffer.toByteArray();
-        } catch (IOException e) {
-            return null;
-        }
-    }
 
     private static ThreadFactory daemonThreadFactory() {
         AtomicInteger counter = new AtomicInteger(1);

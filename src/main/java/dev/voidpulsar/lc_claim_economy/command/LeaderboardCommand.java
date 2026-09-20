@@ -3,9 +3,9 @@ package dev.voidpulsar.lc_claim_economy.command;
 import dev.ftb.mods.ftbchunks.api.FTBChunksAPI;
 import dev.ftb.mods.ftbteams.api.Team;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
-import dev.voidpulsar.lc_claim_economy.teams.FtbTeamCatalog;
-import dev.voidpulsar.lc_claim_economy.util.MoneyMessageUtil;
+import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
+import dev.voidpulsar.lc_claim_economy.teams.TeamRegistry;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
 import io.github.lightman314.lightmanscurrency.api.money.value.MoneyStorage;
 import io.github.lightman314.lightmanscurrency.api.money.value.MoneyValue;
@@ -48,7 +48,7 @@ public final class LeaderboardCommand {
     private static int showLand(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
         List<Ranked> ranked = new ArrayList<>();
-        for (Team team : FtbTeamCatalog.trackedTeams(server)) {
+        for (Team team : TeamRegistry.trackedTeams(server)) {
             int claimed = FTBChunksAPI.api().isManagerLoaded()
                     ? FTBChunksAPI.api().getManager().getOrCreateData(team).getClaimedChunks().size()
                     : 0;
@@ -65,10 +65,10 @@ public final class LeaderboardCommand {
     private static int showWealth(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
         List<Ranked> ranked = new ArrayList<>();
-        for (Team team : FtbTeamCatalog.trackedTeams(server)) {
+        for (Team team : TeamRegistry.trackedTeams(server)) {
             IBankAccount account;
             try {
-                account = BankAccountHelper.getAccountForTeam(server, team);
+                account = BankLedgerAccess.getAccountForTeam(server, team);
             } catch (IllegalStateException ignored) {
                 continue;
             }
@@ -77,7 +77,7 @@ public final class LeaderboardCommand {
                 continue;
             }
             MoneyValue balance = storage.allValues().iterator().next();
-            ranked.add(new Ranked(teamLabel(team), MoneyMessageUtil.formatBalance(account), 0L, balance));
+            ranked.add(new Ranked(teamLabel(team), CurrencyTextFormat.formatBalance(account), 0L, balance));
         }
         ranked.sort((a, b) -> compareMoney(b.balance(), a.balance()));
         send(source, "message.lc_claim_economy.leaderboard.wealth_header", ranked);

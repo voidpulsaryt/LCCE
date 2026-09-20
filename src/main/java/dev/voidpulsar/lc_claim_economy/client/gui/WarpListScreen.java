@@ -15,6 +15,9 @@ import dev.ftb.mods.ftblibrary.ui.misc.NordColors;
 import dev.ftb.mods.ftblibrary.util.TooltipList;
 import dev.ftb.mods.ftblibrary.util.client.ClientUtils;
 import dev.voidpulsar.lc_claim_economy.client.ClientWarps;
+import dev.voidpulsar.lc_claim_economy.client.gui.widget.EmptyMessageRow;
+import dev.voidpulsar.lc_claim_economy.client.gui.widget.LcScreenChrome;
+import dev.voidpulsar.lc_claim_economy.client.gui.widget.PillButton;
 import dev.voidpulsar.lc_claim_economy.network.RequestWarpsPayload;
 import dev.voidpulsar.lc_claim_economy.network.WarpCreatePayload;
 import dev.voidpulsar.lc_claim_economy.network.WarpDeletePayload;
@@ -38,10 +41,10 @@ import net.neoforged.neoforge.network.PacketDistributor;
  * never from plain command-line warp usage.
  */
 public class WarpListScreen extends BaseScreen {
-    private static final int HEADER_HEIGHT = 22;
-    private static final int HEADER_BUTTON_SIZE = 16;
-    private static final int CONTENT_PAD = 8;
-    private static final int SCROLLBAR_WIDTH = 8;
+    private static final int HEADER_HEIGHT = LcScreenChrome.HEADER_HEIGHT;
+    private static final int HEADER_BUTTON_SIZE = LcScreenChrome.HEADER_BUTTON_SIZE;
+    private static final int CONTENT_PAD = LcScreenChrome.CONTENT_PAD;
+    private static final int SCROLLBAR_WIDTH = LcScreenChrome.SCROLLBAR_WIDTH;
     private static final int CREATE_ROW_HEIGHT = 20;
     private static final int ENTRY_HEIGHT = 22;
     private static final int SECTION_HEADER_HEIGHT = 14;
@@ -64,8 +67,8 @@ public class WarpListScreen extends BaseScreen {
 
     @Override
     public boolean onInit() {
-        setWidth(Math.min(getScreen().getGuiScaledWidth() - 20, 360));
-        setHeight(Math.min(getScreen().getGuiScaledHeight() - 20, 320));
+        setWidth(LcScreenChrome.clamped(getScreen().getGuiScaledWidth(), 360));
+        setHeight(LcScreenChrome.clamped(getScreen().getGuiScaledHeight(), 320));
         return true;
     }
 
@@ -118,8 +121,7 @@ public class WarpListScreen extends BaseScreen {
     @Override
     public void drawBackground(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
         super.drawBackground(graphics, theme, x, y, w, h);
-        NordColors.POLAR_NIGHT_0.draw(graphics, x + 4, y + HEADER_HEIGHT + 2, w - 8, h - HEADER_HEIGHT - 6);
-        NordColors.POLAR_NIGHT_2.draw(graphics, x + 4, y + HEADER_HEIGHT + 2, w - 8, 1);
+        LcScreenChrome.drawContentBackground(graphics, x, y, w, h);
     }
 
     @Override
@@ -164,13 +166,13 @@ public class WarpListScreen extends BaseScreen {
         @Override
         public void addWidgets() {
             if (!ClientWarps.enabled()) {
-                add(new MessageRow(this, Component.translatable("gui.lc_claim_economy.warp.disabled").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)));
+                add(new EmptyMessageRow(this, Component.translatable("gui.lc_claim_economy.warp.disabled").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)));
                 return;
             }
 
             add(new SectionHeaderRow(this, Component.translatable("gui.lc_claim_economy.warp.section_own")));
             if (ClientWarps.ownWarps().isEmpty()) {
-                add(new MessageRow(this, Component.translatable("gui.lc_claim_economy.warp.none_own").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)));
+                add(new EmptyMessageRow(this, Component.translatable("gui.lc_claim_economy.warp.none_own").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)));
             } else {
                 for (WarpDto warp : ClientWarps.ownWarps()) {
                     add(new OwnWarpRow(this, warp));
@@ -179,7 +181,7 @@ public class WarpListScreen extends BaseScreen {
 
             add(new SectionHeaderRow(this, Component.translatable("gui.lc_claim_economy.warp.section_public")));
             if (ClientWarps.publicWarps().isEmpty()) {
-                add(new MessageRow(this, Component.translatable("gui.lc_claim_economy.warp.none_public").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)));
+                add(new EmptyMessageRow(this, Component.translatable("gui.lc_claim_economy.warp.none_public").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)));
             } else {
                 for (WarpDto warp : ClientWarps.publicWarps()) {
                     add(new PublicWarpRow(this, warp));
@@ -224,21 +226,6 @@ public class WarpListScreen extends BaseScreen {
         public void draw(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
             super.draw(graphics, theme, x, y, w, h);
             theme.drawString(graphics, getTitle(), x + 6, y + 3, NordColors.SNOW_STORM_1, 0);
-        }
-    }
-
-    private static final class MessageRow extends Button {
-        MessageRow(Panel panel, Component title) {
-            super(panel, title, Color4I.empty());
-        }
-
-        @Override
-        public void onClicked(MouseButton button) {
-        }
-
-        @Override
-        public void draw(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
-            theme.drawString(graphics, getTitle(), x + 6, y + 6, NordColors.SNOW_STORM_2, 0);
         }
     }
 
@@ -314,12 +301,17 @@ public class WarpListScreen extends BaseScreen {
         }
     }
 
-    private static final class TpButton extends Button {
+    private static final class TpButton extends PillButton {
         private final Runnable action;
 
         TpButton(Panel panel, Runnable action) {
-            super(panel, Component.translatable("gui.lc_claim_economy.warp.tp"), Color4I.empty());
+            super(panel, Component.translatable("gui.lc_claim_economy.warp.tp"), 220, 170);
             this.action = action;
+        }
+
+        @Override
+        protected Color4I fillColor() {
+            return NordColors.FROST_2;
         }
 
         @Override
@@ -329,29 +321,22 @@ public class WarpListScreen extends BaseScreen {
         }
 
         @Override
-        public void drawBackground(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
-            NordColors.FROST_2.withAlpha(isMouseOver() ? 220 : 170).draw(graphics, x, y, w, h);
-            NordColors.POLAR_NIGHT_3.draw(graphics, x, y + h - 1, w, 1);
-        }
-
-        @Override
-        public void draw(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
-            super.draw(graphics, theme, x, y, w, h);
-            theme.drawString(graphics, getTitle(), x + w / 2, y + 5, NordColors.SNOW_STORM_0, Theme.CENTERED);
-        }
-
-        @Override
         public void addMouseOverText(TooltipList list) {
             list.add(Component.translatable("gui.lc_claim_economy.warp.tp_hint"));
         }
     }
 
-    private static final class TogglePublicButton extends Button {
+    private static final class TogglePublicButton extends PillButton {
         private final WarpDto warp;
 
         TogglePublicButton(Panel panel, WarpDto warp) {
-            super(panel, Component.translatable(warp.isPublic() ? "gui.lc_claim_economy.warp.make_private" : "gui.lc_claim_economy.warp.make_public"), Color4I.empty());
+            super(panel, Component.translatable(warp.isPublic() ? "gui.lc_claim_economy.warp.make_private" : "gui.lc_claim_economy.warp.make_public"), 220, 170);
             this.warp = warp;
+        }
+
+        @Override
+        protected Color4I fillColor() {
+            return warp.isPublic() ? NordColors.FROST_1 : NordColors.POLAR_NIGHT_1;
         }
 
         @Override
@@ -360,47 +345,27 @@ public class WarpListScreen extends BaseScreen {
         }
 
         @Override
-        public void drawBackground(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
-            Color4I fill = warp.isPublic() ? NordColors.FROST_1 : NordColors.POLAR_NIGHT_1;
-            fill.withAlpha(isMouseOver() ? 220 : 170).draw(graphics, x, y, w, h);
-            NordColors.POLAR_NIGHT_3.draw(graphics, x, y + h - 1, w, 1);
-        }
-
-        @Override
-        public void draw(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
-            super.draw(graphics, theme, x, y, w, h);
-            theme.drawString(graphics, getTitle(), x + w / 2, y + 5, NordColors.SNOW_STORM_0, Theme.CENTERED);
-        }
-
-        @Override
         public void addMouseOverText(TooltipList list) {
             list.add(Component.translatable(warp.isPublic() ? "gui.lc_claim_economy.warp.make_private_hint" : "gui.lc_claim_economy.warp.make_public_hint"));
         }
     }
 
-    private static final class DeleteButton extends Button {
+    private static final class DeleteButton extends PillButton {
         private final WarpDto warp;
 
         DeleteButton(Panel panel, WarpDto warp) {
-            super(panel, Component.literal("X"), Color4I.empty());
+            super(panel, Component.literal("X"), 210, 150);
             this.warp = warp;
+        }
+
+        @Override
+        protected Color4I fillColor() {
+            return NordColors.RED;
         }
 
         @Override
         public void onClicked(MouseButton button) {
             PacketDistributor.sendToServer(new WarpDeletePayload(warp.name()));
-        }
-
-        @Override
-        public void drawBackground(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
-            NordColors.RED.withAlpha(isMouseOver() ? 210 : 150).draw(graphics, x, y, w, h);
-            NordColors.POLAR_NIGHT_3.draw(graphics, x, y + h - 1, w, 1);
-        }
-
-        @Override
-        public void draw(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
-            super.draw(graphics, theme, x, y, w, h);
-            theme.drawString(graphics, getTitle(), x + w / 2, y + 5, NordColors.SNOW_STORM_0, Theme.CENTERED);
         }
 
         @Override

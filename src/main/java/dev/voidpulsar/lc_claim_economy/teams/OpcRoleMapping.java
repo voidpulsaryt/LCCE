@@ -4,7 +4,7 @@ import xaero.pac.common.parties.party.member.PartyMemberRank;
 
 /**
  * OP&C party rank to LC team role mapping, mirroring
- * {@link FtbLcRoleMapping}'s owner -&gt; owner, officer -&gt; admin,
+ * {@link TeamRankBridge}'s owner -&gt; owner, officer -&gt; admin,
  * member -&gt; member scheme.
  * <p>
  * OP&C ranks (lowest to highest, excluding the owner who isn't a rank tier

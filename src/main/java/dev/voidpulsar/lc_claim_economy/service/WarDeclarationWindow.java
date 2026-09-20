@@ -11,7 +11,7 @@ import java.util.Locale;
 /**
  * Restricts when new wars can be declared to a recurring weekly window (e.g. "Friday 22:00 UTC
  * to Sunday 22:00 UTC"), independent of ending wars or the automatic upkeep-suspension/restore
- * cycle in {@link UpkeepSettlementService}, which are never gated by this window.
+ * cycle in {@link BillingSettlementService}, which are never gated by this window.
  */
 public final class WarDeclarationWindow {
 

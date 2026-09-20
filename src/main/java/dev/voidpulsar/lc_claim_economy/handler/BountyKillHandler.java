@@ -2,10 +2,10 @@ package dev.voidpulsar.lc_claim_economy.handler;
 
 import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
-import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
+import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
-import dev.voidpulsar.lc_claim_economy.util.MoneyMessageUtil;
-import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
 import io.github.lightman314.lightmanscurrency.api.money.value.MoneyValue;
 import net.minecraft.network.chat.Component;
@@ -49,12 +49,12 @@ public class BountyKillHandler {
             return;
         }
 
-        MoneyValue reward = MoneyUtil.fromCopper(totalCopper);
-        IBankAccount killerAccount = BankAccountHelper.getAccountForPlayer(killer.server, killer);
+        MoneyValue reward = CurrencyAmounts.fromCopper(totalCopper);
+        IBankAccount killerAccount = BankLedgerAccess.getAccountForPlayer(killer.server, killer);
         killerAccount.depositMoney(reward);
 
         MutableComponent announcement = Component.translatable("message.lc_claim_economy.bounty.collected",
-                killer.getDisplayName(), victim.getDisplayName(), MoneyMessageUtil.formatValue(reward));
+                killer.getDisplayName(), victim.getDisplayName(), CurrencyTextFormat.formatValue(reward));
         killer.server.getPlayerList().broadcastSystemMessage(announcement, false);
     }
 

@@ -4,9 +4,9 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.LongArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
-import dev.voidpulsar.lc_claim_economy.util.MoneyMessageUtil;
-import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
+import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
 import io.github.lightman314.lightmanscurrency.api.money.value.MoneyValue;
 import net.minecraft.commands.CommandSourceStack;
@@ -46,15 +46,15 @@ public final class QuestRewardCommand {
         }
 
         long amountCopper = LongArgumentType.getLong(context, "amount_copper");
-        MoneyValue amount = MoneyUtil.fromCopper(amountCopper);
+        MoneyValue amount = CurrencyAmounts.fromCopper(amountCopper);
         if (amount.isEmpty()) {
             return 0;
         }
 
-        IBankAccount account = BankAccountHelper.getAccountForPlayer(player.server, player);
+        IBankAccount account = BankLedgerAccess.getAccountForPlayer(player.server, player);
         account.depositMoney(amount);
         player.displayClientMessage(Component.translatable("message.lc_claim_economy.quest_deposit.received",
-                MoneyMessageUtil.formatValue(amount)), false);
+                CurrencyTextFormat.formatValue(amount)), false);
         return 1;
     }
 }

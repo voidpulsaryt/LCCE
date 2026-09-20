@@ -10,9 +10,9 @@ import xaero.pac.common.server.parties.party.api.IServerPartyAPI;
 import java.util.UUID;
 
 /**
- * Resolves the balance/claim-count data {@code ClaimPriceSync} needs for
+ * Resolves the balance/claim-count data {@code ClaimPricingBroadcast} needs for
  * the dashboard, for a given player's OP&C claim identity. Kept in this
- * package (rather than inline in {@code ClaimPriceSync}) so that class's
+ * package (rather than inline in {@code ClaimPricingBroadcast}) so that class's
  * own method signatures never reference any {@code xaero.pac.*} type -
  * see {@code ModCompat}'s javadoc on why that matters for FTB-only
  * installs that don't have OP&C at all.

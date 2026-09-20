@@ -7,15 +7,15 @@ import dev.ftb.mods.ftblibrary.math.ChunkDimPos;
 import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
+import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
-import dev.voidpulsar.lc_claim_economy.data.ChunkPosKey;
+import dev.voidpulsar.lc_claim_economy.data.ChunkCoordKey;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.data.WarpEntry;
 import dev.voidpulsar.lc_claim_economy.network.WarpDto;
 import dev.voidpulsar.lc_claim_economy.network.SyncWarpsPayload;
-import dev.voidpulsar.lc_claim_economy.util.MoneyMessageUtil;
-import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
 import dev.voidpulsar.lc_claim_economy.util.WorldDisplayNames;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
 import io.github.lightman314.lightmanscurrency.api.money.bank.reference.builtin.PlayerBankReference;
@@ -80,7 +80,7 @@ public final class WarpService {
         }
 
         ChunkDimPos pos = new ChunkDimPos(player.level(), player.blockPosition());
-        String chunkKey = ChunkPosKey.encode(pos);
+        String chunkKey = ChunkCoordKey.encode(pos);
 
         if (LcClaimEconomyConfig.SERVER.warpRequireOwnClaim.get()) {
             if (!FTBChunksAPI.api().isManagerLoaded() || !FTBTeamsAPI.api().isManagerLoaded()) {
@@ -98,15 +98,15 @@ public final class WarpService {
 
         long costCopper = existing == null ? LcClaimEconomyConfig.SERVER.warpCreateCostCopper.get() : 0L;
         if (costCopper > 0L) {
-            MoneyValue cost = MoneyUtil.fromCopper(costCopper);
-            IBankAccount account = BankAccountHelper.getAccountForPlayer(server, player);
+            MoneyValue cost = CurrencyAmounts.fromCopper(costCopper);
+            IBankAccount account = BankLedgerAccess.getAccountForPlayer(server, player);
             if (!account.getMoneyStorage().containsValue(cost)) {
                 player.displayClientMessage(Component.translatable("message.lc_claim_economy.insufficient_funds",
-                        MoneyMessageUtil.formatValue(cost), MoneyMessageUtil.formatBalance(account)), false);
+                        CurrencyTextFormat.formatValue(cost), CurrencyTextFormat.formatBalance(account)), false);
                 return;
             }
             account.withdrawMoney(cost);
-            BankAccountHelper.logTransaction(account, false, cost, Component.translatable("message.lc_claim_economy.ledger.warp_create"));
+            BankLedgerAccess.logTransaction(account, false, cost, Component.translatable("message.lc_claim_economy.ledger.warp_create"));
         }
 
         WarpEntry entry = new WarpEntry(
@@ -342,19 +342,19 @@ public final class WarpService {
 
         long tollCopper = chargeToll ? LcClaimEconomyConfig.SERVER.warpTeleportCostCopper.get() : 0L;
         if (tollCopper > 0L) {
-            MoneyValue toll = MoneyUtil.fromCopper(tollCopper);
-            IBankAccount payerAccount = BankAccountHelper.getAccountForPlayer(server, player);
+            MoneyValue toll = CurrencyAmounts.fromCopper(tollCopper);
+            IBankAccount payerAccount = BankLedgerAccess.getAccountForPlayer(server, player);
             if (!payerAccount.getMoneyStorage().containsValue(toll)) {
                 player.displayClientMessage(Component.translatable("message.lc_claim_economy.insufficient_funds",
-                        MoneyMessageUtil.formatValue(toll), MoneyMessageUtil.formatBalance(payerAccount)), false);
+                        CurrencyTextFormat.formatValue(toll), CurrencyTextFormat.formatBalance(payerAccount)), false);
                 return;
             }
             IBankAccount ownerAccount = resolveOwnerAccount(server, entry.ownerId());
             payerAccount.withdrawMoney(toll);
-            BankAccountHelper.logTransaction(payerAccount, false, toll, Component.translatable("message.lc_claim_economy.ledger.warp_toll_paid"));
+            BankLedgerAccess.logTransaction(payerAccount, false, toll, Component.translatable("message.lc_claim_economy.ledger.warp_toll_paid"));
             if (ownerAccount != null) {
                 ownerAccount.depositMoney(toll);
-                BankAccountHelper.logTransaction(ownerAccount, true, toll, Component.translatable("message.lc_claim_economy.ledger.warp_toll_received"));
+                BankLedgerAccess.logTransaction(ownerAccount, true, toll, Component.translatable("message.lc_claim_economy.ledger.warp_toll_received"));
             }
         }
 
@@ -369,8 +369,8 @@ public final class WarpService {
                 ? FTBTeamsAPI.api().getManager().getTeamForPlayerID(ownerId)
                 : Optional.empty();
         if (team.isPresent()) {
-            BankAccountHelper.ensurePartyAccountExists(server, team.get());
-            return BankAccountHelper.getAccountForTeam(server, team.get());
+            BankLedgerAccess.ensurePartyAccountExists(server, team.get());
+            return BankLedgerAccess.getAccountForTeam(server, team.get());
         }
         return PlayerBankReference.of(ownerId).get();
     }

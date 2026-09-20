@@ -7,10 +7,10 @@ import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
+import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
-import dev.voidpulsar.lc_claim_economy.util.MoneyMessageUtil;
-import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
 import io.github.lightman314.lightmanscurrency.api.money.value.MoneyValue;
 import net.minecraft.ChatFormatting;
@@ -69,7 +69,7 @@ public final class BountyCommand {
 
         LcClaimEconomySavedData.get(placer.server).addPlayerBounty(target.getUUID(), amountCopper);
         MutableComponent announcement = Component.translatable("message.lc_claim_economy.bounty.player_placed",
-                placer.getDisplayName(), MoneyMessageUtil.formatValue(amount), target.getDisplayName());
+                placer.getDisplayName(), CurrencyTextFormat.formatValue(amount), target.getDisplayName());
         placer.server.getPlayerList().broadcastSystemMessage(announcement, false);
         return 1;
     }
@@ -97,21 +97,21 @@ public final class BountyCommand {
 
         LcClaimEconomySavedData.get(placer.server).addTeamBounty(targetTeam.getTeamId(), amountCopper);
         MutableComponent announcement = Component.translatable("message.lc_claim_economy.bounty.team_placed",
-                placer.getDisplayName(), MoneyMessageUtil.formatValue(amount), targetTeam.getName());
+                placer.getDisplayName(), CurrencyTextFormat.formatValue(amount), targetTeam.getName());
         placer.server.getPlayerList().broadcastSystemMessage(announcement, false);
         return 1;
     }
 
     @Nullable
     private static MoneyValue withdrawFromPlacer(ServerPlayer placer, long amountCopper) {
-        MoneyValue amount = MoneyUtil.fromCopper(amountCopper);
+        MoneyValue amount = CurrencyAmounts.fromCopper(amountCopper);
         if (amount.isEmpty()) {
             return null;
         }
-        IBankAccount account = BankAccountHelper.getAccountForPlayer(placer.server, placer);
+        IBankAccount account = BankLedgerAccess.getAccountForPlayer(placer.server, placer);
         if (!account.getMoneyStorage().containsValue(amount)) {
             MutableComponent message = Component.translatable("message.lc_claim_economy.insufficient_funds",
-                    MoneyMessageUtil.formatValue(amount), MoneyMessageUtil.formatBalance(account));
+                    CurrencyTextFormat.formatValue(amount), CurrencyTextFormat.formatBalance(account));
             placer.displayClientMessage(message, false);
             return null;
         }
@@ -138,14 +138,14 @@ public final class BountyCommand {
                     : entry.getKey().toString();
             message.append("\n").append(Component.translatable("message.lc_claim_economy.bounty.list_player_line",
                     Component.literal(name).withStyle(ChatFormatting.AQUA),
-                    MoneyMessageUtil.formatValue(MoneyUtil.fromCopper(entry.getValue()))));
+                    CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(entry.getValue()))));
         }
         for (Map.Entry<UUID, Long> entry : teamBounties.entrySet()) {
             Team team = FTBTeamsAPI.api().getManager().getTeamByID(entry.getKey()).orElse(null);
             Component teamName = team != null ? team.getName() : Component.literal(entry.getKey().toString());
             message.append("\n").append(Component.translatable("message.lc_claim_economy.bounty.list_team_line",
                     teamName.copy().withStyle(ChatFormatting.AQUA),
-                    MoneyMessageUtil.formatValue(MoneyUtil.fromCopper(entry.getValue()))));
+                    CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(entry.getValue()))));
         }
 
         ServerPlayer player = source.getPlayer();

@@ -3,8 +3,8 @@ package dev.voidpulsar.lc_claim_economy.web;
 import dev.voidpulsar.lc_claim_economy.compat.ModCompat;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
 import dev.voidpulsar.lc_claim_economy.opc.OpcWebDataSource;
-import dev.voidpulsar.lc_claim_economy.service.ProtectionPricing;
-import dev.voidpulsar.lc_claim_economy.service.WarService;
+import dev.voidpulsar.lc_claim_economy.service.SafeguardPricing;
+import dev.voidpulsar.lc_claim_economy.service.ConflictService;
 import net.minecraft.server.MinecraftServer;
 
 import java.util.Comparator;
@@ -57,7 +57,7 @@ public final class WebDataService {
         if (ModCompat.isFtbAvailable()) {
             backendName = "FTB Chunks";
             trackedAccounts = FtbWebDataSource.trackedAccountCount(server);
-            warEnabled = WarService.isEnabled();
+            warEnabled = ConflictService.isEnabled();
         } else if (ModCompat.isOpcAvailable()) {
             backendName = "Open Parties & Claims";
             trackedAccounts = OpcWebDataSource.trackedAccountCount(server);
@@ -74,7 +74,7 @@ public final class WebDataService {
                 config.forceLoadUpkeepPrice.get(),
                 config.upkeepPeriodMinutes.get(),
                 config.freeChunks.get(),
-                ProtectionPricing.landChunkGroupSize(),
+                SafeguardPricing.landChunkGroupSize(),
                 warEnabled,
                 config.mobGriefProtectionPrice.get(),
                 config.explosionProtectionPrice.get(),

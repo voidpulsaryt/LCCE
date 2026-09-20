@@ -7,10 +7,10 @@ import dev.ftb.mods.ftblibrary.math.ChunkDimPos;
 import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.data.ChunkPosKey;
+import dev.voidpulsar.lc_claim_economy.data.ChunkCoordKey;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
-import dev.voidpulsar.lc_claim_economy.data.TeamPendingState;
-import dev.voidpulsar.lc_claim_economy.network.PendingStateSync;
+import dev.voidpulsar.lc_claim_economy.data.TeamQueuedChanges;
+import dev.voidpulsar.lc_claim_economy.network.QueuedStateBroadcast;
 import dev.voidpulsar.lc_claim_economy.network.SyncLandChunksPayload;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
@@ -36,7 +36,7 @@ public final class LandChunkService {
     }
 
     public static boolean isLandChunk(MinecraftServer server, UUID teamId, ChunkDimPos pos) {
-        return LcClaimEconomySavedData.get(server).isLandChunk(teamId, ChunkPosKey.encode(pos));
+        return LcClaimEconomySavedData.get(server).isLandChunk(teamId, ChunkCoordKey.encode(pos));
     }
 
     public static boolean isLandChunk(MinecraftServer server, ClaimedChunk chunk) {
@@ -57,7 +57,7 @@ public final class LandChunkService {
         }
         int count = 0;
         for (ClaimedChunk chunk : chunkData.getClaimedChunks()) {
-            if (landKeys.contains(ChunkPosKey.encode(chunk.getPos()))) {
+            if (landKeys.contains(ChunkCoordKey.encode(chunk.getPos()))) {
                 count++;
             }
         }
@@ -150,7 +150,7 @@ public final class LandChunkService {
             return null;
         }
 
-        ChunkDimPos pos = ChunkPosKey.toChunkDimPos(chunkKey);
+        ChunkDimPos pos = ChunkCoordKey.toChunkDimPos(chunkKey);
         ClaimedChunk chunk = FTBChunksAPI.api().getManager().getChunk(pos);
         if (chunk == null
                 || chunk.getTeamData().getTeam() == null
@@ -170,28 +170,28 @@ public final class LandChunkService {
             return null;
         }
 
-        String normalizedKey = ChunkPosKey.encode(pos);
-        TeamPendingState pendingState = savedData.getPendingState(team.getTeamId());
+        String normalizedKey = ChunkCoordKey.encode(pos);
+        TeamQueuedChanges pendingState = savedData.getPendingState(team.getTeamId());
 
         if (pendingState.isPendingLandChunk(normalizedKey)) {
             savedData.setPendingState(team.getTeamId(), pendingState.withoutPendingLandChunk(normalizedKey));
-            PendingStateSync.syncTeam(server, team);
+            QueuedStateBroadcast.syncTeam(server, team);
             LcClaimEconomy.LOGGER.info("Team {}: cancelled pending land toggle for chunk {}", team.getShortName(), normalizedKey);
             return ToggleOutcome.CANCELLED;
         }
         if (pendingState.isPendingBuildChunk(normalizedKey)) {
             savedData.setPendingState(team.getTeamId(), pendingState.withoutPendingBuildChunk(normalizedKey));
-            PendingStateSync.syncTeam(server, team);
+            QueuedStateBroadcast.syncTeam(server, team);
             LcClaimEconomy.LOGGER.info("Team {}: cancelled pending build toggle for chunk {}", team.getShortName(), normalizedKey);
             return ToggleOutcome.CANCELLED;
         }
 
         boolean currentlyLand = savedData.isLandChunk(team.getTeamId(), normalizedKey);
-        TeamPendingState updated = currentlyLand
+        TeamQueuedChanges updated = currentlyLand
                 ? pendingState.withPendingBuildChunk(normalizedKey)
                 : pendingState.withPendingLandChunk(normalizedKey);
 
-        if (!ProtectionService.canAffordNextPeriod(server, team, updated)) {
+        if (!SafeguardEnforcementService.canAffordNextPeriod(server, team, updated)) {
             if (!batch) {
                 player.displayClientMessage(Component.translatable("message.lc_claim_economy.chunk_type_insufficient"), false);
             }
@@ -201,14 +201,14 @@ public final class LandChunkService {
         savedData.setPendingState(team.getTeamId(), updated);
         LcClaimEconomy.LOGGER.info("Team {}: chunk {} queued for {} (next upkeep)",
                 team.getShortName(), normalizedKey, currentlyLand ? "build" : "land");
-        PendingStateSync.syncTeam(server, team);
+        QueuedStateBroadcast.syncTeam(server, team);
         return currentlyLand ? ToggleOutcome.BUILD : ToggleOutcome.LAND;
     }
 
-    public static TeamPendingState applyPendingChunkTypes(MinecraftServer server, Team team, TeamPendingState pendingState) {
+    public static TeamQueuedChanges applyPendingChunkTypes(MinecraftServer server, Team team, TeamQueuedChanges pendingState) {
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         UUID teamId = team.getTeamId();
-        TeamPendingState updated = pendingState;
+        TeamQueuedChanges updated = pendingState;
         boolean changedLand = false;
 
         for (String key : new HashSet<>(pendingState.pendingLandChunks())) {
@@ -231,7 +231,7 @@ public final class LandChunkService {
     }
 
     public static void onChunkUnclaimed(MinecraftServer server, ClaimedChunk chunk) {
-        String chunkKey = ChunkPosKey.encode(chunk.getPos());
+        String chunkKey = ChunkCoordKey.encode(chunk.getPos());
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         boolean changed = savedData.clearLandChunk(chunkKey);
         ChunkUserPermissionService.onChunkUnclaimed(server, chunkKey);
@@ -239,11 +239,11 @@ public final class LandChunkService {
 
         Team team = chunk.getTeamData().getTeam();
         if (team != null) {
-            TeamPendingState pending = savedData.getPendingState(team.getTeamId());
-            TeamPendingState cleared = pending.withoutChunkTypePending(chunkKey);
+            TeamQueuedChanges pending = savedData.getPendingState(team.getTeamId());
+            TeamQueuedChanges cleared = pending.withoutChunkTypePending(chunkKey);
             if (cleared != pending) {
                 savedData.setPendingState(team.getTeamId(), cleared);
-                PendingStateSync.syncTeam(server, team);
+                QueuedStateBroadcast.syncTeam(server, team);
             }
         }
 

@@ -4,50 +4,36 @@ import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
 import io.github.lightman314.lightmanscurrency.common.bank.BankAccount;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.StringTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.storage.DimensionDataStorage;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
+import java.util.Collection;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * The single NBT persistence root for this mod's non-bank server-wide state. Internally
+ * decomposed into focused per-domain managers (see the {@code data} package) that this class
+ * owns and delegates every public method to - the NBT tag structure/key names are unchanged
+ * from before that decomposition, and every method here keeps its original signature, so no
+ * consumer needed to change. See {@link TeamLinkManager}'s javadoc for why per-team claim
+ * state (this class's {@link TeamLinkEntry}) is the one manager that stayed as a single big
+ * cohesive unit rather than splitting further.
+ */
 public class LcClaimEconomySavedData extends SavedData {
     private static final String DATA_NAME = LcClaimEconomy.MOD_ID + "_team_accounts";
 
-    private final Map<UUID, TeamLinkEntry> teamLinks = new HashMap<>();
-    private final Set<UUID> peacefulTeams = new HashSet<>();
-    private final Map<UUID, Long> warActiveSinceMillis = new HashMap<>();
-    private boolean pioneerClaimGranted = false;
-    private final Map<UUID, Long> playerBounties = new HashMap<>();
-    private final Map<UUID, Long> teamBounties = new HashMap<>();
-    private final Map<UUID, Long> nextUpkeepTickByTeam = new HashMap<>();
-    private final Map<UUID, Long> nextOpcUpkeepTickByOwner = new HashMap<>();
-
-    private final Map<String, MarketListing> marketListings = new HashMap<>();
-    private final Map<UUID, Map<String, WarpEntry>> playerWarps = new HashMap<>();
-
-    private long statUpkeepChargedCopper = 0L;
-    private int statUpkeepChargedCount = 0;
-    private int statUpkeepMissedCount = 0;
-    private long statClaimSpendCopper = 0L;
-    private int statClaimCount = 0;
-    private long statUnclaimRefundCopper = 0L;
-    private int statUnclaimCount = 0;
-    private long statMarketVolumeCopper = 0L;
-    private int statMarketSaleCount = 0;
+    private final TeamLinkManager teamLinks = new TeamLinkManager(this::setDirty);
+    private final BountyManager bounties = new BountyManager(this::setDirty);
+    private final UpkeepScheduleManager upkeepSchedule = new UpkeepScheduleManager(this::setDirty);
+    private final ServerStatsManager stats = new ServerStatsManager(this::setDirty);
+    private final MarketListingManager marketListings = new MarketListingManager(this::setDirty);
+    private final WarpManager warps = new WarpManager(this::setDirty);
 
     public static LcClaimEconomySavedData get(MinecraftServer server) {
         ServerLevel level = server.overworld();
@@ -55,456 +41,59 @@ public class LcClaimEconomySavedData extends SavedData {
         return storage.computeIfAbsent(new SavedData.Factory<>(LcClaimEconomySavedData::new, LcClaimEconomySavedData::load), DATA_NAME);
     }
 
-    private static LcClaimEconomySavedData load(CompoundTag tag, HolderLookup.Provider lookup) {
+    static LcClaimEconomySavedData load(CompoundTag tag, HolderLookup.Provider lookup) {
         LcClaimEconomySavedData data = new LcClaimEconomySavedData();
-        data.pioneerClaimGranted = tag.getBoolean("PioneerClaimGranted");
-        loadTickMap(tag, "NextUpkeepTickByTeam", data.nextUpkeepTickByTeam);
-        loadTickMap(tag, "NextOpcUpkeepTickByOwner", data.nextOpcUpkeepTickByOwner);
-        loadBountyMap(tag, "PlayerBounties", data.playerBounties);
-        loadBountyMap(tag, "TeamBounties", data.teamBounties);
-
-        if (tag.contains("PeacefulTeams", Tag.TAG_LIST)) {
-            ListTag peacefulList = tag.getList("PeacefulTeams", Tag.TAG_INT_ARRAY);
-            for (int i = 0; i < peacefulList.size(); i++) {
-                data.peacefulTeams.add(net.minecraft.nbt.NbtUtils.loadUUID(peacefulList.get(i)));
-            }
-        }
-        loadBountyMap(tag, "WarActiveSince", data.warActiveSinceMillis);
-
-        data.statUpkeepChargedCopper = tag.getLong("StatUpkeepChargedCopper");
-        data.statUpkeepChargedCount = tag.getInt("StatUpkeepChargedCount");
-        data.statUpkeepMissedCount = tag.getInt("StatUpkeepMissedCount");
-        data.statClaimSpendCopper = tag.getLong("StatClaimSpendCopper");
-        data.statClaimCount = tag.getInt("StatClaimCount");
-        data.statUnclaimRefundCopper = tag.getLong("StatUnclaimRefundCopper");
-        data.statUnclaimCount = tag.getInt("StatUnclaimCount");
-        data.statMarketVolumeCopper = tag.getLong("StatMarketVolumeCopper");
-        data.statMarketSaleCount = tag.getInt("StatMarketSaleCount");
-
-        ListTag marketList = tag.getList("MarketListings", Tag.TAG_COMPOUND);
-        for (int i = 0; i < marketList.size(); i++) {
-            CompoundTag listingTag = marketList.getCompound(i);
-            String chunkKey = listingTag.getString("ChunkKey");
-            if (chunkKey.isEmpty()) {
-                continue;
-            }
-            data.marketListings.put(chunkKey, new MarketListing(
-                    listingTag.getUUID("SellerTeamId"),
-                    listingTag.getString("SellerName"),
-                    listingTag.getLong("PriceCopper"),
-                    listingTag.getLong("Listed")
-            ));
-        }
-        ListTag warpList = tag.getList("PlayerWarps", Tag.TAG_COMPOUND);
-        for (int i = 0; i < warpList.size(); i++) {
-            CompoundTag entryTag = warpList.getCompound(i);
-            if (!entryTag.hasUUID("OwnerId") || entryTag.getString("Name").isEmpty()) {
-                continue;
-            }
-            Set<String> aliases = new HashSet<>();
-            if (entryTag.contains("Aliases", Tag.TAG_LIST)) {
-                ListTag aliasList = entryTag.getList("Aliases", Tag.TAG_STRING);
-                for (int j = 0; j < aliasList.size(); j++) {
-                    aliases.add(aliasList.getString(j));
-                }
-            }
-            WarpEntry entry = new WarpEntry(
-                    entryTag.getString("Name"),
-                    entryTag.getUUID("OwnerId"),
-                    entryTag.getString("OwnerName"),
-                    ResourceLocation.parse(entryTag.getString("Dimension")),
-                    entryTag.getDouble("X"),
-                    entryTag.getDouble("Y"),
-                    entryTag.getDouble("Z"),
-                    entryTag.getFloat("Yaw"),
-                    entryTag.getFloat("Pitch"),
-                    entryTag.getString("ChunkKey"),
-                    entryTag.getBoolean("Public"),
-                    entryTag.getLong("Created"),
-                    Set.copyOf(aliases)
-            );
-            data.playerWarps.computeIfAbsent(entry.ownerId(), id -> new HashMap<>())
-                    .put(entry.name().toLowerCase(Locale.ROOT), entry);
-        }
-
-        ListTag list = tag.getList("Teams", Tag.TAG_COMPOUND);
-        for (int i = 0; i < list.size(); i++) {
-            CompoundTag entryTag = list.getCompound(i);
-            UUID teamId = entryTag.getUUID("TeamId");
-            long lcTeamId = entryTag.contains("LcTeamId", Tag.TAG_LONG) ? entryTag.getLong("LcTeamId") : -1L;
-            BankAccount legacyAccount = null;
-            if (entryTag.contains("Account", Tag.TAG_COMPOUND)) {
-                legacyAccount = new BankAccount(() -> data.setDirty(), entryTag.getCompound("Account"), lookup);
-            }
-            boolean locked = entryTag.getBoolean("ProtectionLocked");
-            TeamPendingState pending = loadPendingState(entryTag);
-            Set<String> landChunks = new HashSet<>();
-            if (entryTag.contains("LandChunks", Tag.TAG_LIST)) {
-                ListTag landList = entryTag.getList("LandChunks", Tag.TAG_STRING);
-                for (int j = 0; j < landList.size(); j++) {
-                    landChunks.add(landList.getString(j));
-                }
-            }
-            Set<UUID> warTargets = new HashSet<>();
-            if (entryTag.contains("WarTargets", Tag.TAG_LIST)) {
-                ListTag warList = entryTag.getList("WarTargets", Tag.TAG_INT_ARRAY);
-                for (int j = 0; j < warList.size(); j++) {
-                    warTargets.add(net.minecraft.nbt.NbtUtils.loadUUID(warList.get(j)));
-                }
-            }
-            Map<String, Map<UUID, Integer>> chunkUserPermissions = new HashMap<>();
-            Map<String, Integer> chunkAllPlayerPermissions = new HashMap<>();
-            if (entryTag.contains("ChunkUserPermissions", Tag.TAG_LIST)) {
-                ListTag chunks = entryTag.getList("ChunkUserPermissions", Tag.TAG_COMPOUND);
-                for (int j = 0; j < chunks.size(); j++) {
-                    CompoundTag chunkEntry = chunks.getCompound(j);
-                    String chunkKey = chunkEntry.getString("ChunkKey");
-                    if (chunkKey.isEmpty()) {
-                        continue;
-                    }
-
-                    int allFlags = chunkEntry.contains("AllFlags", Tag.TAG_INT) ? chunkEntry.getInt("AllFlags") : 0;
-                    if (allFlags > 0) {
-                        chunkAllPlayerPermissions.put(chunkKey, allFlags);
-                    }
-
-                    Map<UUID, Integer> perPlayer = new HashMap<>();
-                    if (chunkEntry.contains("Players", Tag.TAG_LIST)) {
-                        ListTag players = chunkEntry.getList("Players", Tag.TAG_COMPOUND);
-                        for (int k = 0; k < players.size(); k++) {
-                            CompoundTag playerEntry = players.getCompound(k);
-                            if (!playerEntry.hasUUID("PlayerId")) {
-                                continue;
-                            }
-                            int flags = playerEntry.getInt("Flags");
-                            if (flags <= 0) {
-                                continue;
-                            }
-                            perPlayer.put(playerEntry.getUUID("PlayerId"), flags);
-                        }
-                    }
-                    if (!perPlayer.isEmpty()) {
-                        chunkUserPermissions.put(chunkKey, Map.copyOf(perPlayer));
-                    }
-                }
-            }
-            data.teamLinks.put(teamId, new TeamLinkEntry(
-                    teamId,
-                    lcTeamId,
-                    legacyAccount,
-                    locked,
-                    pending,
-                    landChunks,
-                    warTargets,
-                    Map.copyOf(chunkUserPermissions),
-                    Map.copyOf(chunkAllPlayerPermissions)
-            ));
-        }
+        data.teamLinks.load(tag, lookup);
+        data.bounties.load(tag);
+        data.upkeepSchedule.load(tag);
+        data.stats.load(tag);
+        data.marketListings.load(tag);
+        data.warps.load(tag);
         return data;
-    }
-
-    private static void loadTickMap(CompoundTag tag, String key, Map<UUID, Long> target) {
-        ListTag list = tag.getList(key, Tag.TAG_COMPOUND);
-        for (int i = 0; i < list.size(); i++) {
-            CompoundTag entry = list.getCompound(i);
-            if (!entry.hasUUID("Id")) {
-                continue;
-            }
-            target.put(entry.getUUID("Id"), entry.getLong("Tick"));
-        }
-    }
-
-    private static void saveTickMap(CompoundTag tag, String key, Map<UUID, Long> source) {
-        if (source.isEmpty()) {
-            return;
-        }
-        ListTag list = new ListTag();
-        for (Map.Entry<UUID, Long> entry : source.entrySet()) {
-            CompoundTag entryTag = new CompoundTag();
-            entryTag.putUUID("Id", entry.getKey());
-            entryTag.putLong("Tick", entry.getValue());
-            list.add(entryTag);
-        }
-        tag.put(key, list);
-    }
-
-    private static void loadBountyMap(CompoundTag tag, String key, Map<UUID, Long> target) {
-        ListTag list = tag.getList(key, Tag.TAG_COMPOUND);
-        for (int i = 0; i < list.size(); i++) {
-            CompoundTag entry = list.getCompound(i);
-            long copper = entry.getLong("Copper");
-            if (copper <= 0L) {
-                continue;
-            }
-            target.put(entry.getUUID("Id"), copper);
-        }
-    }
-
-    private static TeamPendingState loadPendingState(CompoundTag entryTag) {
-        Map<String, String> pendingProperties = new HashMap<>();
-        if (entryTag.contains("PendingProperties", Tag.TAG_COMPOUND)) {
-            CompoundTag propertiesTag = entryTag.getCompound("PendingProperties");
-            for (String key : propertiesTag.getAllKeys()) {
-                pendingProperties.put(key, propertiesTag.getString(key));
-            }
-        }
-
-        Set<String> pendingLoads = new HashSet<>();
-        if (entryTag.contains("PendingForceLoads", Tag.TAG_LIST)) {
-            ListTag loads = entryTag.getList("PendingForceLoads", Tag.TAG_STRING);
-            for (int i = 0; i < loads.size(); i++) {
-                pendingLoads.add(loads.getString(i));
-            }
-        }
-
-        Set<String> pendingUnloads = new HashSet<>();
-        if (entryTag.contains("PendingForceUnloads", Tag.TAG_LIST)) {
-            ListTag unloads = entryTag.getList("PendingForceUnloads", Tag.TAG_STRING);
-            for (int i = 0; i < unloads.size(); i++) {
-                pendingUnloads.add(unloads.getString(i));
-            }
-        }
-
-        Set<UUID> pendingWarDeclares = new HashSet<>();
-        if (entryTag.contains("PendingWarDeclares", Tag.TAG_LIST)) {
-            ListTag declares = entryTag.getList("PendingWarDeclares", Tag.TAG_INT_ARRAY);
-            for (int i = 0; i < declares.size(); i++) {
-                pendingWarDeclares.add(net.minecraft.nbt.NbtUtils.loadUUID(declares.get(i)));
-            }
-        }
-
-        Set<UUID> pendingWarEnds = new HashSet<>();
-        if (entryTag.contains("PendingWarEnds", Tag.TAG_LIST)) {
-            ListTag ends = entryTag.getList("PendingWarEnds", Tag.TAG_INT_ARRAY);
-            for (int i = 0; i < ends.size(); i++) {
-                pendingWarEnds.add(net.minecraft.nbt.NbtUtils.loadUUID(ends.get(i)));
-            }
-        }
-
-        Set<String> pendingLandChunks = new HashSet<>();
-        if (entryTag.contains("PendingLandChunks", Tag.TAG_LIST)) {
-            ListTag landPending = entryTag.getList("PendingLandChunks", Tag.TAG_STRING);
-            for (int i = 0; i < landPending.size(); i++) {
-                pendingLandChunks.add(landPending.getString(i));
-            }
-        }
-
-        Set<String> pendingBuildChunks = new HashSet<>();
-        if (entryTag.contains("PendingBuildChunks", Tag.TAG_LIST)) {
-            ListTag buildPending = entryTag.getList("PendingBuildChunks", Tag.TAG_STRING);
-            for (int i = 0; i < buildPending.size(); i++) {
-                pendingBuildChunks.add(buildPending.getString(i));
-            }
-        }
-
-        if (entryTag.contains("AutoSuspendedWars", Tag.TAG_LIST)) {
-            ListTag suspendedWars = entryTag.getList("AutoSuspendedWars", Tag.TAG_INT_ARRAY);
-            for (int i = 0; i < suspendedWars.size(); i++) {
-                pendingWarDeclares.add(net.minecraft.nbt.NbtUtils.loadUUID(suspendedWars.get(i)));
-            }
-        }
-
-        return new TeamPendingState(
-                pendingProperties,
-                pendingLoads,
-                pendingUnloads,
-                pendingLandChunks,
-                pendingBuildChunks,
-                pendingWarDeclares,
-                pendingWarEnds
-        );
     }
 
     @Override
     public CompoundTag save(CompoundTag tag, HolderLookup.Provider lookup) {
-        tag.putBoolean("PioneerClaimGranted", pioneerClaimGranted);
-        saveTickMap(tag, "NextUpkeepTickByTeam", nextUpkeepTickByTeam);
-        saveTickMap(tag, "NextOpcUpkeepTickByOwner", nextOpcUpkeepTickByOwner);
-        saveBountyMap(tag, "PlayerBounties", playerBounties);
-        saveBountyMap(tag, "TeamBounties", teamBounties);
-
-        if (!peacefulTeams.isEmpty()) {
-            ListTag peacefulList = new ListTag();
-            peacefulTeams.forEach(id -> peacefulList.add(net.minecraft.nbt.NbtUtils.createUUID(id)));
-            tag.put("PeacefulTeams", peacefulList);
-        }
-        saveBountyMap(tag, "WarActiveSince", warActiveSinceMillis);
-
-        tag.putLong("StatUpkeepChargedCopper", statUpkeepChargedCopper);
-        tag.putInt("StatUpkeepChargedCount", statUpkeepChargedCount);
-        tag.putInt("StatUpkeepMissedCount", statUpkeepMissedCount);
-        tag.putLong("StatClaimSpendCopper", statClaimSpendCopper);
-        tag.putInt("StatClaimCount", statClaimCount);
-        tag.putLong("StatUnclaimRefundCopper", statUnclaimRefundCopper);
-        tag.putInt("StatUnclaimCount", statUnclaimCount);
-        tag.putLong("StatMarketVolumeCopper", statMarketVolumeCopper);
-        tag.putInt("StatMarketSaleCount", statMarketSaleCount);
-
-        ListTag marketList = new ListTag();
-        for (Map.Entry<String, MarketListing> entry : marketListings.entrySet()) {
-            CompoundTag listingTag = new CompoundTag();
-            listingTag.putString("ChunkKey", entry.getKey());
-            listingTag.putUUID("SellerTeamId", entry.getValue().sellerTeamId());
-            listingTag.putString("SellerName", entry.getValue().sellerName());
-            listingTag.putLong("PriceCopper", entry.getValue().priceCopper());
-            listingTag.putLong("Listed", entry.getValue().listedAt());
-            marketList.add(listingTag);
-        }
-        tag.put("MarketListings", marketList);
-
-        ListTag warpList = new ListTag();
-        for (Map<String, WarpEntry> warps : playerWarps.values()) {
-            for (WarpEntry entry : warps.values()) {
-                CompoundTag entryTag = new CompoundTag();
-                entryTag.putString("Name", entry.name());
-                entryTag.putUUID("OwnerId", entry.ownerId());
-                entryTag.putString("OwnerName", entry.ownerName());
-                entryTag.putString("Dimension", entry.dimension().toString());
-                entryTag.putDouble("X", entry.x());
-                entryTag.putDouble("Y", entry.y());
-                entryTag.putDouble("Z", entry.z());
-                entryTag.putFloat("Yaw", entry.yaw());
-                entryTag.putFloat("Pitch", entry.pitch());
-                entryTag.putString("ChunkKey", entry.chunkKey());
-                entryTag.putBoolean("Public", entry.isPublic());
-                entryTag.putLong("Created", entry.createdAtMillis());
-                if (!entry.aliases().isEmpty()) {
-                    ListTag aliasList = new ListTag();
-                    entry.aliases().forEach(alias -> aliasList.add(StringTag.valueOf(alias)));
-                    entryTag.put("Aliases", aliasList);
-                }
-                warpList.add(entryTag);
-            }
-        }
-        tag.put("PlayerWarps", warpList);
-
-        ListTag list = new ListTag();
-        for (TeamLinkEntry entry : teamLinks.values()) {
-            CompoundTag entryTag = new CompoundTag();
-            entryTag.putUUID("TeamId", entry.ftbTeamId());
-            if (entry.lcTeamId() > 0) {
-                entryTag.putLong("LcTeamId", entry.lcTeamId());
-            }
-            if (entry.legacyAccount() != null) {
-                entryTag.put("Account", entry.legacyAccount().save(lookup));
-            }
-            entryTag.putBoolean("ProtectionLocked", entry.protectionLocked());
-            savePendingState(entryTag, entry.pendingState());
-            if (!entry.landChunks().isEmpty()) {
-                ListTag landList = new ListTag();
-                entry.landChunks().forEach(key -> landList.add(StringTag.valueOf(key)));
-                entryTag.put("LandChunks", landList);
-            }
-            if (!entry.warTargets().isEmpty()) {
-                ListTag warList = new ListTag();
-                entry.warTargets().forEach(id -> warList.add(net.minecraft.nbt.NbtUtils.createUUID(id)));
-                entryTag.put("WarTargets", warList);
-            }
-            if (!entry.chunkUserPermissions().isEmpty() || !entry.chunkAllPlayerPermissions().isEmpty()) {
-                Set<String> chunkKeys = new HashSet<>(entry.chunkUserPermissions().keySet());
-                chunkKeys.addAll(entry.chunkAllPlayerPermissions().keySet());
-                ListTag chunkList = new ListTag();
-                for (String chunkKey : chunkKeys) {
-                    CompoundTag chunkTag = new CompoundTag();
-                    chunkTag.putString("ChunkKey", chunkKey);
-
-                    int allFlags = entry.chunkAllPlayerPermissions().getOrDefault(chunkKey, 0);
-                    if (allFlags > 0) {
-                        chunkTag.putInt("AllFlags", allFlags);
-                    }
-
-                    ListTag players = new ListTag();
-                    for (Map.Entry<UUID, Integer> playerEntry : entry.chunkUserPermissions().getOrDefault(chunkKey, Map.of()).entrySet()) {
-                            int flags = playerEntry.getValue() == null ? 0 : playerEntry.getValue();
-                            if (flags <= 0) {
-                                continue;
-                            }
-                            CompoundTag playerTag = new CompoundTag();
-                            playerTag.putUUID("PlayerId", playerEntry.getKey());
-                            playerTag.putInt("Flags", flags);
-                            players.add(playerTag);
-                    }
-                    if (!players.isEmpty()) {
-                        chunkTag.put("Players", players);
-                    }
-                    if (allFlags > 0 || !players.isEmpty()) {
-                        chunkList.add(chunkTag);
-                    }
-                }
-                if (!chunkList.isEmpty()) {
-                    entryTag.put("ChunkUserPermissions", chunkList);
-                }
-            }
-            list.add(entryTag);
-        }
-        tag.put("Teams", list);
+        teamLinks.save(tag, lookup);
+        bounties.save(tag);
+        upkeepSchedule.save(tag);
+        stats.save(tag);
+        marketListings.save(tag);
+        warps.save(tag);
         return tag;
     }
 
-    private static void saveBountyMap(CompoundTag tag, String key, Map<UUID, Long> source) {
-        if (source.isEmpty()) {
-            return;
-        }
-        ListTag list = new ListTag();
-        for (Map.Entry<UUID, Long> entry : source.entrySet()) {
-            if (entry.getValue() == null || entry.getValue() <= 0L) {
-                continue;
-            }
-            CompoundTag entryTag = new CompoundTag();
-            entryTag.putUUID("Id", entry.getKey());
-            entryTag.putLong("Copper", entry.getValue());
-            list.add(entryTag);
-        }
-        if (!list.isEmpty()) {
-            tag.put(key, list);
-        }
-    }
+    // ---------------- Bounties ----------------
 
     /** Adds to (does not replace) any existing bounty on this player, in copper. */
     public void addPlayerBounty(UUID victim, long copper) {
-        if (copper <= 0L) {
-            return;
-        }
-        playerBounties.merge(victim, copper, Long::sum);
-        setDirty();
+        bounties.addPlayerBounty(victim, copper);
     }
 
     /** Adds to (does not replace) any existing bounty on this team, in copper. */
     public void addTeamBounty(UUID team, long copper) {
-        if (copper <= 0L) {
-            return;
-        }
-        teamBounties.merge(team, copper, Long::sum);
-        setDirty();
+        bounties.addTeamBounty(team, copper);
     }
 
     /** Removes and returns the full bounty amount (in copper) on this player, or 0 if none. */
     public long takePlayerBounty(UUID victim) {
-        Long copper = playerBounties.remove(victim);
-        if (copper != null && copper > 0L) {
-            setDirty();
-            return copper;
-        }
-        return 0L;
+        return bounties.takePlayerBounty(victim);
     }
 
     /** Removes and returns the full bounty amount (in copper) on this team, or 0 if none. */
     public long takeTeamBounty(UUID team) {
-        Long copper = teamBounties.remove(team);
-        if (copper != null && copper > 0L) {
-            setDirty();
-            return copper;
-        }
-        return 0L;
+        return bounties.takeTeamBounty(team);
     }
 
     public Map<UUID, Long> playerBounties() {
-        return Map.copyOf(playerBounties);
+        return bounties.playerBounties();
     }
 
     public Map<UUID, Long> teamBounties() {
-        return Map.copyOf(teamBounties);
+        return bounties.teamBounties();
     }
+
+    // ---------------- Pioneer bonus / server stats ----------------
 
     /**
      * Marks the server-wide Pioneer Bonus as claimed and returns true, the
@@ -514,81 +103,89 @@ public class LcClaimEconomySavedData extends SavedData {
      * claimed on the server.
      */
     public boolean claimPioneerBonus() {
-        if (pioneerClaimGranted) {
-            return false;
-        }
-        pioneerClaimGranted = true;
-        setDirty();
-        return true;
+        return stats.claimPioneerBonus();
     }
+
+    public void recordUpkeepCharged(long copper) {
+        stats.recordUpkeepCharged(copper);
+    }
+
+    public void recordUpkeepMissed() {
+        stats.recordUpkeepMissed();
+    }
+
+    public void recordClaimPurchase(long copper) {
+        stats.recordClaimPurchase(copper);
+    }
+
+    public void recordUnclaimRefund(long copper) {
+        stats.recordUnclaimRefund(copper);
+    }
+
+    public void recordMarketSale(long copper) {
+        stats.recordMarketSale(copper);
+    }
+
+    public long getStatUpkeepChargedCopper() {
+        return stats.getStatUpkeepChargedCopper();
+    }
+
+    public int getStatUpkeepChargedCount() {
+        return stats.getStatUpkeepChargedCount();
+    }
+
+    public int getStatUpkeepMissedCount() {
+        return stats.getStatUpkeepMissedCount();
+    }
+
+    public long getStatClaimSpendCopper() {
+        return stats.getStatClaimSpendCopper();
+    }
+
+    public int getStatClaimCount() {
+        return stats.getStatClaimCount();
+    }
+
+    public long getStatUnclaimRefundCopper() {
+        return stats.getStatUnclaimRefundCopper();
+    }
+
+    public int getStatUnclaimCount() {
+        return stats.getStatUnclaimCount();
+    }
+
+    public long getStatMarketVolumeCopper() {
+        return stats.getStatMarketVolumeCopper();
+    }
+
+    public int getStatMarketSaleCount() {
+        return stats.getStatMarketSaleCount();
+    }
+
+    // ---------------- Upkeep scheduling ----------------
 
     /** Next world-time tick (persisted so it survives server restarts) this FTB team's upkeep should fire at, or -1 if not yet scheduled. */
     public long getNextUpkeepTick(UUID teamId) {
-        return nextUpkeepTickByTeam.getOrDefault(teamId, -1L);
+        return upkeepSchedule.getNextUpkeepTick(teamId);
     }
 
     public void setNextUpkeepTick(UUID teamId, long tick) {
-        if (!Long.valueOf(tick).equals(nextUpkeepTickByTeam.get(teamId))) {
-            nextUpkeepTickByTeam.put(teamId, tick);
-            setDirty();
-        }
+        upkeepSchedule.setNextUpkeepTick(teamId, tick);
     }
 
     /** Next world-time tick (persisted so it survives server restarts) this OP&C claim owner's upkeep should fire at, or -1 if not yet scheduled. */
     public long getNextOpcUpkeepTick(UUID ownerId) {
-        return nextOpcUpkeepTickByOwner.getOrDefault(ownerId, -1L);
+        return upkeepSchedule.getNextOpcUpkeepTick(ownerId);
     }
 
     public void setNextOpcUpkeepTick(UUID ownerId, long tick) {
-        if (!Long.valueOf(tick).equals(nextOpcUpkeepTickByOwner.get(ownerId))) {
-            nextOpcUpkeepTickByOwner.put(ownerId, tick);
-            setDirty();
-        }
+        upkeepSchedule.setNextOpcUpkeepTick(ownerId, tick);
     }
 
-    private static void savePendingState(CompoundTag entryTag, TeamPendingState pendingState) {
-        if (!pendingState.pendingProperties().isEmpty()) {
-            CompoundTag propertiesTag = new CompoundTag();
-            pendingState.pendingProperties().forEach(propertiesTag::putString);
-            entryTag.put("PendingProperties", propertiesTag);
-        }
-        if (!pendingState.pendingForceLoads().isEmpty()) {
-            ListTag loads = new ListTag();
-            pendingState.pendingForceLoads().forEach(key -> loads.add(StringTag.valueOf(key)));
-            entryTag.put("PendingForceLoads", loads);
-        }
-        if (!pendingState.pendingForceUnloads().isEmpty()) {
-            ListTag unloads = new ListTag();
-            pendingState.pendingForceUnloads().forEach(key -> unloads.add(StringTag.valueOf(key)));
-            entryTag.put("PendingForceUnloads", unloads);
-        }
-        if (!pendingState.pendingLandChunks().isEmpty()) {
-            ListTag landPending = new ListTag();
-            pendingState.pendingLandChunks().forEach(key -> landPending.add(StringTag.valueOf(key)));
-            entryTag.put("PendingLandChunks", landPending);
-        }
-        if (!pendingState.pendingBuildChunks().isEmpty()) {
-            ListTag buildPending = new ListTag();
-            pendingState.pendingBuildChunks().forEach(key -> buildPending.add(StringTag.valueOf(key)));
-            entryTag.put("PendingBuildChunks", buildPending);
-        }
-        if (!pendingState.pendingWarDeclares().isEmpty()) {
-            ListTag declares = new ListTag();
-            pendingState.pendingWarDeclares().forEach(id -> declares.add(net.minecraft.nbt.NbtUtils.createUUID(id)));
-            entryTag.put("PendingWarDeclares", declares);
-        }
-        if (!pendingState.pendingWarEnds().isEmpty()) {
-            ListTag ends = new ListTag();
-            pendingState.pendingWarEnds().forEach(id -> ends.add(net.minecraft.nbt.NbtUtils.createUUID(id)));
-            entryTag.put("PendingWarEnds", ends);
-        }
-    }
+    // ---------------- Team links / pending state / protection lock ----------------
 
     public TeamLinkEntry getOrCreateLink(UUID ftbTeamId) {
-        return teamLinks.computeIfAbsent(ftbTeamId, id -> {
-            setDirty();
-            return new TeamLinkEntry(id, -1L, null, false, new TeamPendingState(), Set.of(), Set.of(), Map.of(), Map.of());
-        });
+        return teamLinks.getOrCreateLink(ftbTeamId);
     }
 
     @Nullable
@@ -598,93 +195,67 @@ public class LcClaimEconomySavedData extends SavedData {
 
     @Nullable
     public TeamLinkEntry findByLcTeamId(long lcTeamId) {
-        if (lcTeamId <= 0) {
-            return null;
-        }
-        for (TeamLinkEntry entry : teamLinks.values()) {
-            if (entry.lcTeamId() == lcTeamId) {
-                return entry;
-            }
-        }
-        return null;
+        return teamLinks.findByLcTeamId(lcTeamId);
     }
 
-    public java.util.Collection<TeamLinkEntry> getAllLinks() {
-        return java.util.List.copyOf(teamLinks.values());
+    public Collection<TeamLinkEntry> getAllLinks() {
+        return teamLinks.getAllLinks();
     }
 
     @Nullable
     public TeamLinkEntry removeLink(UUID ftbTeamId) {
-        TeamLinkEntry removed = teamLinks.remove(ftbTeamId);
-        if (removed != null) {
-            setDirty();
-        }
-        return removed;
+        return teamLinks.removeLink(ftbTeamId);
     }
 
     /** Clears the LC bank link only; keeps land chunks, pending state, and protection lock. */
     public boolean clearLcTeamLink(UUID ftbTeamId) {
-        TeamLinkEntry entry = teamLinks.get(ftbTeamId);
-        if (entry == null || (entry.lcTeamId() <= 0 && entry.legacyAccount() == null)) {
-            return false;
-        }
-        teamLinks.put(ftbTeamId, entry.withLcTeamId(-1L).withLegacyAccount(null));
-        setDirty();
-        return true;
+        return teamLinks.clearLcTeamLink(ftbTeamId);
     }
 
     public void removeLinkByLcTeamId(long lcTeamId) {
-        TeamLinkEntry entry = findByLcTeamId(lcTeamId);
-        if (entry != null) {
-            removeLink(entry.ftbTeamId());
-        }
+        teamLinks.removeLinkByLcTeamId(lcTeamId);
     }
 
-    public TeamPendingState getPendingState(UUID ftbTeamId) {
-        TeamLinkEntry entry = teamLinks.get(ftbTeamId);
-        return entry == null ? new TeamPendingState() : entry.pendingState();
+    public TeamQueuedChanges getPendingState(UUID ftbTeamId) {
+        return teamLinks.getPendingState(ftbTeamId);
     }
 
-    public void setPendingState(UUID ftbTeamId, TeamPendingState pendingState) {
-        TeamLinkEntry entry = getOrCreateLink(ftbTeamId);
-        teamLinks.put(ftbTeamId, entry.withPendingState(pendingState));
-        setDirty();
+    public void setPendingState(UUID ftbTeamId, TeamQueuedChanges pendingState) {
+        teamLinks.setPendingState(ftbTeamId, pendingState);
     }
 
     public void setLcTeamId(UUID ftbTeamId, long lcTeamId) {
-        TeamLinkEntry entry = getOrCreateLink(ftbTeamId);
-        if (entry.lcTeamId() != lcTeamId) {
-            teamLinks.put(ftbTeamId, entry.withLcTeamId(lcTeamId));
-            setDirty();
-        }
+        teamLinks.setLcTeamId(ftbTeamId, lcTeamId);
     }
 
     public void clearLegacyAccount(UUID ftbTeamId) {
-        TeamLinkEntry entry = teamLinks.get(ftbTeamId);
-        if (entry != null && entry.legacyAccount() != null) {
-            teamLinks.put(ftbTeamId, entry.withLegacyAccount(null));
-            setDirty();
-        }
+        teamLinks.clearLegacyAccount(ftbTeamId);
     }
 
     public void setProtectionLocked(UUID teamId, boolean locked) {
-        TeamLinkEntry entry = teamLinks.get(teamId);
-        if (entry != null && entry.protectionLocked() != locked) {
-            teamLinks.put(teamId, entry.withProtectionLocked(locked));
-            setDirty();
-        } else if (entry == null && locked) {
-            teamLinks.put(teamId, new TeamLinkEntry(teamId, -1L, null, true, new TeamPendingState(), Set.of(), Set.of(), Map.of(), Map.of()));
-            setDirty();
-        }
+        teamLinks.setProtectionLocked(teamId, locked);
     }
 
+    public boolean isProtectionLocked(UUID teamId) {
+        return teamLinks.isProtectionLocked(teamId);
+    }
+
+    public boolean isManagedLcTeam(long lcTeamId) {
+        return teamLinks.isManagedLcTeam(lcTeamId);
+    }
+
+    public Set<Long> getLinkedLcTeamIds() {
+        return teamLinks.getLinkedLcTeamIds();
+    }
+
+    // ---------------- Land chunks / chunk permissions ----------------
+
     public Set<String> getLandChunks(UUID teamId) {
-        TeamLinkEntry entry = teamLinks.get(teamId);
-        return entry == null ? Set.of() : entry.landChunks();
+        return teamLinks.getLandChunks(teamId);
     }
 
     public boolean isLandChunk(UUID teamId, String chunkKey) {
-        return getLandChunks(teamId).contains(chunkKey);
+        return teamLinks.isLandChunk(teamId, chunkKey);
     }
 
     /**
@@ -692,455 +263,156 @@ public class LcClaimEconomySavedData extends SavedData {
      * state actually changed.
      */
     public boolean setLandChunk(UUID teamId, String chunkKey, boolean land) {
-        TeamLinkEntry entry = getOrCreateLink(teamId);
-        if (entry.landChunks().contains(chunkKey) == land) {
-            return false;
-        }
-        Set<String> updated = new HashSet<>(entry.landChunks());
-        if (land) {
-            updated.add(chunkKey);
-        } else {
-            updated.remove(chunkKey);
-        }
-        teamLinks.put(teamId, entry.withLandChunks(updated));
-        setDirty();
-        return true;
+        return teamLinks.setLandChunk(teamId, chunkKey, land);
     }
 
     /** Removes a chunk from every team's land set (e.g. after unclaiming). */
     public boolean clearLandChunk(String chunkKey) {
-        boolean changed = false;
-        for (TeamLinkEntry entry : java.util.List.copyOf(teamLinks.values())) {
-            if (entry.landChunks().contains(chunkKey)) {
-                Set<String> updated = new HashSet<>(entry.landChunks());
-                updated.remove(chunkKey);
-                teamLinks.put(entry.ftbTeamId(), entry.withLandChunks(updated));
-                changed = true;
-            }
-        }
-        if (changed) {
-            setDirty();
-        }
-        return changed;
+        return teamLinks.clearLandChunk(chunkKey);
     }
 
     public Map<UUID, Integer> getChunkUserPermissions(UUID teamId, String chunkKey) {
-        TeamLinkEntry entry = teamLinks.get(teamId);
-        if (entry == null) {
-            return Map.of();
-        }
-        return entry.chunkUserPermissions().getOrDefault(chunkKey, Map.of());
+        return teamLinks.getChunkUserPermissions(teamId, chunkKey);
     }
 
     public int getChunkUserPermissionFlags(UUID teamId, String chunkKey, UUID playerId) {
-        Integer flags = getChunkUserPermissions(teamId, chunkKey).get(playerId);
-        return flags == null ? 0 : flags;
+        return teamLinks.getChunkUserPermissionFlags(teamId, chunkKey, playerId);
     }
 
     public int getChunkAllPlayerPermissionFlags(UUID teamId, String chunkKey) {
-        TeamLinkEntry entry = teamLinks.get(teamId);
-        if (entry == null) {
-            return 0;
-        }
-        Integer flags = entry.chunkAllPlayerPermissions().get(chunkKey);
-        return flags == null ? 0 : flags;
+        return teamLinks.getChunkAllPlayerPermissionFlags(teamId, chunkKey);
     }
 
     public boolean setChunkUserPermissionFlags(UUID teamId, String chunkKey, UUID playerId, int flags) {
-        TeamLinkEntry entry = getOrCreateLink(teamId);
-        Map<String, Map<UUID, Integer>> updatedChunks = new HashMap<>(entry.chunkUserPermissions());
-        Map<UUID, Integer> existingChunk = updatedChunks.get(chunkKey);
-        Map<UUID, Integer> updatedPlayers = new HashMap<>(existingChunk == null ? Map.of() : existingChunk);
-
-        if (flags <= 0) {
-            if (updatedPlayers.remove(playerId) == null) {
-                return false;
-            }
-        } else {
-            Integer previous = updatedPlayers.put(playerId, flags);
-            if (previous != null && previous == flags) {
-                return false;
-            }
-        }
-
-        if (updatedPlayers.isEmpty()) {
-            updatedChunks.remove(chunkKey);
-        } else {
-            updatedChunks.put(chunkKey, Map.copyOf(updatedPlayers));
-        }
-
-        teamLinks.put(teamId, entry.withChunkUserPermissions(Map.copyOf(updatedChunks)));
-        setDirty();
-        return true;
+        return teamLinks.setChunkUserPermissionFlags(teamId, chunkKey, playerId, flags);
     }
 
     public boolean setChunkAllPlayerPermissionFlags(UUID teamId, String chunkKey, int flags) {
-        TeamLinkEntry entry = getOrCreateLink(teamId);
-        Map<String, Integer> updated = new HashMap<>(entry.chunkAllPlayerPermissions());
-
-        if (flags <= 0) {
-            if (updated.remove(chunkKey) == null) {
-                return false;
-            }
-        } else {
-            Integer previous = updated.put(chunkKey, flags);
-            if (previous != null && previous == flags) {
-                return false;
-            }
-        }
-
-        teamLinks.put(teamId, entry.withChunkAllPlayerPermissions(Map.copyOf(updated)));
-        setDirty();
-        return true;
+        return teamLinks.setChunkAllPlayerPermissionFlags(teamId, chunkKey, flags);
     }
 
     public boolean clearChunkUserPermissions(String chunkKey) {
-        boolean changed = false;
-        for (TeamLinkEntry entry : java.util.List.copyOf(teamLinks.values())) {
-            if (entry.chunkUserPermissions().containsKey(chunkKey) || entry.chunkAllPlayerPermissions().containsKey(chunkKey)) {
-                Map<String, Map<UUID, Integer>> updated = new HashMap<>(entry.chunkUserPermissions());
-                updated.remove(chunkKey);
-                Map<String, Integer> updatedAll = new HashMap<>(entry.chunkAllPlayerPermissions());
-                updatedAll.remove(chunkKey);
-                teamLinks.put(entry.ftbTeamId(), entry.withChunkUserPermissions(Map.copyOf(updated)).withChunkAllPlayerPermissions(Map.copyOf(updatedAll)));
-                changed = true;
-            }
-        }
-        if (changed) {
-            setDirty();
-        }
-        return changed;
+        return teamLinks.clearChunkUserPermissions(chunkKey);
     }
 
     public Set<String> getAllLandChunks() {
-        Set<String> all = new HashSet<>();
-        for (TeamLinkEntry entry : teamLinks.values()) {
-            all.addAll(entry.landChunks());
-        }
-        return all;
+        return teamLinks.getAllLandChunks();
     }
 
-    public boolean isProtectionLocked(UUID teamId) {
-        TeamLinkEntry entry = teamLinks.get(teamId);
-        return entry != null && entry.protectionLocked();
-    }
-
-    public boolean isManagedLcTeam(long lcTeamId) {
-        if (lcTeamId <= 0) {
-            return false;
-        }
-        for (TeamLinkEntry entry : teamLinks.values()) {
-            if (entry.lcTeamId() == lcTeamId) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    public Set<Long> getLinkedLcTeamIds() {
-        Set<Long> linkedIds = new HashSet<>();
-        for (TeamLinkEntry entry : teamLinks.values()) {
-            if (entry.lcTeamId() > 0) {
-                linkedIds.add(entry.lcTeamId());
-            }
-        }
-        return linkedIds;
-    }
+    // ---------------- Peaceful mode / wars ----------------
 
     public boolean isPeaceful(UUID teamId) {
-        return peacefulTeams.contains(teamId);
+        return teamLinks.isPeaceful(teamId);
     }
 
     public void setPeaceful(UUID teamId, boolean peaceful) {
-        boolean changed = peaceful ? peacefulTeams.add(teamId) : peacefulTeams.remove(teamId);
-        if (changed) {
-            setDirty();
-        }
+        teamLinks.setPeaceful(teamId, peaceful);
     }
 
     public Set<UUID> getWarTargets(UUID teamId) {
-        TeamLinkEntry entry = teamLinks.get(teamId);
-        return entry == null ? Set.of() : entry.warTargets();
+        return teamLinks.getWarTargets(teamId);
     }
 
     public boolean isAtWarWith(UUID declarerTeamId, UUID targetTeamId) {
-        return getWarTargets(declarerTeamId).contains(targetTeamId);
+        return teamLinks.isAtWarWith(declarerTeamId, targetTeamId);
     }
 
     public boolean setWarTarget(UUID declarerTeamId, UUID targetTeamId, boolean atWar) {
-        TeamLinkEntry entry = getOrCreateLink(declarerTeamId);
-        Set<UUID> updated = new HashSet<>(entry.warTargets());
-        if (atWar) {
-            if (!updated.add(targetTeamId)) {
-                return false;
-            }
-        } else if (!updated.remove(targetTeamId)) {
-            return false;
-        }
-        teamLinks.put(declarerTeamId, entry.withWarTargets(Set.copyOf(updated)));
-        setDirty();
-        updateWarActiveSince(declarerTeamId);
-        updateWarActiveSince(targetTeamId);
-        return true;
-    }
-
-    /**
-     * Records when a team most recently went from at-peace to at-war (used to gate
-     * {@code siegeModeGraceHours}), and clears it once they return to peace. Edge-triggered on the
-     * 0-to-nonzero and nonzero-to-0 transitions of {@link #collectWarPartnerIds}, so it stays correct
-     * even through {@link dev.voidpulsar.lc_claim_economy.service.WarService}'s add-then-immediately-
-     * remove affordability probe: that probe's add and remove both run through this same method, so a
-     * team already at war sees no transition (timestamp untouched), and a team not at war sees the
-     * timestamp set then immediately cleared again, leaving no lasting trace.
-     */
-    private void updateWarActiveSince(UUID teamId) {
-        boolean atWarNow = !collectWarPartnerIds(teamId).isEmpty();
-        if (atWarNow) {
-            warActiveSinceMillis.putIfAbsent(teamId, System.currentTimeMillis());
-        } else {
-            warActiveSinceMillis.remove(teamId);
-        }
+        return teamLinks.setWarTarget(declarerTeamId, targetTeamId, atWar);
     }
 
     /** Epoch millis this team most recently transitioned from at-peace to at-war, or 0 if not currently at war. */
     public long getWarActiveSince(UUID teamId) {
-        return warActiveSinceMillis.getOrDefault(teamId, 0L);
+        return teamLinks.getWarActiveSince(teamId);
     }
 
     public Set<UUID> collectWarPartnerIds(UUID teamId) {
-        Set<UUID> partners = new HashSet<>();
-        partners.addAll(getWarTargets(teamId));
-        for (TeamLinkEntry entry : teamLinks.values()) {
-            if (entry.warTargets().contains(teamId)) {
-                partners.add(entry.ftbTeamId());
-            }
-        }
-        partners.remove(teamId);
-        return partners;
+        return teamLinks.collectWarPartnerIds(teamId);
     }
 
     public void clearWarReferences(UUID teamId) {
-        boolean changed = false;
-        TeamLinkEntry ownEntry = teamLinks.get(teamId);
-        if (ownEntry != null && !ownEntry.warTargets().isEmpty()) {
-            teamLinks.put(teamId, ownEntry.withWarTargets(Set.of()));
-            changed = true;
-        }
-        for (TeamLinkEntry entry : java.util.List.copyOf(teamLinks.values())) {
-            UUID entryTeamId = entry.ftbTeamId();
-            TeamPendingState pending = entry.pendingState();
-            TeamPendingState cleaned = pending.withoutWarReferences(teamId);
-            if (cleaned != pending) {
-                teamLinks.put(entryTeamId, entry.withPendingState(cleaned));
-                changed = true;
-            }
-            if (entry.warTargets().contains(teamId)) {
-                Set<UUID> updated = new HashSet<>(entry.warTargets());
-                updated.remove(teamId);
-                teamLinks.put(entryTeamId, teamLinks.get(entryTeamId).withWarTargets(Set.copyOf(updated)));
-                changed = true;
-            }
-        }
-        if (changed) {
-            setDirty();
-        }
+        teamLinks.clearWarReferences(teamId);
     }
 
-    public void recordUpkeepCharged(long copper) {
-        statUpkeepChargedCopper += copper;
-        statUpkeepChargedCount++;
-        setDirty();
+    public int countIncomingWars(UUID targetTeamId) {
+        return teamLinks.countIncomingWars(targetTeamId);
     }
 
-    public void recordUpkeepMissed() {
-        statUpkeepMissedCount++;
-        setDirty();
-    }
-
-    public void recordClaimPurchase(long copper) {
-        statClaimSpendCopper += copper;
-        statClaimCount++;
-        setDirty();
-    }
-
-    public void recordUnclaimRefund(long copper) {
-        statUnclaimRefundCopper += copper;
-        statUnclaimCount++;
-        setDirty();
-    }
-
-    public void recordMarketSale(long copper) {
-        statMarketVolumeCopper += copper;
-        statMarketSaleCount++;
-        setDirty();
-    }
-
-    public long getStatUpkeepChargedCopper() {
-        return statUpkeepChargedCopper;
-    }
-
-    public int getStatUpkeepChargedCount() {
-        return statUpkeepChargedCount;
-    }
-
-    public int getStatUpkeepMissedCount() {
-        return statUpkeepMissedCount;
-    }
-
-    public long getStatClaimSpendCopper() {
-        return statClaimSpendCopper;
-    }
-
-    public int getStatClaimCount() {
-        return statClaimCount;
-    }
-
-    public long getStatUnclaimRefundCopper() {
-        return statUnclaimRefundCopper;
-    }
-
-    public int getStatUnclaimCount() {
-        return statUnclaimCount;
-    }
-
-    public long getStatMarketVolumeCopper() {
-        return statMarketVolumeCopper;
-    }
-
-    public int getStatMarketSaleCount() {
-        return statMarketSaleCount;
-    }
+    // ---------------- Marketplace ----------------
 
     /** Lists a claimed chunk for sale on the public marketplace, replacing any existing listing for it. */
     public void setMarketListing(String chunkKey, MarketListing listing) {
-        marketListings.put(chunkKey, listing);
-        setDirty();
+        marketListings.setMarketListing(chunkKey, listing);
     }
 
     @Nullable
     public MarketListing getMarketListing(String chunkKey) {
-        return marketListings.get(chunkKey);
+        return marketListings.getMarketListing(chunkKey);
     }
 
     /** Removes a listing (sold, cancelled, or the chunk was unclaimed/lost). Returns false if none existed. */
     public boolean removeMarketListing(String chunkKey) {
-        boolean removed = marketListings.remove(chunkKey) != null;
-        if (removed) {
-            setDirty();
-        }
-        return removed;
+        return marketListings.removeMarketListing(chunkKey);
     }
 
     public Map<String, MarketListing> getAllMarketListings() {
-        return Map.copyOf(marketListings);
+        return marketListings.getAllMarketListings();
     }
 
     public List<MarketListing> getMarketListingsBySeller(UUID sellerTeamId) {
-        return marketListings.values().stream()
-                .filter(listing -> listing.sellerTeamId().equals(sellerTeamId))
-                .toList();
+        return marketListings.getMarketListingsBySeller(sellerTeamId);
     }
 
+    // ---------------- Player warps ----------------
+
     public Map<String, WarpEntry> getWarps(UUID ownerId) {
-        return Map.copyOf(playerWarps.getOrDefault(ownerId, Map.of()));
+        return warps.getWarps(ownerId);
     }
 
     @Nullable
     public WarpEntry getWarp(UUID ownerId, String nameLower) {
-        Map<String, WarpEntry> warps = playerWarps.get(ownerId);
-        return warps == null ? null : warps.get(nameLower);
+        return warps.getWarp(ownerId, nameLower);
     }
 
     /** Looks up a warp by its primary (lowercased) name first, then by alias, both scoped to this one owner. */
     @Nullable
     public WarpEntry resolveWarp(UUID ownerId, String nameOrAliasLower) {
-        Map<String, WarpEntry> warps = playerWarps.get(ownerId);
-        if (warps == null) {
-            return null;
-        }
-        WarpEntry direct = warps.get(nameOrAliasLower);
-        if (direct != null) {
-            return direct;
-        }
-        for (WarpEntry entry : warps.values()) {
-            if (entry.aliases().contains(nameOrAliasLower)) {
-                return entry;
-            }
-        }
-        return null;
+        return warps.resolveWarp(ownerId, nameOrAliasLower);
     }
 
     public int countWarps(UUID ownerId) {
-        Map<String, WarpEntry> warps = playerWarps.get(ownerId);
-        return warps == null ? 0 : warps.size();
+        return warps.countWarps(ownerId);
     }
 
     /** Stores (or replaces) a warp, keyed by its owner and lowercased name. */
     public void setWarp(WarpEntry entry) {
-        playerWarps.computeIfAbsent(entry.ownerId(), id -> new HashMap<>())
-                .put(entry.name().toLowerCase(Locale.ROOT), entry);
-        setDirty();
+        warps.setWarp(entry);
     }
 
     public boolean removeWarp(UUID ownerId, String nameLower) {
-        Map<String, WarpEntry> warps = playerWarps.get(ownerId);
-        if (warps == null || warps.remove(nameLower) == null) {
-            return false;
-        }
-        if (warps.isEmpty()) {
-            playerWarps.remove(ownerId);
-        }
-        setDirty();
-        return true;
+        return warps.removeWarp(ownerId, nameLower);
     }
 
     /** Every warp (any owner) currently marked public, for browsing/teleporting to other players' warps. */
     public List<WarpEntry> getAllPublicWarps() {
-        List<WarpEntry> result = new ArrayList<>();
-        for (Map<String, WarpEntry> warps : playerWarps.values()) {
-            for (WarpEntry entry : warps.values()) {
-                if (entry.isPublic()) {
-                    result.add(entry);
-                }
-            }
-        }
-        return result;
+        return warps.getAllPublicWarps();
     }
 
     /** Removes any warp (any owner) sitting on this chunk, e.g. after the chunk is unclaimed. */
     public boolean clearWarpsInChunk(String chunkKey) {
-        boolean changed = false;
-        for (Map<String, WarpEntry> warps : playerWarps.values()) {
-            Iterator<WarpEntry> iterator = warps.values().iterator();
-            while (iterator.hasNext()) {
-                if (iterator.next().chunkKey().equals(chunkKey)) {
-                    iterator.remove();
-                    changed = true;
-                }
-            }
-        }
-        if (changed) {
-            setDirty();
-        }
-        return changed;
+        return warps.clearWarpsInChunk(chunkKey);
     }
 
-    public int countIncomingWars(UUID targetTeamId) {
-        int count = 0;
-        for (TeamLinkEntry entry : teamLinks.values()) {
-            if (entry.warTargets().contains(targetTeamId)) {
-                count++;
-            }
-        }
-        return count;
-    }
+    // ---------------- Nested record types ----------------
+    // Kept here (not moved into the managers above) since several other classes reference
+    // these exact names, e.g. LcClaimEconomySavedData.TeamLinkEntry.
 
     public record TeamLinkEntry(
             UUID ftbTeamId,
             long lcTeamId,
             @Nullable BankAccount legacyAccount,
             boolean protectionLocked,
-            TeamPendingState pendingState,
+            TeamQueuedChanges pendingState,
             Set<String> landChunks,
             Set<UUID> warTargets,
             Map<String, Map<UUID, Integer>> chunkUserPermissions,
@@ -1158,7 +430,7 @@ public class LcClaimEconomySavedData extends SavedData {
             return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, locked, pendingState, landChunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions);
         }
 
-        TeamLinkEntry withPendingState(TeamPendingState pending) {
+        TeamLinkEntry withPendingState(TeamQueuedChanges pending) {
             return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pending, landChunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions);
         }
 

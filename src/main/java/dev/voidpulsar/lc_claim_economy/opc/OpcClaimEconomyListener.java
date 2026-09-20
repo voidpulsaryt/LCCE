@@ -1,11 +1,11 @@
 package dev.voidpulsar.lc_claim_economy.opc;
 
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.bank.BankAccountHelper;
+import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
-import dev.voidpulsar.lc_claim_economy.service.FreeChunkAllowance;
-import dev.voidpulsar.lc_claim_economy.util.MoneyUtil;
+import dev.voidpulsar.lc_claim_economy.service.ComplimentaryChunkAllotment;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
 import io.github.lightman314.lightmanscurrency.api.money.value.MoneyValue;
 import net.minecraft.network.chat.Component;
@@ -24,7 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * OP&C equivalent of the FTB {@code ChunkClaimHandler} claim/unclaim
+ * OP&C equivalent of the FTB {@code ChunkAcquisitionHandler} claim/unclaim
  * economy. OP&C's public API only exposes an AFTER-the-fact change
  * listener (no pre-claim veto hook), so insufficient-funds claims are
  * allowed to happen and then immediately reverted via
@@ -43,7 +43,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Handles the base claim price and unclaim refund (including clearing the
  * land/build chunk type on unclaim - see {@code LcClaimEconomySavedData}).
  * Periodic protection (force-load + land/build) upkeep billing is handled
- * separately by {@link OpcUpkeepService}. OP&C claims never participate in
+ * separately by {@link OpcBillingCycleService}. OP&C claims never participate in
  * wars - OP&C has no invasion/overclaim concept for that to map onto, and
  * it isn't planned.
  */
@@ -113,7 +113,7 @@ public final class OpcClaimEconomyListener implements IClaimsManagerListenerAPI 
             return;
         }
 
-        MoneyValue price = MoneyUtil.fromCopper(LcClaimEconomyConfig.SERVER.claimPrice.get());
+        MoneyValue price = CurrencyAmounts.fromCopper(LcClaimEconomyConfig.SERVER.claimPrice.get());
         if (price.isEmpty()) {
             return;
         }
@@ -136,7 +136,7 @@ public final class OpcClaimEconomyListener implements IClaimsManagerListenerAPI 
         account.withdrawMoney(price);
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         savedData.recordClaimPurchase(LcClaimEconomyConfig.SERVER.claimPrice.get());
-        BankAccountHelper.logTransaction(account, false, price, Component.translatable("message.lc_claim_economy.ledger.claim_purchase"));
+        BankLedgerAccess.logTransaction(account, false, price, Component.translatable("message.lc_claim_economy.ledger.claim_purchase"));
     }
 
     private void handleUnclaim(MinecraftServer server, UUID owner) {
@@ -146,7 +146,7 @@ public final class OpcClaimEconomyListener implements IClaimsManagerListenerAPI 
         // handleClaim's symmetric claimCountAfter), so +1 reconstructs the count the
         // owner held right before this particular chunk was removed.
         int claimCountBeforeUnclaim = claimCountFor(claimsManager, owner) + 1;
-        if (!FreeChunkAllowance.shouldRefundOnUnclaim(claimCountBeforeUnclaim)) {
+        if (!ComplimentaryChunkAllotment.shouldRefundOnUnclaim(claimCountBeforeUnclaim)) {
             // This chunk was within the free allowance and was never paid for.
             return;
         }
@@ -163,10 +163,10 @@ public final class OpcClaimEconomyListener implements IClaimsManagerListenerAPI 
             return;
         }
 
-        account.depositMoney(MoneyUtil.fromCopper(refundAmount));
+        account.depositMoney(CurrencyAmounts.fromCopper(refundAmount));
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         savedData.recordUnclaimRefund(refundAmount);
-        BankAccountHelper.logTransaction(account, true, MoneyUtil.fromCopper(refundAmount), Component.translatable("message.lc_claim_economy.ledger.unclaim_refund"));
+        BankLedgerAccess.logTransaction(account, true, CurrencyAmounts.fromCopper(refundAmount), Component.translatable("message.lc_claim_economy.ledger.unclaim_refund"));
     }
 
     private static boolean isPartyOwned(IServerClaimsManagerAPI claimsManager, UUID owner) {

@@ -3,7 +3,7 @@ package dev.voidpulsar.lc_claim_economy.opc;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.context.CommandContext;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
-import dev.voidpulsar.lc_claim_economy.data.ChunkPosKey;
+import dev.voidpulsar.lc_claim_economy.data.ChunkCoordKey;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.teams.OpcRoleMapping;
 import net.minecraft.commands.CommandSourceStack;
@@ -26,7 +26,7 @@ import java.util.UUID;
 /**
  * OP&C has no dedicated claims screen to hook a UI toggle into the way FTB
  * Chunks' chunk screen mixins do (see {@code ToggleChunkTypePayload} and
- * {@code ChunkScreenPanelMixin} on the FTB side), so land/build chunk
+ * {@code ClaimMapPanelMixin} on the FTB side), so land/build chunk
  * typing is exposed as a command instead, applied to whichever claimed
  * chunk the executing player is currently standing in. Unlike the FTB
  * side's queued toggle, the change here takes effect immediately rather
@@ -107,7 +107,7 @@ public final class OpcChunkTypeCommand {
         if (!isAuthorized(server, player, owner)) {
             return null;
         }
-        return new Claim(owner, ChunkPosKey.encode(dimension, chunkPos.x, chunkPos.z));
+        return new Claim(owner, ChunkCoordKey.encode(dimension, chunkPos.x, chunkPos.z));
     }
 
     private static boolean isAuthorized(MinecraftServer server, ServerPlayer player, UUID owner) {
