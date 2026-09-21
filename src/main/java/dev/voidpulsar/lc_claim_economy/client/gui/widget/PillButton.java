@@ -9,32 +9,36 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
 /**
- * Small action pill button (colored fill, centered label, bottom divider) used for
- * per-row actions like teleport/toggle-public/delete/remove. Was independently
- * hand-rolled in WarpListScreen's TpButton/TogglePublicButton/DeleteButton and
- * ChunkUserPermissionsScreen's RemovePlayerButton - all four share this exact
- * structure, using one of two consistent hover-alpha pairs (220/170 for regular
- * actions, 210/150 for delete-style ones). ChunkUserPermissionsScreen's
- * ToggleFlagButton is NOT one of these - it picks fill color from toggle state
- * plus a disabled-alpha override, with no hover-alpha at all, which is a
- * genuinely different pattern.
+ * Compact row-action button: flat color fill, centered label, single-pixel
+ * bottom divider. This is the common shape behind WarpListScreen's
+ * teleport/toggle-public/delete buttons and ChunkUserPermissionsScreen's
+ * remove-player button - those four were once separate copy-pasted classes
+ * that only differed in fill color and alpha pair, so the shared shape lives
+ * here now. Two alpha pairs cover every current caller: 220/170 for regular
+ * actions, 210/150 for destructive ones.
+ * <p>
+ * ChunkUserPermissionsScreen's per-flag toggle buttons are a different beast
+ * (fill color depends on on/off state, plus a disabled-alpha override, and
+ * no hover response) and were intentionally left as their own class rather
+ * than forced into this shape.
  */
 public abstract class PillButton extends Button {
-    private final int hoverAlpha;
-    private final int normalAlpha;
+    private final int hoverFillAlpha;
+    private final int idleFillAlpha;
 
-    protected PillButton(Panel panel, Component label, int hoverAlpha, int normalAlpha) {
+    protected PillButton(Panel panel, Component label, int hoverFillAlpha, int idleFillAlpha) {
         super(panel, label, Color4I.empty());
-        this.hoverAlpha = hoverAlpha;
-        this.normalAlpha = normalAlpha;
+        this.hoverFillAlpha = hoverFillAlpha;
+        this.idleFillAlpha = idleFillAlpha;
     }
 
-    /** The pill's fill color before hover/normal alpha is applied. */
+    /** Base fill color for the pill, before the hover/idle alpha is mixed in. */
     protected abstract Color4I fillColor();
 
     @Override
     public void drawBackground(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
-        fillColor().withAlpha(isMouseOver() ? hoverAlpha : normalAlpha).draw(graphics, x, y, w, h);
+        int alpha = isMouseOver() ? hoverFillAlpha : idleFillAlpha;
+        fillColor().withAlpha(alpha).draw(graphics, x, y, w, h);
         NordColors.POLAR_NIGHT_3.draw(graphics, x, y + h - 1, w, 1);
     }
 

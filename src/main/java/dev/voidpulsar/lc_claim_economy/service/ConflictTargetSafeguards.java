@@ -5,8 +5,10 @@ import dev.ftb.mods.ftbteams.api.Team;
 import dev.ftb.mods.ftbteams.api.property.PrivacyMode;
 
 /**
- * Live build-chunk protections on a war opponent. A team is vulnerable when
- * block edit is public, explosions are allowed, or PvP is allowed.
+ * Snapshot of a war opponent's build-chunk defenses at the moment their war view was
+ * built. A team is exposed to attack whenever any one of the three flags is off -
+ * public block edit, allowed explosions, or allowed PvP are each individually enough
+ * to make raiding possible.
  */
 public record ConflictTargetSafeguards(
         boolean blockEditProtected,
@@ -14,15 +16,14 @@ public record ConflictTargetSafeguards(
         boolean pvpProtected
 ) {
     public boolean hasWarVulnerability() {
-        return !blockEditProtected || !explosionProtected || !pvpProtected;
+        return !(blockEditProtected && explosionProtected && pvpProtected);
     }
 
     public static ConflictTargetSafeguards live(Team team) {
-        return new ConflictTargetSafeguards(
-                team.getProperty(FTBChunksProperties.BLOCK_EDIT_MODE) != PrivacyMode.PUBLIC,
-                !team.getProperty(FTBChunksProperties.ALLOW_EXPLOSIONS),
-                !team.getProperty(FTBChunksProperties.ALLOW_PVP)
-        );
+        boolean editLocked = team.getProperty(FTBChunksProperties.BLOCK_EDIT_MODE) != PrivacyMode.PUBLIC;
+        boolean explosionsBlocked = !team.getProperty(FTBChunksProperties.ALLOW_EXPLOSIONS);
+        boolean pvpBlocked = !team.getProperty(FTBChunksProperties.ALLOW_PVP);
+        return new ConflictTargetSafeguards(editLocked, explosionsBlocked, pvpBlocked);
     }
 
     public static ConflictTargetSafeguards allProtected() {

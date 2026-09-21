@@ -42,8 +42,10 @@ public final class SafeguardPricing {
     }
 
     /**
-     * Billable chunk counts per type. The free chunk allowance is consumed by
-     * build chunks first, any remainder reduces the land chunk count.
+     * Billable chunk counts, split by type. The free allowance is spent on build
+     * chunks first; only what's left over after that reduces the land chunk count -
+     * so a team with more claims than free chunks but still within the allowance on
+     * build alone pays nothing extra for land, and vice versa.
      */
     public record ChunkCounts(int totalChunks, int buildBillable, int landBillable) {
         public static final ChunkCounts EMPTY = new ChunkCounts(0, 0, 0);
@@ -67,21 +69,22 @@ public final class SafeguardPricing {
             ChunkTeamData chunkData,
             TeamQueuedChanges pendingState
     ) {
-        int total = chunkData.getClaimedChunks().size();
-        int land = ProtectionEnforcement.countEffectiveLandChunks(server, team, chunkData, pendingState);
-        int build = Math.max(0, total - land);
+        int totalChunks = chunkData.getClaimedChunks().size();
+        int landChunks = ProtectionEnforcement.countEffectiveLandChunks(server, team, chunkData, pendingState);
+        int buildChunks = Math.max(0, totalChunks - landChunks);
 
-        int allowance = ComplimentaryChunkAllotment.allowance();
-        int buildBillable = Math.max(0, build - allowance);
-        int allowanceLeft = Math.max(0, allowance - build);
-        int landBillable = Math.max(0, land - allowanceLeft);
-        return new ChunkCounts(total, buildBillable, landBillable);
+        int freeAllowance = ComplimentaryChunkAllotment.allowance();
+        int buildBillable = Math.max(0, buildChunks - freeAllowance);
+        int allowanceRemainingForLand = Math.max(0, freeAllowance - buildChunks);
+        int landBillable = Math.max(0, landChunks - allowanceRemainingForLand);
+        return new ChunkCounts(totalChunks, buildBillable, landBillable);
     }
 
     /**
-     * Number of billed land price units: the billable land chunk count is
-     * rounded up to the next full group of {@code landChunkGroupSize} chunks,
-     * then divided by the group size (i.e. one charge per started group).
+     * Land is charged per started group rather than per chunk: the billable land
+     * count rounds up to the next full {@code landChunkGroupSize}-chunk group before
+     * dividing, so e.g. one chunk over a group boundary still costs a whole extra
+     * unit - this is what makes land cheaper per-chunk than build territory.
      */
     public static int landChunkUnits(int landBillable) {
         return landChunkUnits(landBillable, landChunkGroupSize());
@@ -100,69 +103,64 @@ public final class SafeguardPricing {
     }
 
     public static long calculateBuildBasePrice(TeamPropertyCollection properties, Map<String, String> pendingProperties) {
-        long base = 0L;
+        var config = LcClaimEconomyConfig.SERVER;
+        long total = 0L;
         if (!getBooleanProperty(properties, FTBChunksProperties.ALLOW_MOB_GRIEFING, pendingProperties)) {
-            base += LcClaimEconomyConfig.SERVER.mobGriefProtectionPrice.get();
+            total += config.mobGriefProtectionPrice.get();
         }
         if (!getBooleanProperty(properties, FTBChunksProperties.ALLOW_EXPLOSIONS, pendingProperties)) {
-            base += LcClaimEconomyConfig.SERVER.explosionProtectionPrice.get();
+            total += config.explosionProtectionPrice.get();
         }
         if (!getBooleanProperty(properties, FTBChunksProperties.ALLOW_PVP, pendingProperties)) {
-            base += LcClaimEconomyConfig.SERVER.pvpDisablePrice.get();
+            total += config.pvpDisablePrice.get();
         }
         if (getPrivacyProperty(properties, FTBChunksProperties.BLOCK_INTERACT_MODE, pendingProperties) != PrivacyMode.PUBLIC) {
-            base += LcClaimEconomyConfig.SERVER.blockInteractProtectionPrice.get();
+            total += config.blockInteractProtectionPrice.get();
         }
         if (getPrivacyProperty(properties, FTBChunksProperties.BLOCK_EDIT_MODE, pendingProperties) != PrivacyMode.PUBLIC) {
-            base += LcClaimEconomyConfig.SERVER.blockEditProtectionPrice.get();
+            total += config.blockEditProtectionPrice.get();
         }
         if (getPrivacyProperty(properties, FTBChunksProperties.ENTITY_INTERACT_MODE, pendingProperties) != PrivacyMode.PUBLIC) {
-            base += LcClaimEconomyConfig.SERVER.entityInteractProtectionPrice.get();
+            total += config.entityInteractProtectionPrice.get();
         }
-        return base;
+        return total;
     }
 
+    /** Land chunks only ever expose the two block-privacy settings - there's no mob-griefing/explosion/PvP toggle for them. */
     public static long calculateLandBasePrice(TeamPropertyCollection properties, Map<String, String> pendingProperties) {
-        long base = 0L;
-        // Land chunks can only be protected against block interaction/editing.
+        var config = LcClaimEconomyConfig.SERVER;
+        long total = 0L;
         if (getPrivacyProperty(properties, LandProperties.LAND_BLOCK_INTERACT_MODE, pendingProperties) != PrivacyMode.PUBLIC) {
-            base += LcClaimEconomyConfig.SERVER.blockInteractProtectionPrice.get();
+            total += config.blockInteractProtectionPrice.get();
         }
         if (getPrivacyProperty(properties, LandProperties.LAND_BLOCK_EDIT_MODE, pendingProperties) != PrivacyMode.PUBLIC) {
-            base += LcClaimEconomyConfig.SERVER.blockEditProtectionPrice.get();
+            total += config.blockEditProtectionPrice.get();
         }
-        return base;
+        return total;
     }
 
     /**
-     * Protection upkeep in copper: build chunks pay the build base price per
-     * chunk, land chunks (state territory) pay the land base price once per
-     * group of {@code landChunkGroupSize} chunks (rounded up to the next full
-     * group), which makes land cheaper to protect.
+     * Combines both chunk types into one upkeep figure: build chunks are charged
+     * per-chunk at the build rate, while land chunks are charged per started group
+     * (see {@link #landChunkUnits(int)}) at the land rate.
      */
     public static long calculateProtectionCopper(
             TeamPropertyCollection properties,
             Map<String, String> pendingProperties,
             ChunkCounts counts
     ) {
-        long copper = 0L;
         long buildBase = calculateBuildBasePrice(properties, pendingProperties);
-        if (buildBase > 0 && counts.buildBillable() > 0) {
-            copper += buildBase * counts.buildBillable();
-        }
+        long buildCopper = (buildBase > 0 && counts.buildBillable() > 0) ? buildBase * counts.buildBillable() : 0L;
+
         long landBase = calculateLandBasePrice(properties, pendingProperties);
-        if (landBase > 0 && counts.landBillable() > 0) {
-            copper += landBase * landChunkUnits(counts.landBillable());
-        }
-        return copper;
+        long landCopper = (landBase > 0 && counts.landBillable() > 0) ? landBase * landChunkUnits(counts.landBillable()) : 0L;
+
+        return buildCopper + landCopper;
     }
 
     public static long calculateForceLoadCopper(int forceLoadCount) {
-        long forceLoadPrice = LcClaimEconomyConfig.SERVER.forceLoadUpkeepPrice.get();
-        if (forceLoadPrice > 0 && forceLoadCount > 0) {
-            return forceLoadPrice * forceLoadCount;
-        }
-        return 0L;
+        long unitPrice = LcClaimEconomyConfig.SERVER.forceLoadUpkeepPrice.get();
+        return (unitPrice > 0 && forceLoadCount > 0) ? unitPrice * forceLoadCount : 0L;
     }
 
     public static MoneyValue calculateTotalUpkeepCost(MinecraftServer server, Team team, TeamQueuedChanges pendingState) {
@@ -170,15 +168,8 @@ public final class SafeguardPricing {
     }
 
     public static long calculateTotalUpkeepCopper(MinecraftServer server, Team team, TeamQueuedChanges pendingState) {
-        ChunkTeamData chunkData = FTBChunksAPI.api().getManager().getOrCreateData(team);
-        ChunkCounts counts = countBillableChunks(server, team, chunkData, pendingState);
-        int forceLoadCount = countEffectiveForceLoads(chunkData, pendingState);
-        long protectionCopper = calculateProtectionCopper(
-                team.getProperties(),
-                SafeguardRollbackService.pricingProperties(team, pendingState),
-                counts
-        );
-        return protectionCopper + calculateForceLoadCopper(forceLoadCount);
+        Map<String, String> livePricing = SafeguardRollbackService.pricingProperties(team, pendingState);
+        return calculateTotalUpkeepCopper(server, team, pendingState, livePricing);
     }
 
     public static long calculateTotalUpkeepCopper(
@@ -189,16 +180,17 @@ public final class SafeguardPricing {
     ) {
         ChunkTeamData chunkData = FTBChunksAPI.api().getManager().getOrCreateData(team);
         ChunkCounts counts = countBillableChunks(server, team, chunkData, pendingState);
-        int forceLoadCount = countEffectiveForceLoads(chunkData, pendingState);
         long protectionCopper = calculateProtectionCopper(team.getProperties(), pricingOverrides, counts);
-        return protectionCopper + calculateForceLoadCopper(forceLoadCount);
+        long forceLoadCopper = calculateForceLoadCopper(countEffectiveForceLoads(chunkData, pendingState));
+        return protectionCopper + forceLoadCopper;
     }
 
+    /** Live force-loaded chunk count adjusted for changes that are queued but not applied yet. */
     public static int countEffectiveForceLoads(ChunkTeamData chunkData, TeamQueuedChanges pendingState) {
-        int count = chunkData.getForceLoadedChunks().size();
-        count += pendingState.pendingForceLoads().size();
-        count -= pendingState.pendingForceUnloads().size();
-        return Math.max(count, 0);
+        int projected = chunkData.getForceLoadedChunks().size()
+                + pendingState.pendingForceLoads().size()
+                - pendingState.pendingForceUnloads().size();
+        return Math.max(projected, 0);
     }
 
     public static boolean isProtectionProperty(TeamProperty<?> property) {
@@ -223,32 +215,34 @@ public final class SafeguardPricing {
             TeamProperty<?> property,
             Object value
     ) {
-        Map<String, String> copy = new HashMap<>(pendingProperties);
-        copy.put(propertyKey(property), serializePropertyValue(property, value));
-        return copy;
+        Map<String, String> updated = new HashMap<>(pendingProperties);
+        updated.put(propertyKey(property), serializePropertyValue(property, value));
+        return updated;
     }
 
+    /** Reads a boolean property, preferring a pending override over the live team value when one is queued. */
     private static boolean getBooleanProperty(
             TeamPropertyCollection properties,
             TeamProperty<Boolean> property,
             Map<String, String> pendingProperties
     ) {
         String key = propertyKey(property);
-        if (pendingProperties.containsKey(key)) {
-            return deserializePropertyValue(property, pendingProperties.get(key), properties.get(property));
-        }
-        return properties.get(property);
+        String overrideValue = pendingProperties.get(key);
+        return overrideValue != null
+                ? deserializePropertyValue(property, overrideValue, properties.get(property))
+                : properties.get(property);
     }
 
+    /** Reads a privacy-mode property, preferring a pending override over the live team value when one is queued. */
     private static PrivacyMode getPrivacyProperty(
             TeamPropertyCollection properties,
             TeamProperty<PrivacyMode> property,
             Map<String, String> pendingProperties
     ) {
         String key = propertyKey(property);
-        if (pendingProperties.containsKey(key)) {
-            return deserializePropertyValue(property, pendingProperties.get(key), properties.get(property));
-        }
-        return properties.get(property);
+        String overrideValue = pendingProperties.get(key);
+        return overrideValue != null
+                ? deserializePropertyValue(property, overrideValue, properties.get(property))
+                : properties.get(property);
     }
 }

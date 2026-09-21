@@ -13,12 +13,11 @@ import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 
 /**
- * Note: this class's own method signatures/fields must never reference any
- * {@code dev.ftb.mods.*} or {@code xaero.pac.*} type - both are optional
- * dependencies (see {@code ModCompat}), and this class is loaded
- * unconditionally regardless of which claim mod (if either) is installed.
- * The actual FTB/OP&C-specific lookups below are guarded behind
- * {@code ModCompat} checks before the corresponding type is ever touched.
+ * Pushes the client-facing pricing/balance snapshot used by the claim HUD. This class
+ * loads unconditionally regardless of which claim mod (if any) is present, so its own
+ * public signatures must stay free of {@code dev.ftb.mods.*}/{@code xaero.pac.*} types;
+ * those optional dependencies only get touched inside methods already guarded by a
+ * {@code ModCompat} check.
  */
 public final class ClaimPricingBroadcast {
     private ClaimPricingBroadcast() {
@@ -29,51 +28,17 @@ public final class ClaimPricingBroadcast {
     }
 
     public static PricingBroadcastPayload createPayload(ServerPlayer player) {
-        boolean balanceSynced = false;
-        boolean balanceEmpty = true;
-        String balanceText = "";
-        int claimedChunks = 0;
-
-        if (ModCompat.isFtbAvailable() && FTBTeamsAPI.api().isManagerLoaded()) {
-            Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
-            if (team != null) {
-                BankLedgerAccess.ensurePartyAccountExists(player.server, team);
-                IBankAccount account = BankLedgerAccess.getAccountForPlayer(player.server, player);
-                balanceSynced = true;
-                balanceEmpty = account.getMoneyStorage().isEmpty();
-                if (!balanceEmpty) {
-                    String text = account.getMoneyStorage().getAllValueText().getString();
-                    // Defensive cap: FriendlyByteBuf#writeUtf throws an EncoderException
-                    // (which disconnects the player) if the string exceeds its max length.
-                    // A normal formatted balance is at most a few dozen characters, so this
-                    // never triggers in practice, but it stops a malformed/huge value from
-                    // ever taking the connection down.
-                    if (text.length() > 256) {
-                        text = text.substring(0, 256);
-                    }
-                    balanceText = text;
-                }
-                if (FTBChunksAPI.api().isManagerLoaded()) {
-                    claimedChunks = FTBChunksAPI.api().getManager().getOrCreateData(team).getClaimedChunks().size();
-                }
-            }
-        } else if (ModCompat.isOpcAvailable()) {
-            OpcDashboardSync.Balance balance = OpcDashboardSync.resolve(player);
-            balanceSynced = balance.synced();
-            balanceEmpty = balance.empty();
-            balanceText = balance.text();
-            claimedChunks = balance.claimedChunks();
-        }
+        BalanceSnapshot balance = resolveBalanceSnapshot(player);
 
         return new PricingBroadcastPayload(
                 LcClaimEconomyConfig.SERVER.claimPrice.get(),
                 LcClaimEconomyConfig.SERVER.forceLoadUpkeepPrice.get(),
                 LcClaimEconomyConfig.SERVER.upkeepPeriodMinutes.get(),
                 LcClaimEconomyConfig.SERVER.freeChunks.get(),
-                claimedChunks,
-                balanceSynced,
-                balanceEmpty,
-                balanceText,
+                balance.claimedChunks(),
+                balance.synced(),
+                balance.empty(),
+                balance.text(),
                 LcClaimEconomyConfig.SERVER.mobGriefProtectionPrice.get(),
                 LcClaimEconomyConfig.SERVER.explosionProtectionPrice.get(),
                 LcClaimEconomyConfig.SERVER.pvpDisablePrice.get(),
@@ -83,5 +48,43 @@ public final class ClaimPricingBroadcast {
                 SafeguardPricing.landChunkGroupSize(),
                 ModCompat.isFtbAvailable() && ConflictService.isEnabled()
         );
+    }
+
+    /** Player's own balance text plus claim count, sourced from whichever claim mod (FTB or OP&C) is actually installed. */
+    private record BalanceSnapshot(boolean synced, boolean empty, String text, int claimedChunks) {
+        static final BalanceSnapshot NONE = new BalanceSnapshot(false, true, "", 0);
+    }
+
+    private static BalanceSnapshot resolveBalanceSnapshot(ServerPlayer player) {
+        if (ModCompat.isFtbAvailable() && FTBTeamsAPI.api().isManagerLoaded()) {
+            Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
+            return team == null ? BalanceSnapshot.NONE : resolveFtbBalance(player, team);
+        }
+        if (ModCompat.isOpcAvailable()) {
+            OpcDashboardSync.Balance balance = OpcDashboardSync.resolve(player);
+            return new BalanceSnapshot(balance.synced(), balance.empty(), balance.text(), balance.claimedChunks());
+        }
+        return BalanceSnapshot.NONE;
+    }
+
+    private static BalanceSnapshot resolveFtbBalance(ServerPlayer player, Team team) {
+        BankLedgerAccess.ensurePartyAccountExists(player.server, team);
+        IBankAccount account = BankLedgerAccess.getAccountForPlayer(player.server, player);
+        boolean empty = account.getMoneyStorage().isEmpty();
+        String text = empty ? "" : capForNetworkWrite(account.getMoneyStorage().getAllValueText().getString());
+        int claimedChunks = FTBChunksAPI.api().isManagerLoaded()
+                ? FTBChunksAPI.api().getManager().getOrCreateData(team).getClaimedChunks().size()
+                : 0;
+        return new BalanceSnapshot(true, empty, text, claimedChunks);
+    }
+
+    /**
+     * {@code FriendlyByteBuf#writeUtf} throws (and disconnects the player) past its max
+     * length. A real formatted balance never gets remotely close to 256 characters, but
+     * this keeps a malformed or absurd value from ever being able to take the connection
+     * down.
+     */
+    private static String capForNetworkWrite(String text) {
+        return text.length() > 256 ? text.substring(0, 256) : text;
     }
 }

@@ -20,11 +20,13 @@ public final class ClientPricingCache {
             "message.lc_claim_economy.claim_rank_denied"
     );
 
-    // Matches FTB Chunks' own "Claimed: X / Y" and "Force loaded: X / Y" text exactly:
-    // white labels, vanilla Minecraft green (ChatFormatting.GREEN) for values. No
-    // background/border box, since this renders inside FTB's own bottom bar
-    // (ChunkScreen$CustomBottomPanel), which already provides the panel background -
-    // adding our own on top just looked like a mismatched floating card.
+    // These four colors intentionally echo FTB Chunks' own bottom-bar text (white
+    // labels, vanilla green values) rather than this mod's usual Nord palette,
+    // because ChunkScreenCustomBottomPanelMixin paints this segment directly
+    // into FTB's existing bottom bar. That bar already supplies its own
+    // background, so a mismatched color scheme here would read as a bug, not
+    // a feature - matching it exactly makes the injected text disappear into
+    // the vanilla panel like it was always part of it.
     private static final Color4I LABEL_COLOR = Color4I.rgb(0xFFFFFF);
     private static final Color4I SEPARATOR_COLOR = Color4I.rgb(0xAAAAAA);
     private static final Color4I VALUE_COLOR = Color4I.rgb(0x55FF55);
@@ -53,37 +55,37 @@ public final class ClientPricingCache {
     }
 
     public static void update(
-            long claim,
-            long forceLoadUpkeep,
-            int upkeepPeriod,
-            int free,
-            int claimed,
-            boolean syncedBalance,
-            boolean emptyBalance,
-            String balance,
-            long mobGrief,
-            long explosion,
-            long pvpDisable,
-            long blockInteract,
-            long blockEdit,
-            long entityInteract,
-            int landGroupSize
+            long newClaimPrice,
+            long newForceLoadUpkeepPrice,
+            int newUpkeepPeriodMinutes,
+            int newFreeChunks,
+            int newClaimedChunks,
+            boolean newBalanceSynced,
+            boolean newBalanceEmpty,
+            String newBalanceText,
+            long newMobGriefProtectionPrice,
+            long newExplosionProtectionPrice,
+            long newPvpDisablePrice,
+            long newBlockInteractProtectionPrice,
+            long newBlockEditProtectionPrice,
+            long newEntityInteractProtectionPrice,
+            int newLandChunkGroupSize
     ) {
-        claimPrice = claim;
-        forceLoadUpkeepPrice = forceLoadUpkeep;
-        upkeepPeriodMinutes = upkeepPeriod;
-        freeChunks = free;
-        claimedChunks = claimed;
-        balanceSynced = syncedBalance;
-        balanceEmpty = emptyBalance;
-        balanceText = balance;
-        mobGriefProtectionPrice = mobGrief;
-        explosionProtectionPrice = explosion;
-        pvpDisablePrice = pvpDisable;
-        blockInteractProtectionPrice = blockInteract;
-        blockEditProtectionPrice = blockEdit;
-        entityInteractProtectionPrice = entityInteract;
-        landChunkGroupSize = landGroupSize;
+        claimPrice = newClaimPrice;
+        forceLoadUpkeepPrice = newForceLoadUpkeepPrice;
+        upkeepPeriodMinutes = newUpkeepPeriodMinutes;
+        freeChunks = newFreeChunks;
+        claimedChunks = newClaimedChunks;
+        balanceSynced = newBalanceSynced;
+        balanceEmpty = newBalanceEmpty;
+        balanceText = newBalanceText;
+        mobGriefProtectionPrice = newMobGriefProtectionPrice;
+        explosionProtectionPrice = newExplosionProtectionPrice;
+        pvpDisablePrice = newPvpDisablePrice;
+        blockInteractProtectionPrice = newBlockInteractProtectionPrice;
+        blockEditProtectionPrice = newBlockEditProtectionPrice;
+        entityInteractProtectionPrice = newEntityInteractProtectionPrice;
+        landChunkGroupSize = newLandChunkGroupSize;
     }
 
     public static long claimPrice() {
@@ -110,14 +112,14 @@ public final class ClientPricingCache {
         return Math.max(0, freeChunks - claimedChunks);
     }
 
-    /** Public alias of {@link #formatBalance()} for use outside this class. */
+    /** Public alias of {@link #balanceComponent()} for use outside this class. */
     public static Component currentBalanceText() {
-        return formatBalance();
+        return balanceComponent();
     }
 
-    /** Public alias of {@link #formatEffectiveClaimPrice()} for use outside this class. */
+    /** Public alias of {@link #effectivePriceComponent()} for use outside this class. */
     public static Component currentEffectiveClaimPrice() {
-        return formatEffectiveClaimPrice();
+        return effectivePriceComponent();
     }
 
     /**
@@ -188,21 +190,22 @@ public final class ClientPricingCache {
         return LC_CLAIM_RESULT_IDS.contains(resultId);
     }
 
+    /** Paints the "claim <price> | balance <balance> | upkeep <price> <period>" line into FTB Chunks' bottom bar, left to right, tracking a running cursor since each segment's width depends on its text. */
     public static void renderBottomPanel(GuiGraphics graphics, Theme theme, int x, int y) {
         int cursor = x;
-        cursor = drawSegment(theme, graphics, cursor, y, label("claim"), LABEL_COLOR);
-        cursor = drawSegment(theme, graphics, cursor, y, space(), LABEL_COLOR);
-        cursor = drawSegment(theme, graphics, cursor, y, formatEffectiveClaimPrice(), VALUE_COLOR);
-        cursor = drawSegment(theme, graphics, cursor, y, separator(), SEPARATOR_COLOR);
-        cursor = drawSegment(theme, graphics, cursor, y, label("balance"), LABEL_COLOR);
-        cursor = drawSegment(theme, graphics, cursor, y, space(), LABEL_COLOR);
-        cursor = drawSegment(theme, graphics, cursor, y, formatBalance(), VALUE_COLOR);
-        cursor = drawSegment(theme, graphics, cursor, y, separator(), SEPARATOR_COLOR);
-        cursor = drawSegment(theme, graphics, cursor, y, label("upkeep"), LABEL_COLOR);
-        cursor = drawSegment(theme, graphics, cursor, y, space(), LABEL_COLOR);
-        cursor = drawSegment(theme, graphics, cursor, y, formatPrice(forceLoadUpkeepPrice), VALUE_COLOR);
-        cursor = drawSegment(theme, graphics, cursor, y, space(), PERIOD_COLOR);
-        drawSegment(theme, graphics, cursor, y, formatUpkeepPeriod(upkeepPeriodMinutes), PERIOD_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, labelText("claim"), LABEL_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, spaceText(), LABEL_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, effectivePriceComponent(), VALUE_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, separatorText(), SEPARATOR_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, labelText("balance"), LABEL_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, spaceText(), LABEL_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, balanceComponent(), VALUE_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, separatorText(), SEPARATOR_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, labelText("upkeep"), LABEL_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, spaceText(), LABEL_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, priceComponent(forceLoadUpkeepPrice), VALUE_COLOR);
+        cursor = paintSegment(theme, graphics, cursor, y, spaceText(), PERIOD_COLOR);
+        paintSegment(theme, graphics, cursor, y, periodComponent(upkeepPeriodMinutes), PERIOD_COLOR);
     }
 
     public static void noteChunkUpdate(int totalChunks, int changedChunks, Map<String, Integer> problems) {
@@ -210,6 +213,7 @@ public final class ClientPricingCache {
         lastProblems = problems;
     }
 
+    /** Picks the right chat-line translation for a failed claim attempt, based on which shortfall result fired and how many chunks were involved. */
     public static MutableComponent claimProblemLine(String resultId) {
         if (MassClaimShortfallResult.RESULT_ID.equals(resultId)) {
             int count = lastProblems.getOrDefault(resultId, lastUpdateTotalChunks);
@@ -220,9 +224,9 @@ public final class ClientPricingCache {
             if (count > 1) {
                 return Component.translatable(
                         "message.lc_claim_economy.insufficient_funds_bulk_claim",
-                        formatEffectiveClaimPrice(),
+                        effectivePriceComponent(),
                         count,
-                        formatBalance()
+                        balanceComponent()
                 );
             }
             return insufficientFundsMessage();
@@ -233,8 +237,8 @@ public final class ClientPricingCache {
     public static MutableComponent insufficientFundsMessage() {
         return Component.translatable(
                 ClaimShortfallResult.RESULT_ID,
-                formatEffectiveClaimPrice(),
-                formatBalance()
+                effectivePriceComponent(),
+                balanceComponent()
         );
     }
 
@@ -242,21 +246,22 @@ public final class ClientPricingCache {
         long unitPrice = nextClaimUnitPrice();
         return Component.translatable(
                 MassClaimShortfallResult.RESULT_ID,
-                formatPrice(unitPrice * Math.max(chunkCount, 1)),
+                priceComponent(unitPrice * Math.max(chunkCount, 1)),
                 chunkCount,
-                formatBalance()
+                balanceComponent()
         );
     }
 
+    /** 0 while the free-chunk allowance still covers the next claim, otherwise the full per-chunk price. */
     private static long nextClaimUnitPrice() {
         return claimedChunks < freeChunks ? 0L : claimPrice;
     }
 
-    private static Component formatEffectiveClaimPrice() {
-        return formatPrice(nextClaimUnitPrice());
+    private static Component effectivePriceComponent() {
+        return priceComponent(nextClaimUnitPrice());
     }
 
-    private static int drawSegment(
+    private static int paintSegment(
             Theme theme,
             GuiGraphics graphics,
             int x,
@@ -268,33 +273,34 @@ public final class ClientPricingCache {
         return x + theme.getStringWidth(text);
     }
 
-    private static Component label(String key) {
+    private static Component labelText(String key) {
         return Component.translatable("gui.lc_claim_economy.label." + key);
     }
 
-    private static Component separator() {
+    private static Component separatorText() {
         return Component.translatable("gui.lc_claim_economy.separator");
     }
 
-    private static Component space() {
+    private static Component spaceText() {
         return Component.literal(" ");
     }
 
-    private static Component formatBalance() {
+    private static Component balanceComponent() {
         if (balanceEmpty) {
             return Component.translatable("message.lc_claim_economy.balance_empty");
         }
         return Component.literal(balanceText == null ? "" : balanceText);
     }
 
-    private static Component formatPrice(long amount) {
+    private static Component priceComponent(long amount) {
         if (amount <= 0L) {
             return Component.translatable("gui.lc_claim_economy.price_free");
         }
         return CurrencyAmounts.fromCopper(amount).getText();
     }
 
-    private static Component formatUpkeepPeriod(int minutes) {
+    /** Collapses a minute count down to whichever unit divides it evenly (days, then hours, then minutes), matching or pluralizing the translation key as needed. */
+    private static Component periodComponent(int minutes) {
         if (minutes % 1440 == 0) {
             int days = minutes / 1440;
             return days == 1

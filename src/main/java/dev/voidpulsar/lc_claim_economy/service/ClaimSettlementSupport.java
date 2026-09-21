@@ -10,6 +10,7 @@ import net.minecraft.commands.CommandSourceStack;
 import java.util.ArrayList;
 import java.util.List;
 
+/** Shared helper for the "wipe out every claim a team/player holds" settlement paths (disband, party join, admin clear). */
 public final class ClaimSettlementSupport {
     private ClaimSettlementSupport() {
     }
@@ -27,25 +28,32 @@ public final class ClaimSettlementSupport {
         return unclaimAll(chunkData, source, true);
     }
 
+    /**
+     * Unclaims every chunk currently held by {@code chunkData}. Settlement callers
+     * snapshot the claim list up front since the loop itself mutates {@code chunkData}
+     * as it goes, and iterating a collection while removing from it underneath is asking
+     * for trouble.
+     */
     public static int unclaimAll(ChunkTeamData chunkData, CommandSourceStack source, boolean suppressNotifications) {
-        List<ClaimedChunk> claimedChunks = new ArrayList<>(chunkData.getClaimedChunks());
-        if (claimedChunks.isEmpty()) {
+        List<ClaimedChunk> snapshot = new ArrayList<>(chunkData.getClaimedChunks());
+        if (snapshot.isEmpty()) {
             return 0;
         }
 
-        int[] unclaimed = {0};
-        Runnable action = () -> {
-            for (ClaimedChunk chunk : claimedChunks) {
+        int[] successCount = {0};
+        Runnable unclaimEach = () -> {
+            for (ClaimedChunk chunk : snapshot) {
                 if (chunkData.unclaim(source, chunk.getPos(), false).isSuccess()) {
-                    unclaimed[0]++;
+                    successCount[0]++;
                 }
             }
         };
+
         if (suppressNotifications) {
-            ClaimTransferContext.runSuppressingNotifications(action);
+            ClaimTransferContext.runSuppressingNotifications(unclaimEach);
         } else {
-            action.run();
+            unclaimEach.run();
         }
-        return unclaimed[0];
+        return successCount[0];
     }
 }

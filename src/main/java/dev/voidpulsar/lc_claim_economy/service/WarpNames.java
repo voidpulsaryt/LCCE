@@ -4,24 +4,27 @@ import javax.annotation.Nullable;
 import java.util.Locale;
 import java.util.regex.Pattern;
 
-/** Pure warp-name validation/normalization, split out of {@link WarpService} so it's directly unit-testable. */
+/**
+ * Warp-name rules live here instead of inline in {@link WarpService} so the
+ * validation logic can be unit tested without spinning up a server/player.
+ */
 public final class WarpNames {
-    private static final Pattern NAME_PATTERN = Pattern.compile("[A-Za-z0-9_]{1,32}");
+    private static final Pattern ALLOWED_CHARACTERS = Pattern.compile("[A-Za-z0-9_]{1,32}");
 
     private WarpNames() {
     }
 
-    /** The trimmed name if it's a valid warp name (letters/digits/underscore, 1-32 chars), otherwise null. */
+    /** Returns the trimmed name when it satisfies the length/character rules, else {@code null}. */
     @Nullable
     public static String normalize(@Nullable String rawName) {
         if (rawName == null) {
             return null;
         }
-        String trimmed = rawName.trim();
-        return NAME_PATTERN.matcher(trimmed).matches() ? trimmed : null;
+        String candidate = rawName.trim();
+        return ALLOWED_CHARACTERS.matcher(candidate).matches() ? candidate : null;
     }
 
-    /** {@link #normalize} lowercased, for use as a map key. */
+    /** Lowercases the result of {@link #normalize} so it's safe to use as a case-insensitive map key. */
     @Nullable
     public static String normalizeKey(@Nullable String rawName) {
         String normalized = normalize(rawName);

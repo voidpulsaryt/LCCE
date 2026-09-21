@@ -12,11 +12,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Configurable order in which protections are disabled when upkeep cannot be
- * paid, and the inverse order used when restoring them at upkeep.
+ * Server owners can reorder which protection drops first when a team can't cover
+ * upkeep, via {@code protectionDismantleOrderBuild}/{@code ...Land}. This class turns
+ * that config into concrete property lists, in both the dismantle direction and its
+ * mirror-image restore direction.
  */
 public final class SafeguardDismantleSequence {
-    private static final List<String> DEFAULT_BUILD_ORDER = List.of(
+    private static final List<String> FALLBACK_BUILD_ORDER = List.of(
             "entity_interact_mode",
             "block_edit_mode",
             "block_interact_mode",
@@ -25,7 +27,7 @@ public final class SafeguardDismantleSequence {
             "allow_pvp"
     );
 
-    private static final List<String> DEFAULT_LAND_ORDER = List.of(
+    private static final List<String> FALLBACK_LAND_ORDER = List.of(
             "land_block_edit_mode",
             "land_block_interact_mode"
     );
@@ -34,77 +36,79 @@ public final class SafeguardDismantleSequence {
     }
 
     public static List<TeamProperty<?>> buildOrder() {
-        return resolveOrder(LcClaimEconomyConfig.SERVER.protectionDismantleOrderBuild.get(),
-                DEFAULT_BUILD_ORDER, SafeguardPricing.BUILD_PROTECTION_PROPERTIES);
+        return resolveConfiguredOrder(LcClaimEconomyConfig.SERVER.protectionDismantleOrderBuild.get(),
+                FALLBACK_BUILD_ORDER, SafeguardPricing.BUILD_PROTECTION_PROPERTIES);
     }
 
     public static List<TeamProperty<?>> landOrder() {
-        return resolveOrder(LcClaimEconomyConfig.SERVER.protectionDismantleOrderLand.get(),
-                DEFAULT_LAND_ORDER, LandProperties.ALL);
+        return resolveConfiguredOrder(LcClaimEconomyConfig.SERVER.protectionDismantleOrderLand.get(),
+                FALLBACK_LAND_ORDER, LandProperties.ALL);
     }
 
+    /**
+     * Land goes first, build second. Within each list, duplicates are dropped so a
+     * property that's (mis)configured into both the build and land order only gets
+     * dismantled once instead of being processed twice.
+     */
     public static List<TeamProperty<?>> fullDismantleOrder() {
-        // Land protections are stripped first; build protections after.
-        // Deduplicate so a property that appears in both configured lists
-        // is only processed once.
-        List<TeamProperty<?>> order = new ArrayList<>(landOrder());
-        for (TeamProperty<?> p : buildOrder()) {
-            if (!order.contains(p)) {
-                order.add(p);
+        List<TeamProperty<?>> combined = new ArrayList<>(landOrder());
+        for (TeamProperty<?> buildProperty : buildOrder()) {
+            if (!combined.contains(buildProperty)) {
+                combined.add(buildProperty);
             }
         }
-        return order;
+        return combined;
     }
 
+    /** Whatever was dismantled last comes back first - simple reversal of {@link #fullDismantleOrder()}. */
     public static List<TeamProperty<?>> restoreOrder() {
-        List<TeamProperty<?>> order = new ArrayList<>(fullDismantleOrder());
-        java.util.Collections.reverse(order);
-        return order;
+        List<TeamProperty<?>> reversed = new ArrayList<>(fullDismantleOrder());
+        java.util.Collections.reverse(reversed);
+        return reversed;
     }
 
     public static int dismantleIndex(TeamProperty<?> property) {
-        List<TeamProperty<?>> order = fullDismantleOrder();
-        for (int i = 0; i < order.size(); i++) {
-            if (order.get(i).equals(property)) {
-                return i;
-            }
-        }
-        return -1;
+        return fullDismantleOrder().indexOf(property);
     }
 
     public static Comparator<String> restorePropertyKeyComparator() {
-        Map<String, Integer> index = new HashMap<>();
-        List<TeamProperty<?>> restore = restoreOrder();
-        for (int i = 0; i < restore.size(); i++) {
-            index.put(SafeguardPricing.propertyKey(restore.get(i)), i);
+        List<TeamProperty<?>> restoreSequence = restoreOrder();
+        Map<String, Integer> rank = new HashMap<>();
+        for (int position = 0; position < restoreSequence.size(); position++) {
+            rank.put(SafeguardPricing.propertyKey(restoreSequence.get(position)), position);
         }
-        return Comparator.comparingInt(key -> index.getOrDefault(key, Integer.MAX_VALUE));
+        return Comparator.comparingInt(key -> rank.getOrDefault(key, Integer.MAX_VALUE));
     }
 
-    private static List<TeamProperty<?>> resolveOrder(
-            List<? extends String> configured,
-            List<String> defaults,
-            Collection<? extends TeamProperty<?>> allowedFallback
+    /**
+     * Builds a property list from a config key list, falling back to the shipped
+     * default order when the server owner hasn't set one. Anything in {@code
+     * completeSet} that the configured/default list doesn't mention is appended
+     * afterward, so build and land properties never bleed into each other's order
+     * just because one list is incomplete.
+     */
+    private static List<TeamProperty<?>> resolveConfiguredOrder(
+            List<? extends String> configuredKeys,
+            List<String> fallbackKeys,
+            Collection<? extends TeamProperty<?>> completeSet
     ) {
-        List<String> keys = configured.isEmpty() ? defaults : new ArrayList<>(configured);
-        List<TeamProperty<?>> resolved = new ArrayList<>();
-        for (String key : keys) {
-            TeamProperty<?> property = findProperty(key);
-            if (property != null && !resolved.contains(property)) {
-                resolved.add(property);
+        List<String> keysToUse = configuredKeys.isEmpty() ? fallbackKeys : new ArrayList<>(configuredKeys);
+        List<TeamProperty<?>> ordered = new ArrayList<>();
+        for (String key : keysToUse) {
+            TeamProperty<?> property = findProtectionProperty(key);
+            if (property != null && !ordered.contains(property)) {
+                ordered.add(property);
             }
         }
-        // Fill in any properties from the allowed set that aren't explicitly
-        // listed — this prevents cross-contamination between build and land lists.
-        for (TeamProperty<?> property : allowedFallback) {
-            if (!resolved.contains(property)) {
-                resolved.add(property);
+        for (TeamProperty<?> property : completeSet) {
+            if (!ordered.contains(property)) {
+                ordered.add(property);
             }
         }
-        return resolved;
+        return ordered;
     }
 
-    private static TeamProperty<?> findProperty(String key) {
+    private static TeamProperty<?> findProtectionProperty(String key) {
         for (TeamProperty<?> property : SafeguardPricing.PROTECTION_PROPERTIES) {
             if (SafeguardPricing.propertyKey(property).equals(key)) {
                 return property;

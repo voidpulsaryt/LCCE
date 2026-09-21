@@ -11,32 +11,27 @@ import javax.annotation.Nullable;
 import java.util.UUID;
 
 /**
- * Central point for all cleanup that must happen when an FTB team ceases to
- * exist. Every code path that handles team deletion — event listeners,
- * reconcile, and the disband settlement — must go through here so nothing
- * is left behind.
+ * The single funnel for tearing down everything this mod attaches to an FTB team once
+ * that team stops existing. It matters that every deletion path - live event
+ * listeners, the startup reconcile pass, and disband settlement - all route through
+ * here, otherwise it's easy for one of them to forget a step and leave orphaned state
+ * behind in {@code SavedData}.
  *
- * <p>Financial settlement (chunk refunds, balance transfer to owner) is handled
- * separately by {@link PartyDissolutionSettlement} <em>before</em> calling
- * this service, because it requires the team object and its members to still
- * be resolvable. This service only does the structural cleanup that works even
- * when the FTB team object is no longer available.
+ * <p>Note this class does NOT do the financial side (chunk refunds, handing the
+ * remaining balance to the owner). {@link PartyDissolutionSettlement} does that first,
+ * before this runs, because it still needs the live {@link Team} and its member list -
+ * something this class deliberately doesn't require, since the reconcile path may only
+ * have a bare team id to work with.
  */
 public final class TeamPurgeService {
     private TeamPurgeService() {
     }
 
     /**
-     * Full structural cleanup for a deleted team. Safe to call even when the
-     * FTB {@link Team} object is no longer available (pass {@code null}).
-     *
-     * <p>Steps performed:
-     * <ol>
-     *   <li>Dissolve all active and pending war links, refresh partner upkeep.</li>
-     *   <li>Clear pending protection / force-load / war state.</li>
-     *   <li>Delete the linked LC bank-team account (parties only).</li>
-     *   <li>Remove the SavedData entry for this team.</li>
-     * </ol>
+     * Tears down war links, pending state, the linked bank account, and the SavedData
+     * entry itself. {@code teamForLcCleanup} may be {@code null} (the reconcile path
+     * doesn't have a live {@link Team} to hand over), in which case the bank-account
+     * link is dropped directly instead of routed through the normal deletion hook.
      */
     public static void purge(MinecraftServer server, UUID teamId, @Nullable Team teamForLcCleanup) {
         if (server == null || teamId == null) {
@@ -45,33 +40,28 @@ public final class TeamPurgeService {
 
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
 
-        // 1. War cleanup — dissolves outgoing and incoming war refs and syncs partners.
         ConflictService.cleanupTeamWars(server, teamId);
 
-        // 2. Pending state
         if (!savedData.getPendingState(teamId).isEmpty()) {
             savedData.setPendingState(teamId, new TeamQueuedChanges());
         }
 
-        // 3. LC bank-team deletion — delegate to CurrencyTeamLinkService which has
-        //    package access to CurrencyTeamAccess. Passing null when no Team object is
-        //    available (reconcile path) is handled gracefully inside.
         if (teamForLcCleanup != null) {
+            // CurrencyTeamLinkService has the package access this class doesn't, to reach
+            // into CurrencyTeamAccess for the actual LC-side bank team deletion.
             CurrencyTeamLinkService.onTeamDeleted(server, teamForLcCleanup);
         } else {
-            // No Team object — remove the SavedData link directly so the orphaned
-            // LC account reference doesn't accumulate. The LC team itself is left
-            // in place; a future reconcile of the LC side will clean it up.
+            // No live Team object to hand off (reconcile path) - at minimum, drop our own
+            // SavedData link so it doesn't keep pointing at an account nothing references
+            // anymore. The LC-side team is left alone; a later reconcile pass on that side
+            // will catch it.
             if (savedData.removeLink(teamId) != null) {
                 LcClaimEconomy.LOGGER.info("Reconcile: removed stale SavedData entry for team {}", teamId);
             }
         }
     }
 
-    /**
-     * Convenience overload used from event handlers where the {@link Team}
-     * object is still available.
-     */
+    /** Used by event handlers that still have the live {@link Team} in hand. */
     public static void purge(MinecraftServer server, Team team) {
         purge(server, team.getTeamId(), team);
     }

@@ -10,11 +10,12 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 
 /**
- * Italic-gray placeholder row ("no entries", "loading...", etc.), shared by
- * ChunkUserPermissionsScreen and WarpListScreen - their prior separate
- * {@code MessageRow} classes were byte-identical. Not used by ConflictScreen,
- * whose own {@code EmptyMessage} positions text differently and suppresses
- * the default hover background, which are real (if small) differences.
+ * Italic-gray placeholder row ("no entries", "loading...", etc.) reused by
+ * ChunkUserPermissionsScreen and WarpListScreen so their empty-state rows
+ * render identically. ConflictScreen deliberately doesn't use this - its rows
+ * are narrower and its own placeholder (PlaceholderRow, nested in that
+ * screen) drops the hover fill and shifts the text position to match, which
+ * would look wrong applied here.
  */
 public final class EmptyMessageRow extends Button {
     public EmptyMessageRow(Panel panel, Component title) {
@@ -23,6 +24,7 @@ public final class EmptyMessageRow extends Button {
 
     @Override
     public void onClicked(MouseButton button) {
+        // Purely informational row; clicks are swallowed rather than passed through.
     }
 
     @Override

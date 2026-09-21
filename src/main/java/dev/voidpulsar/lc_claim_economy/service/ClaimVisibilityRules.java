@@ -4,6 +4,7 @@ import dev.ftb.mods.ftbchunks.api.FTBChunksProperties;
 import dev.ftb.mods.ftbteams.api.Team;
 import dev.ftb.mods.ftbteams.api.property.PrivacyMode;
 
+/** Claim visibility is never billable and never allowed to go private - this mod always forces it public. */
 public final class ClaimVisibilityRules {
     public static final String PROPERTY_KEY = "claim_visibility";
 
@@ -14,7 +15,8 @@ public final class ClaimVisibilityRules {
         if (team == null || !team.isValid()) {
             return;
         }
-        if (team.getProperty(FTBChunksProperties.CLAIM_VISIBILITY) != PrivacyMode.PUBLIC) {
+        boolean alreadyPublic = team.getProperty(FTBChunksProperties.CLAIM_VISIBILITY) == PrivacyMode.PUBLIC;
+        if (!alreadyPublic) {
             team.setProperty(FTBChunksProperties.CLAIM_VISIBILITY, PrivacyMode.PUBLIC);
         }
     }

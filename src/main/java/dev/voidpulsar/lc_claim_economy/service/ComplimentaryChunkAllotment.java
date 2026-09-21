@@ -3,10 +3,12 @@ package dev.voidpulsar.lc_claim_economy.service;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
 
+/** How many of a team's claimed chunks are covered by the free allowance before billing kicks in. */
 public final class ComplimentaryChunkAllotment {
     private ComplimentaryChunkAllotment() {
     }
 
+    /** Config read is wrapped defensively - this runs on hot claim/unclaim paths and must never throw. */
     public static int allowance() {
         try {
             return LcClaimEconomyConfig.SERVER.freeChunks.get();
@@ -28,11 +30,12 @@ public final class ComplimentaryChunkAllotment {
         return claimedChunksBeforeUnclaim > allowance();
     }
 
+    /** Of {@code newClaims} chunks being claimed at once, how many fall outside whatever's left of the free allowance. */
     public static int countPaidClaimsInBatch(int currentClaimedChunks, int newClaims) {
         if (newClaims <= 0) {
             return 0;
         }
-        int freeRemaining = Math.max(0, allowance() - currentClaimedChunks);
-        return Math.max(0, newClaims - freeRemaining);
+        int stillFree = Math.max(0, allowance() - currentClaimedChunks);
+        return Math.max(0, newClaims - stillFree);
     }
 }

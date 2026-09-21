@@ -8,40 +8,43 @@ import net.minecraft.server.MinecraftServer;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
 /**
- * Backs the {@code siegeModeEnabled} config option. The actual interception
- * point is {@code dev.voidpulsar.lc_claim_economy.mixin.ClaimedChunkProtectionMixin},
- * which calls into this class from its {@code allowExplosions} injection.
+ * Implements the {@code siegeModeEnabled} config toggle: once a team has been at war
+ * long enough, its explosion protection stops applying. {@code
+ * dev.voidpulsar.lc_claim_economy.mixin.ClaimedChunkProtectionMixin} is the actual
+ * interception point and defers to {@link #explosionsBypassed} from its {@code
+ * allowExplosions} injection.
  */
 public final class SiegeModeService {
+    private static final long MILLIS_PER_HOUR = 3_600_000L;
+
     private SiegeModeService() {
     }
 
     /**
-     * True if this chunk's explosion protection should be bypassed because
-     * its team has been at war for longer than the configured grace period
-     * and siege mode is on. Deliberately blanket per-team (not scoped to the
-     * specific war opponent) - {@code allowExplosions()} carries no
-     * information about what caused the explosion to check against, and FTB
-     * Chunks' own explosion protection is a per-team setting to begin with,
-     * not per-attacker.
+     * Whether a claimed chunk's explosion protection should be ignored right now
+     * because siege mode kicked in. This is intentionally an all-or-nothing per-team
+     * check rather than scoped to a specific attacker: {@code allowExplosions()} gives
+     * us no way to know who/what caused the explosion, and FTB Chunks' explosion flag
+     * is itself a single per-team switch, not something that can be conditioned on the
+     * other side of the war.
      */
     public static boolean explosionsBypassed(ClaimedChunk chunk) {
         if (!LcClaimEconomyConfig.SERVER.siegeModeEnabled.get() || !ConflictService.isEnabled()) {
             return false;
         }
+
         Team team = chunk.getTeamData().getTeam();
-        if (team == null) {
-            return false;
-        }
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server == null) {
+        if (team == null || server == null) {
             return false;
         }
-        long activeSince = LcClaimEconomySavedData.get(server).getWarActiveSince(team.getTeamId());
-        if (activeSince <= 0L) {
+
+        long warStartedAt = LcClaimEconomySavedData.get(server).getWarActiveSince(team.getTeamId());
+        if (warStartedAt <= 0L) {
             return false;
         }
-        long graceMillis = LcClaimEconomyConfig.SERVER.siegeModeGraceHours.get() * 3_600_000L;
-        return System.currentTimeMillis() >= activeSince + graceMillis;
+
+        long graceMillis = LcClaimEconomyConfig.SERVER.siegeModeGraceHours.get() * MILLIS_PER_HOUR;
+        return System.currentTimeMillis() >= warStartedAt + graceMillis;
     }
 }
