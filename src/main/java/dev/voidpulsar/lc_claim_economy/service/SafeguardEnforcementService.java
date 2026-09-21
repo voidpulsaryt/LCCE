@@ -12,57 +12,82 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
+/**
+ * Affordability checks and lock/unlock bookkeeping for a team's chunk protection, plus the
+ * reentrancy flags other services check before mutating protection state on their own.
+ *
+ * <p>{@link #isReverting()} / {@link #isApplying()} exist so that code which programmatically
+ * reverts or (re)applies protection can tell whether it is already inside one of those
+ * operations, to avoid recursing back into itself.
+ */
 public final class SafeguardEnforcementService {
-    private static final ThreadLocal<Boolean> REVERTING = ThreadLocal.withInitial(() -> false);
-    private static final ThreadLocal<Boolean> APPLYING = ThreadLocal.withInitial(() -> false);
+
+    private static final ThreadLocal<Boolean> REVERT_FLAG = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> APPLY_FLAG = ThreadLocal.withInitial(() -> false);
 
     private SafeguardEnforcementService() {
     }
 
+    // ------------------------------------------------------------------
+    // Reentrancy flags
+    // ------------------------------------------------------------------
+
     public static boolean isReverting() {
-        return REVERTING.get();
+        return REVERT_FLAG.get();
     }
 
     public static boolean isApplying() {
-        return APPLYING.get();
+        return APPLY_FLAG.get();
     }
 
     public static void setApplying(boolean applying) {
         if (applying) {
-            APPLYING.set(true);
+            APPLY_FLAG.set(true);
         } else {
-            APPLYING.remove();
+            APPLY_FLAG.remove();
         }
     }
 
+    /** Runs {@code action} with {@link #isReverting()} reporting true for the duration. */
     public static void runReverting(Runnable action) {
-        REVERTING.set(true);
+        REVERT_FLAG.set(true);
         try {
             action.run();
         } finally {
-            REVERTING.remove();
+            REVERT_FLAG.remove();
         }
     }
+
+    // ------------------------------------------------------------------
+    // Affordability
+    // ------------------------------------------------------------------
 
     public static boolean canAffordNextPeriod(MinecraftServer server, Team team) {
-        TeamQueuedChanges pendingState = LcClaimEconomySavedData.get(server).getPendingState(team.getTeamId());
-        return canAffordNextPeriod(server, team, pendingState);
+        TeamQueuedChanges queuedChanges = LcClaimEconomySavedData.get(server).getPendingState(team.getTeamId());
+        return canAffordNextPeriod(server, team, queuedChanges);
     }
 
-    public static boolean canAffordNextPeriod(MinecraftServer server, Team team, TeamQueuedChanges pendingState) {
+    public static boolean canAffordNextPeriod(MinecraftServer server, Team team, TeamQueuedChanges queuedChanges) {
         ChunkTeamData chunkData = FTBChunksAPI.api().getManager().getOrCreateData(team);
-        int chunkCount = chunkData.getClaimedChunks().size();
-        int forceLoadCount = SafeguardPricing.countEffectiveForceLoads(chunkData, pendingState);
-        if (chunkCount <= 0 && forceLoadCount <= 0) {
+        int claimedChunkCount = chunkData.getClaimedChunks().size();
+        int forceLoadCount = SafeguardPricing.countEffectiveForceLoads(chunkData, queuedChanges);
+        if (claimedChunkCount <= 0 && forceLoadCount <= 0) {
+            // Nothing billable means nothing to fail to afford.
             return true;
         }
-        MoneyValue cost = ConflictService.calculateTotalUpkeepCost(server, team, pendingState);
-        if (cost.isEmpty()) {
+
+        MoneyValue upkeepCost = ConflictService.calculateTotalUpkeepCost(server, team, queuedChanges);
+        if (upkeepCost.isEmpty()) {
             return true;
         }
-        IBankAccount account = BankLedgerAccess.getAccountForTeam(server, team);
-        return account.getMoneyStorage().containsValue(cost);
+
+        IBankAccount teamAccount = BankLedgerAccess.getAccountForTeam(server, team);
+        return teamAccount.getMoneyStorage().containsValue(upkeepCost);
     }
+
+    // ------------------------------------------------------------------
+    // Lock / unlock
+    // ------------------------------------------------------------------
 
     public static void enforceInsufficientFunds(MinecraftServer server, Team team) {
         LcClaimEconomySavedData.get(server).setProtectionLocked(team.getTeamId(), true);
@@ -74,27 +99,33 @@ public final class SafeguardEnforcementService {
         if (!data.isProtectionLocked(team.getTeamId())) {
             return;
         }
-        if (canAffordNextPeriod(server, team)) {
-            data.setProtectionLocked(team.getTeamId(), false);
-            notifyTeam(server, team, "message.lc_claim_economy.protection_unlocked");
+        if (!canAffordNextPeriod(server, team)) {
+            return;
         }
+        data.setProtectionLocked(team.getTeamId(), false);
+        notifyTeam(server, team, "message.lc_claim_economy.protection_unlocked");
     }
 
+    // ------------------------------------------------------------------
+    // Notifications
+    // ------------------------------------------------------------------
+
     public static void notifyTeam(MinecraftServer server, Team team, String messageKey) {
-        Component message = Component.translatable(messageKey);
-        notifyTeam(server, team, message);
+        notifyTeam(server, team, Component.translatable(messageKey));
     }
 
     public static void notifyTeam(MinecraftServer server, Team team, Component message) {
-        for (ServerPlayer member : team.getOnlineMembers()) {
-            member.displayClientMessage(message, false);
+        for (ServerPlayer onlineMember : team.getOnlineMembers()) {
+            onlineMember.displayClientMessage(message, false);
         }
     }
 
+    /** Same as {@link #notifyTeam(MinecraftServer, Team, Component)} but skips regular party members. */
     public static void notifyTeamManagers(MinecraftServer server, Team team, Component message) {
-        for (ServerPlayer member : team.getOnlineMembers()) {
-            if (!team.isPartyTeam() || team.getRankForPlayer(member.getUUID()).isOfficerOrBetter()) {
-                member.displayClientMessage(message, false);
+        for (ServerPlayer onlineMember : team.getOnlineMembers()) {
+            boolean isManager = !team.isPartyTeam() || team.getRankForPlayer(onlineMember.getUUID()).isOfficerOrBetter();
+            if (isManager) {
+                onlineMember.displayClientMessage(message, false);
             }
         }
     }

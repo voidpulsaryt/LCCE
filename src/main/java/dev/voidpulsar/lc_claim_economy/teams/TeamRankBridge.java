@@ -18,15 +18,19 @@ public final class TeamRankBridge {
     }
 
     /** Whether this rank is high enough that its holder should exist in the linked LC team at all. */
-    public static boolean isTrackedMember(TeamRank rank) {
-        return rank.isMemberOrBetter();
+    public static boolean isTrackedMember(TeamRank partyRank) {
+        return partyRank.isMemberOrBetter();
     }
 
-    public static boolean isLcAdmin(TeamRank rank, UUID playerId, UUID ownerId) {
-        return !playerId.equals(ownerId) && rank.isOfficerOrBetter() && !rank.isOwner();
+    /** Officer-or-better, but not the owner (the owner is mirrored separately by the caller). */
+    public static boolean isLcAdmin(TeamRank partyRank, UUID memberId, UUID ownerId) {
+        boolean notOwner = !memberId.equals(ownerId);
+        return notOwner && partyRank.isOfficerOrBetter() && !partyRank.isOwner();
     }
 
-    public static boolean isLcMember(TeamRank rank, UUID playerId, UUID ownerId) {
-        return !playerId.equals(ownerId) && rank.isMemberOrBetter() && !rank.isOfficerOrBetter();
+    /** Member-or-better but below officer, and not the owner. */
+    public static boolean isLcMember(TeamRank partyRank, UUID memberId, UUID ownerId) {
+        boolean notOwner = !memberId.equals(ownerId);
+        return notOwner && partyRank.isMemberOrBetter() && !partyRank.isOfficerOrBetter();
     }
 }

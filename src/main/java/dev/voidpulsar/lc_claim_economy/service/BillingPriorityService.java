@@ -16,11 +16,15 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Builds the dismantle/restore priority list for a team. Priority 1 is the
- * protection dismantled last (restored first); the highest number is the most
- * expensive active outgoing war (dismantled first).
+ * Works out, for one team, the order billing should give up on things when funds run short
+ * and the order it should restore them in when funds recover.
+ *
+ * <p>Entries come back sorted ascending by {@link PriorityEntry#priority()}: the first entry
+ * is the cheapest protection toggle (dismantled last, restored first), and the list ends with
+ * the priciest active outgoing war (the first thing dismantled when a team can't keep up).
  */
 public final class BillingPriorityService {
+
     public record PriorityEntry(
             int priority,
             EntryKind kind,
@@ -40,71 +44,96 @@ public final class BillingPriorityService {
 
     public static List<PriorityEntry> buildOrder(MinecraftServer server, Team team) {
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        TeamQueuedChanges pendingState = savedData.getPendingState(team.getTeamId());
-        UUID teamId = team.getTeamId();
-        List<PriorityEntry> entries = new ArrayList<>();
-        int priority = 1;
+        TeamQueuedChanges queuedChanges = savedData.getPendingState(team.getTeamId());
 
+        List<PriorityEntry> orderedEntries = new ArrayList<>();
+        int nextPriority = 1;
+
+        nextPriority = appendProtectionEntries(server, team, queuedChanges, orderedEntries, nextPriority);
+        appendOutgoingWarEntries(server, team, savedData, orderedEntries, nextPriority);
+
+        return orderedEntries;
+    }
+
+    /** Appends one entry per billable protection setting, in restore order, starting at {@code startingPriority}. */
+    private static int appendProtectionEntries(
+            MinecraftServer server,
+            Team team,
+            TeamQueuedChanges queuedChanges,
+            List<PriorityEntry> orderedEntries,
+            int startingPriority
+    ) {
+        int nextPriority = startingPriority;
         for (TeamProperty<?> property : SafeguardDismantleSequence.restoreOrder()) {
             if (!SafeguardRollbackService.isLiveProtectionBillable(team, property)) {
                 continue;
             }
-            String key = SafeguardPricing.propertyKey(property);
-            entries.add(new PriorityEntry(
-                    priority++,
+            String propertyKey = SafeguardPricing.propertyKey(property);
+            orderedEntries.add(new PriorityEntry(
+                    nextPriority++,
                     EntryKind.PROTECTION,
-                    key,
-                    protectionLabel(key),
-                    protectionUpkeepCopper(server, team, pendingState, property)
+                    propertyKey,
+                    protectionLabel(propertyKey),
+                    protectionUpkeepCopper(server, team, queuedChanges, property)
             ));
         }
+        return nextPriority;
+    }
 
-        List<UUID> outgoing = new ArrayList<>(savedData.getWarTargets(teamId));
-        outgoing.sort(Comparator.comparingLong(targetId -> {
+    /** Appends one entry per active outgoing war, cheapest to re-declare first. */
+    private static void appendOutgoingWarEntries(
+            MinecraftServer server,
+            Team team,
+            LcClaimEconomySavedData savedData,
+            List<PriorityEntry> orderedEntries,
+            int startingPriority
+    ) {
+        List<UUID> outgoingTargets = new ArrayList<>(savedData.getWarTargets(team.getTeamId()));
+        outgoingTargets.sort(Comparator.comparingLong(targetId -> {
             Team target = TeamRegistry.resolve(server, targetId);
             return target == null ? 0L : ConflictService.costToDeclareWar(server, team, target);
         }));
 
-        for (UUID targetId : outgoing) {
+        int nextPriority = startingPriority;
+        for (UUID targetId : outgoingTargets) {
             Team target = TeamRegistry.resolve(server, targetId);
             if (target == null) {
                 continue;
             }
-            entries.add(new PriorityEntry(
-                    priority++,
+            orderedEntries.add(new PriorityEntry(
+                    nextPriority++,
                     EntryKind.OUTGOING_WAR,
                     targetId.toString(),
                     Component.literal(ConflictService.displayName(target)),
                     ConflictService.costToDeclareWar(server, team, target)
             ));
         }
-
-        return entries;
     }
 
-    private static Component protectionLabel(String key) {
-        return Component.translatable("message.lc_claim_economy.upkeep_priority.protection." + key);
+    private static Component protectionLabel(String propertyKey) {
+        return Component.translatable("message.lc_claim_economy.upkeep_priority.protection." + propertyKey);
     }
 
+    /** The copper this single property contributes to upkeep: total cost minus cost with it pinned at its cheapest setting. */
     private static long protectionUpkeepCopper(
             MinecraftServer server,
             Team team,
-            TeamQueuedChanges pendingState,
+            TeamQueuedChanges queuedChanges,
             TeamProperty<?> property
     ) {
-        SafeguardPricing.ChunkCounts counts = SafeguardPricing.countBillableChunks(server, team);
-        Map<String, String> pricing = SafeguardRollbackService.pricingProperties(team, pendingState);
-        long withLive = SafeguardPricing.calculateProtectionCopper(team.getProperties(), pricing, counts);
+        SafeguardPricing.ChunkCounts billableChunks = SafeguardPricing.countBillableChunks(server, team);
+        Map<String, String> livePricing = SafeguardRollbackService.pricingProperties(team, queuedChanges);
+        long costWithLiveSetting = SafeguardPricing.calculateProtectionCopper(team.getProperties(), livePricing, billableChunks);
 
-        String key = SafeguardPricing.propertyKey(property);
-        Map<String, String> atMinimum = new HashMap<>(pricing);
-        atMinimum.put(key, minimumSerialized(property));
+        String propertyKey = SafeguardPricing.propertyKey(property);
+        Map<String, String> pricingAtFloor = new HashMap<>(livePricing);
+        pricingAtFloor.put(propertyKey, cheapestSerializedValue(property));
 
-        long atMin = SafeguardPricing.calculateProtectionCopper(team.getProperties(), atMinimum, counts);
-        return Math.max(0L, withLive - atMin);
+        long costAtFloor = SafeguardPricing.calculateProtectionCopper(team.getProperties(), pricingAtFloor, billableChunks);
+        return Math.max(0L, costWithLiveSetting - costAtFloor);
     }
 
-    private static String minimumSerialized(TeamProperty<?> property) {
+    private static String cheapestSerializedValue(TeamProperty<?> property) {
         if (property instanceof dev.ftb.mods.ftbteams.api.property.BooleanProperty) {
             return SafeguardPricing.serializePropertyValue(property, true);
         }

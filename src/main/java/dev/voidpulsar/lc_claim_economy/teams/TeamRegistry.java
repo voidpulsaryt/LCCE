@@ -15,11 +15,15 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Central view of which FTB teams exist and how the mod should treat them.
- * Single-player teams and active parties participate in war, upkeep, and billing;
- * inactive/empty parties are ignored until they become active again.
+ * Answers "what kind of FTB team is this, and does the mod care about it".
+ *
+ * <p>Solo teams and parties that currently have at least one active member drive war,
+ * billing and upkeep; a party nobody has selected as their active team is treated as
+ * dormant until it wakes back up.
  */
 public final class TeamRegistry {
+
+    /** How a given {@link Team} should be treated by the rest of the mod. */
     public enum TeamKind {
         INVALID,
         SINGLE_PLAYER,
@@ -29,6 +33,10 @@ public final class TeamRegistry {
 
     private TeamRegistry() {
     }
+
+    // ------------------------------------------------------------------
+    // Classification
+    // ------------------------------------------------------------------
 
     public static TeamKind kindOf(MinecraftServer server, @Nullable Team team) {
         if (team == null || !team.isValid()) {
@@ -58,35 +66,36 @@ public final class TeamRegistry {
         return kindOf(server, team) == TeamKind.INACTIVE_PARTY;
     }
 
-    /** Teams that participate in war, upkeep, and other mod features. */
+    /** True for any team the mod should surface in war, upkeep and billing logic. */
     public static boolean isTracked(MinecraftServer server, @Nullable Team team) {
-        TeamKind kind = kindOf(server, team);
-        return switch (kind) {
+        return switch (kindOf(server, team)) {
             case ACTIVE_PARTY -> true;
             case SINGLE_PLAYER -> isActiveSinglePlayerTeam(server, team);
-            default -> false;
+            case INACTIVE_PARTY, INVALID -> false;
         };
     }
 
     /**
-     * A solo FTB team counts only while at least one member still uses it as their active team.
-     * Players who joined a party keep their personal team object, but it must not appear in war/upkeep.
+     * A solo team stops counting the moment its one member picks a party as their active
+     * team — the personal team object still exists, it just must stop showing up in
+     * war/upkeep while parked.
      */
     public static boolean isActiveSinglePlayerTeam(MinecraftServer server, @Nullable Team team) {
         if (!isSinglePlayerTeam(team) || !FTBTeamsAPI.api().isManagerLoaded()) {
             return false;
         }
 
-        TeamManager manager = FTBTeamsAPI.api().getManager();
-        for (UUID memberId : team.getMembers()) {
-            if (manager.getTeamForPlayerID(memberId)
-                    .map(activeTeam -> activeTeam.getTeamId().equals(team.getTeamId()))
-                    .orElse(false)) {
-                return true;
-            }
-        }
-        return false;
+        TeamManager teamManager = FTBTeamsAPI.api().getManager();
+        UUID soloTeamId = team.getTeamId();
+        return team.getMembers().stream().anyMatch(memberUuid ->
+                teamManager.getTeamForPlayerID(memberUuid)
+                        .map(currentTeam -> currentTeam.getTeamId().equals(soloTeamId))
+                        .orElse(false));
     }
+
+    // ------------------------------------------------------------------
+    // Resolution
+    // ------------------------------------------------------------------
 
     public static boolean exists(MinecraftServer server, UUID teamId) {
         return resolve(server, teamId) != null;
@@ -97,22 +106,26 @@ public final class TeamRegistry {
         return TeamBankLinkRegistry.findStoredTeam(server, teamId);
     }
 
+    // ------------------------------------------------------------------
+    // Bulk listings
+    // ------------------------------------------------------------------
+
     public static List<Team> allStoredTeams(MinecraftServer server) {
         if (server == null || !FTBTeamsAPI.api().isManagerLoaded()) {
             return List.of();
         }
-        List<Team> teams = new ArrayList<>();
-        for (Team team : FTBTeamsAPI.api().getManager().getTeams()) {
-            if (team.isValid()) {
-                teams.add(team);
+        List<Team> validTeams = new ArrayList<>();
+        for (Team candidate : FTBTeamsAPI.api().getManager().getTeams()) {
+            if (candidate.isValid()) {
+                validTeams.add(candidate);
             }
         }
-        return teams;
+        return validTeams;
     }
 
     public static List<Team> trackedTeams(MinecraftServer server) {
         return allStoredTeams(server).stream()
-                .filter(team -> isTracked(server, team))
+                .filter(candidate -> isTracked(server, candidate))
                 .toList();
     }
 
@@ -124,20 +137,20 @@ public final class TeamRegistry {
 
     public static List<Team> activeParties(MinecraftServer server) {
         return allStoredTeams(server).stream()
-                .filter(team -> isActiveParty(server, team))
+                .filter(candidate -> isActiveParty(server, candidate))
                 .toList();
     }
 
-    /**
-     * Removes all active and pending war links for the given team and refreshes partners.
-     */
+    // ------------------------------------------------------------------
+    // Teardown
+    // ------------------------------------------------------------------
+
+    /** Tears down every active and pending war involving this team and pings its partners. */
     public static void dissolveWarLinks(MinecraftServer server, UUID teamId) {
         ConflictService.cleanupTeamWars(server, teamId);
     }
 
-    /**
-     * Cleans up mod state when an FTB team is deleted or its saved link is reconciled away.
-     */
+    /** Full cleanup pass run once an FTB team is gone (deleted live, or dropped by reconcile). */
     public static void onTeamDeleted(MinecraftServer server, UUID teamId) {
         if (server == null || teamId == null) {
             return;

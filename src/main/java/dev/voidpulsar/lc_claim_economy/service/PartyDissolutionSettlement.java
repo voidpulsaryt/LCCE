@@ -7,7 +7,6 @@ import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.teams.TeamRegistry;
 import dev.voidpulsar.lc_claim_economy.teams.CurrencyTeamLinkService;
-import dev.voidpulsar.lc_claim_economy.service.ConflictSyncCoordinator;
 import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
 import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
@@ -22,121 +21,151 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+/**
+ * Closes out a party's LC footprint the moment FTB Teams disbands it.
+ *
+ * <p>When a party goes away its war entries and queued protection changes must not linger
+ * in {@link LcClaimEconomySavedData}, and whatever money and claimed land it still held has
+ * to land somewhere sane — the former owner's personal account and, for any chunks that get
+ * auto-released, a cash refund. None of this depends on the owner still being online.
+ */
 public final class PartyDissolutionSettlement {
-    private static final Set<UUID> SETTLING = ConcurrentHashMap.newKeySet();
+
+    /** Guards against re-entrant settlement of the same party (disband events can double-fire). */
+    private static final Set<UUID> IN_PROGRESS = ConcurrentHashMap.newKeySet();
 
     private PartyDissolutionSettlement() {
     }
 
-    public static void settle(MinecraftServer server, Team team) {
-        if (!team.isPartyTeam()) {
+    /** Outcome of releasing whatever chunks the disbanding party still had claimed. */
+    private record ChunkReleaseOutcome(int chunksHeld, int chunksReleased, long copperRefunded) {
+        private static final ChunkReleaseOutcome NONE = new ChunkReleaseOutcome(0, 0, 0L);
+    }
+
+    public static void settle(MinecraftServer server, Team party) {
+        if (!party.isPartyTeam()) {
             return;
         }
 
-        UUID teamId = team.getId();
-        if (!SETTLING.add(teamId)) {
+        UUID partyId = party.getId();
+        if (!IN_PROGRESS.add(partyId)) {
             return;
         }
 
         try {
-            // War cleanup and pending state must be cleared regardless of whether
-            // account transfer succeeds — otherwise disbanded teams leave orphaned
-            // war references and pending protection entries in SavedData.
-            LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-            TeamRegistry.dissolveWarLinks(server, teamId);
-            savedData.setPendingState(teamId, savedData.getPendingState(teamId).cleared());
-
-            UUID ownerId = team.getOwner();
-            if (ownerId == null) {
-                return;
-            }
-
-            IBankAccount teamAccount = CurrencyTeamLinkService.getLinkedBankAccount(server, teamId);
-            if (teamAccount == null) {
-                LcClaimEconomy.LOGGER.warn("No linked LC bank account found for disbanding party {}", teamId);
-                return;
-            }
-
-            IBankAccount ownerAccount = PlayerBankReference.of(ownerId).get();
-            if (ownerAccount == null) {
-                LcClaimEconomy.LOGGER.warn(
-                        "Could not transfer party funds for {}: missing personal account for owner {}",
-                        teamId,
-                        ownerId
-                );
-                return;
-            }
-
-            Component accountBalance = CurrencyTextFormat.formatBalance(teamAccount);
-            int claimedChunks = 0;
-            int unclaimedChunks = 0;
-            long refundCopper = 0L;
-
-            if (FTBChunksAPI.api().isManagerLoaded()) {
-                QueuedChangeService.removeAllForceLoads(server, team);
-                ChunkTeamData chunkData = FTBChunksAPI.api().getManager().getOrCreateData(team);
-                CommandSourceStack source = server.createCommandSourceStack().withSuppressedOutput();
-                claimedChunks = chunkData.getClaimedChunks().size();
-                unclaimedChunks = ClaimSettlementSupport.unclaimAll(chunkData, source);
-                refundCopper = (long) ComplimentaryChunkAllotment.billableChunkCount(claimedChunks) * ClaimSettlementSupport.refundPerChunk();
-            }
-
-            if (teamAccount.getMoneyStorage().isEmpty() && unclaimedChunks == 0) {
-                return;
-            }
-
-            Component totalReceived = CurrencyTextFormat.formatBalance(teamAccount);
-            transferAllFunds(teamAccount, ownerAccount);
-            notifyOwner(server, ownerId, accountBalance, totalReceived, unclaimedChunks, refundCopper);
-            ServerPlayer owner = server.getPlayerList().getPlayer(ownerId);
-            if (owner != null) {
-                ConflictSyncCoordinator.syncToPlayer(owner);
-            }
-            LcClaimEconomy.LOGGER.info(
-                    "Settled disbanded party {} for owner {} ({} chunks, {} refund copper)",
-                    teamId,
-                    ownerId,
-                    unclaimedChunks,
-                    refundCopper
-            );
+            runSettlement(server, party, partyId);
         } catch (Exception exception) {
-            LcClaimEconomy.LOGGER.error("Failed to settle disbanded party {}", teamId, exception);
+            LcClaimEconomy.LOGGER.error("Failed to settle disbanded party {}", partyId, exception);
         } finally {
-            SETTLING.remove(teamId);
+            IN_PROGRESS.remove(partyId);
         }
     }
 
-    private static void transferAllFunds(IBankAccount teamAccount, IBankAccount ownerAccount) {
-        for (MoneyValue value : teamAccount.getMoneyStorage().allValues()) {
-            if (value.isEmpty()) {
+    private static void runSettlement(MinecraftServer server, Team party, UUID partyId) {
+        // These two steps happen no matter what follows below: a party with an unresolvable
+        // owner or missing bank link still must not leave orphaned wars or queued changes behind.
+        purgeWarsAndPendingState(server, partyId);
+
+        UUID ownerUuid = party.getOwner();
+        if (ownerUuid == null) {
+            return;
+        }
+
+        IBankAccount partyAccount = CurrencyTeamLinkService.getLinkedBankAccount(server, partyId);
+        if (partyAccount == null) {
+            LcClaimEconomy.LOGGER.warn("No linked LC bank account found for disbanding party {}", partyId);
+            return;
+        }
+
+        IBankAccount ownerAccount = PlayerBankReference.of(ownerUuid).get();
+        if (ownerAccount == null) {
+            LcClaimEconomy.LOGGER.warn(
+                    "Could not transfer party funds for {}: missing personal account for owner {}",
+                    partyId,
+                    ownerUuid
+            );
+            return;
+        }
+
+        Component balanceBeforeRefund = CurrencyTextFormat.formatBalance(partyAccount);
+        ChunkReleaseOutcome chunkOutcome = releasePartyChunks(server, party);
+
+        if (partyAccount.getMoneyStorage().isEmpty() && chunkOutcome.chunksReleased() == 0) {
+            return;
+        }
+
+        Component balanceAfterRefund = CurrencyTextFormat.formatBalance(partyAccount);
+        moveEverythingTo(partyAccount, ownerAccount);
+        notifyOwner(server, ownerUuid, balanceBeforeRefund, balanceAfterRefund, chunkOutcome.chunksReleased(), chunkOutcome.copperRefunded());
+
+        ServerPlayer ownerPlayer = server.getPlayerList().getPlayer(ownerUuid);
+        if (ownerPlayer != null) {
+            ConflictSyncCoordinator.syncToPlayer(ownerPlayer);
+        }
+
+        LcClaimEconomy.LOGGER.info(
+                "Settled disbanded party {} for owner {} ({} chunks, {} refund copper)",
+                partyId,
+                ownerUuid,
+                chunkOutcome.chunksReleased(),
+                chunkOutcome.copperRefunded()
+        );
+    }
+
+    private static void purgeWarsAndPendingState(MinecraftServer server, UUID partyId) {
+        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
+        TeamRegistry.dissolveWarLinks(server, partyId);
+        savedData.setPendingState(partyId, savedData.getPendingState(partyId).cleared());
+    }
+
+    /** Auto-unclaims every chunk the party still holds and reports how much refund that earns. */
+    private static ChunkReleaseOutcome releasePartyChunks(MinecraftServer server, Team party) {
+        if (!FTBChunksAPI.api().isManagerLoaded()) {
+            return ChunkReleaseOutcome.NONE;
+        }
+
+        QueuedChangeService.removeAllForceLoads(server, party);
+        ChunkTeamData teamChunkData = FTBChunksAPI.api().getManager().getOrCreateData(party);
+        CommandSourceStack silentSource = server.createCommandSourceStack().withSuppressedOutput();
+
+        int chunksHeld = teamChunkData.getClaimedChunks().size();
+        int chunksReleased = ClaimSettlementSupport.unclaimAll(teamChunkData, silentSource);
+        long copperRefunded = (long) ComplimentaryChunkAllotment.billableChunkCount(chunksHeld) * ClaimSettlementSupport.refundPerChunk();
+
+        return new ChunkReleaseOutcome(chunksHeld, chunksReleased, copperRefunded);
+    }
+
+    private static void moveEverythingTo(IBankAccount fromAccount, IBankAccount toAccount) {
+        for (MoneyValue heldValue : fromAccount.getMoneyStorage().allValues()) {
+            if (heldValue.isEmpty()) {
                 continue;
             }
-            teamAccount.withdrawMoney(value);
-            ownerAccount.depositMoney(value);
+            fromAccount.withdrawMoney(heldValue);
+            toAccount.depositMoney(heldValue);
         }
     }
 
     private static void notifyOwner(
             MinecraftServer server,
-            UUID ownerId,
-            Component accountBalance,
-            Component totalReceived,
-            int soldChunks,
-            long refundCopper
+            UUID ownerUuid,
+            Component balanceBeforeRefund,
+            Component balanceAfterRefund,
+            int chunksReleased,
+            long copperRefunded
     ) {
-        ServerPlayer owner = server.getPlayerList().getPlayer(ownerId);
-        if (owner == null) {
+        ServerPlayer ownerPlayer = server.getPlayerList().getPlayer(ownerUuid);
+        if (ownerPlayer == null) {
             return;
         }
 
-        Component chunkRefunds = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(refundCopper));
-        owner.displayClientMessage(
+        Component refundText = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(copperRefunded));
+        ownerPlayer.displayClientMessage(
                 Component.translatable(
                         "message.lc_claim_economy.party_disband_settlement",
-                        accountBalance,
-                        totalReceived,
-                        soldChunks,
-                        chunkRefunds
+                        balanceBeforeRefund,
+                        balanceAfterRefund,
+                        chunksReleased,
+                        refundText
                 ),
                 false
         );
