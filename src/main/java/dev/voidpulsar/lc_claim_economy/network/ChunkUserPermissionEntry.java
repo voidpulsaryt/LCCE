@@ -4,10 +4,11 @@ import java.util.UUID;
 
 /**
  * One row of the per-chunk permission list shown in {@code ChunkUserPermissionsScreen}: a
- * player (or, when {@code allPlayers} is set, the catch-all "everyone else" row) and the
- * {@code ChunkPermissionFlags} bitmask granted to them on that chunk. {@code playerId} is
- * ignored client-side when {@code allPlayers} is true - it's whatever placeholder UUID the
- * server used to key the catch-all entry internally.
+ * player, the catch-all "everyone else" row ({@code allPlayers}), or the catch-all "anyone
+ * from an allied team" row ({@code allAllies}) - plus the {@code ChunkPermissionFlags}
+ * bitmask granted to them on that chunk. {@code playerId} is ignored client-side for either
+ * catch-all row - it's whatever placeholder UUID the server used to key that row internally.
+ * Exactly one of {@code allPlayers}/{@code allAllies} is ever true for a given row.
  */
-public record ChunkUserPermissionEntry(UUID playerId, String displayName, int flags, boolean allPlayers) {
+public record ChunkUserPermissionEntry(UUID playerId, String displayName, int flags, boolean allPlayers, boolean allAllies) {
 }

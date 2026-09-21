@@ -263,7 +263,7 @@ public class ChunkUserPermissionsScreen extends BaseScreen {
             add(new ToggleFlagButton(this, entry, ChunkPermissionFlags.BLOCK_INTERACT, "I"));
             add(new ToggleFlagButton(this, entry, ChunkPermissionFlags.ENTITY_INTERACT, "E"));
             add(new ToggleFlagButton(this, entry, ChunkPermissionFlags.PVP, "P"));
-            if (!entry.allPlayers()) {
+            if (!entry.allPlayers() && !entry.allAllies()) {
                 add(new RemovePlayerButton(this, entry));
             }
         }
@@ -280,15 +280,20 @@ public class ChunkUserPermissionsScreen extends BaseScreen {
         @Override
         public void drawBackground(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
             NordColors.POLAR_NIGHT_2.withAlpha(isMouseOver() ? 220 : 180).draw(graphics, x, y, w, h);
-            Component name = entry.allPlayers()
-                    ? Component.translatable("gui.lc_claim_economy.chunk_user_perm.all_players_label").withStyle(ChatFormatting.BOLD)
-                    : Component.literal(entry.displayName());
-            theme.drawString(graphics, name, x + 6, y + 4, NordColors.SNOW_STORM_0, 0);
-            if (!entry.allPlayers()) {
-                theme.drawString(graphics, Component.literal(entry.playerId().toString()), x + 6, y + 13, NordColors.SNOW_STORM_1.withAlpha(180), 0);
+            Component name;
+            Component hint;
+            if (entry.allPlayers()) {
+                name = Component.translatable("gui.lc_claim_economy.chunk_user_perm.all_players_label").withStyle(ChatFormatting.BOLD);
+                hint = Component.translatable("gui.lc_claim_economy.chunk_user_perm.all_players_hint");
+            } else if (entry.allAllies()) {
+                name = Component.translatable("gui.lc_claim_economy.chunk_user_perm.all_allies_label").withStyle(ChatFormatting.BOLD);
+                hint = Component.translatable("gui.lc_claim_economy.chunk_user_perm.all_allies_hint");
             } else {
-                theme.drawString(graphics, Component.translatable("gui.lc_claim_economy.chunk_user_perm.all_players_hint"), x + 6, y + 13, NordColors.SNOW_STORM_1.withAlpha(180), 0);
+                name = Component.literal(entry.displayName());
+                hint = Component.literal(entry.playerId().toString());
             }
+            theme.drawString(graphics, name, x + 6, y + 4, NordColors.SNOW_STORM_0, 0);
+            theme.drawString(graphics, hint, x + 6, y + 13, NordColors.SNOW_STORM_1.withAlpha(180), 0);
         }
     }
 
@@ -314,7 +319,14 @@ public class ChunkUserPermissionsScreen extends BaseScreen {
             } else {
                 next |= flag;
             }
-            String playerRef = entry.allPlayers() ? "*" : entry.playerId().toString();
+            String playerRef;
+            if (entry.allPlayers()) {
+                playerRef = "*";
+            } else if (entry.allAllies()) {
+                playerRef = "**";
+            } else {
+                playerRef = entry.playerId().toString();
+            }
             PacketDistributor.sendToServer(new SetChunkUserPermsPayload(screen.chunkKey, playerRef, next));
         }
 

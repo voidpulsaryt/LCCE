@@ -291,6 +291,15 @@ public class LcClaimEconomySavedData extends SavedData {
         return teamLinks.setChunkAllPlayerPermissionFlags(teamId, chunkKey, flags);
     }
 
+    /** Flags granted to any player whose {@link dev.ftb.mods.ftbteams.api.TeamRank} on this claim's owning team is ALLY - a different, allied team's players, not this team's own roster. */
+    public int getChunkAllyPermissionFlags(UUID teamId, String chunkKey) {
+        return teamLinks.getChunkAllyPermissionFlags(teamId, chunkKey);
+    }
+
+    public boolean setChunkAllyPermissionFlags(UUID teamId, String chunkKey, int flags) {
+        return teamLinks.setChunkAllyPermissionFlags(teamId, chunkKey, flags);
+    }
+
     public boolean clearChunkUserPermissions(String chunkKey) {
         return teamLinks.clearChunkUserPermissions(chunkKey);
     }
@@ -416,38 +425,43 @@ public class LcClaimEconomySavedData extends SavedData {
             Set<String> landChunks,
             Set<UUID> warTargets,
             Map<String, Map<UUID, Integer>> chunkUserPermissions,
-            Map<String, Integer> chunkAllPlayerPermissions
+            Map<String, Integer> chunkAllPlayerPermissions,
+            Map<String, Integer> chunkAllyPermissions
     ) {
         TeamLinkEntry withLcTeamId(long id) {
-            return new TeamLinkEntry(ftbTeamId, id, legacyAccount, protectionLocked, pendingState, landChunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions);
+            return new TeamLinkEntry(ftbTeamId, id, legacyAccount, protectionLocked, pendingState, landChunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions, chunkAllyPermissions);
         }
 
         TeamLinkEntry withLegacyAccount(@Nullable BankAccount account) {
-            return new TeamLinkEntry(ftbTeamId, lcTeamId, account, protectionLocked, pendingState, landChunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions);
+            return new TeamLinkEntry(ftbTeamId, lcTeamId, account, protectionLocked, pendingState, landChunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions, chunkAllyPermissions);
         }
 
         TeamLinkEntry withProtectionLocked(boolean locked) {
-            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, locked, pendingState, landChunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions);
+            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, locked, pendingState, landChunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions, chunkAllyPermissions);
         }
 
         TeamLinkEntry withPendingState(TeamQueuedChanges pending) {
-            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pending, landChunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions);
+            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pending, landChunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions, chunkAllyPermissions);
         }
 
         TeamLinkEntry withLandChunks(Set<String> chunks) {
-            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pendingState, chunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions);
+            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pendingState, chunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions, chunkAllyPermissions);
         }
 
         TeamLinkEntry withWarTargets(Set<UUID> targets) {
-            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pendingState, landChunks, targets, chunkUserPermissions, chunkAllPlayerPermissions);
+            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pendingState, landChunks, targets, chunkUserPermissions, chunkAllPlayerPermissions, chunkAllyPermissions);
         }
 
         TeamLinkEntry withChunkUserPermissions(Map<String, Map<UUID, Integer>> permissions) {
-            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pendingState, landChunks, warTargets, permissions, chunkAllPlayerPermissions);
+            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pendingState, landChunks, warTargets, permissions, chunkAllPlayerPermissions, chunkAllyPermissions);
         }
 
         TeamLinkEntry withChunkAllPlayerPermissions(Map<String, Integer> permissions) {
-            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pendingState, landChunks, warTargets, chunkUserPermissions, permissions);
+            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pendingState, landChunks, warTargets, chunkUserPermissions, permissions, chunkAllyPermissions);
+        }
+
+        TeamLinkEntry withChunkAllyPermissions(Map<String, Integer> permissions) {
+            return new TeamLinkEntry(ftbTeamId, lcTeamId, legacyAccount, protectionLocked, pendingState, landChunks, warTargets, chunkUserPermissions, chunkAllPlayerPermissions, permissions);
         }
     }
 

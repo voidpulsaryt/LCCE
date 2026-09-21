@@ -6,6 +6,16 @@ All notable changes to this mod are documented here.
 
 ### Added
 
+- **"All Allies" chunk permission grant** *(FTB Chunks only)* — the per-chunk
+  permission screen (`/lcce` chunk permissions GUI) now has a second
+  catch-all row alongside "All Players": permissions granted here apply
+  to any player whose rank on the claim's owning team resolves to
+  `ALLY` (i.e. a member of a different team yours has flagged as
+  allied), stacked on top of whatever "All Players" already grants.
+  Does not affect who can spend from the team's bank account or manage
+  claim/protection settings — those stay members-only as before, and
+  allied-team players are still never added to a linked Lightman's
+  Currency team's roster.
 - **`upkeepOnlineRequirement`** config option — controls when a team's (or
   OP&C claim owner's) upkeep countdown is allowed to advance: `ANYONE_ONLINE`
   (default, matches prior behavior) counts down only while someone is online

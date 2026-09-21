@@ -77,6 +77,7 @@ final class TeamLinkManager {
             }
             Map<String, Map<UUID, Integer>> chunkUserPermissions = new HashMap<>();
             Map<String, Integer> chunkAllPlayerPermissions = new HashMap<>();
+            Map<String, Integer> chunkAllyPermissions = new HashMap<>();
             if (entryTag.contains("ChunkUserPermissions", Tag.TAG_LIST)) {
                 ListTag chunks = entryTag.getList("ChunkUserPermissions", Tag.TAG_COMPOUND);
                 for (int j = 0; j < chunks.size(); j++) {
@@ -89,6 +90,13 @@ final class TeamLinkManager {
                     int allFlags = chunkEntry.contains("AllFlags", Tag.TAG_INT) ? chunkEntry.getInt("AllFlags") : 0;
                     if (allFlags > 0) {
                         chunkAllPlayerPermissions.put(chunkKey, allFlags);
+                    }
+
+                    // Absent on any save written before the ally-permission feature existed -
+                    // defaults to 0 (no ally access), same as a freshly-claimed chunk.
+                    int allyFlags = chunkEntry.contains("AllyFlags", Tag.TAG_INT) ? chunkEntry.getInt("AllyFlags") : 0;
+                    if (allyFlags > 0) {
+                        chunkAllyPermissions.put(chunkKey, allyFlags);
                     }
 
                     Map<UUID, Integer> perPlayer = new HashMap<>();
@@ -120,7 +128,8 @@ final class TeamLinkManager {
                     landChunks,
                     warTargets,
                     Map.copyOf(chunkUserPermissions),
-                    Map.copyOf(chunkAllPlayerPermissions)
+                    Map.copyOf(chunkAllPlayerPermissions),
+                    Map.copyOf(chunkAllyPermissions)
             ));
         }
     }
@@ -230,9 +239,10 @@ final class TeamLinkManager {
                 entry.warTargets().forEach(id -> warList.add(NbtUtils.createUUID(id)));
                 entryTag.put("WarTargets", warList);
             }
-            if (!entry.chunkUserPermissions().isEmpty() || !entry.chunkAllPlayerPermissions().isEmpty()) {
+            if (!entry.chunkUserPermissions().isEmpty() || !entry.chunkAllPlayerPermissions().isEmpty() || !entry.chunkAllyPermissions().isEmpty()) {
                 Set<String> chunkKeys = new HashSet<>(entry.chunkUserPermissions().keySet());
                 chunkKeys.addAll(entry.chunkAllPlayerPermissions().keySet());
+                chunkKeys.addAll(entry.chunkAllyPermissions().keySet());
                 ListTag chunkList = new ListTag();
                 for (String chunkKey : chunkKeys) {
                     CompoundTag chunkTag = new CompoundTag();
@@ -241,6 +251,11 @@ final class TeamLinkManager {
                     int allFlags = entry.chunkAllPlayerPermissions().getOrDefault(chunkKey, 0);
                     if (allFlags > 0) {
                         chunkTag.putInt("AllFlags", allFlags);
+                    }
+
+                    int allyFlags = entry.chunkAllyPermissions().getOrDefault(chunkKey, 0);
+                    if (allyFlags > 0) {
+                        chunkTag.putInt("AllyFlags", allyFlags);
                     }
 
                     ListTag players = new ListTag();
@@ -257,7 +272,7 @@ final class TeamLinkManager {
                     if (!players.isEmpty()) {
                         chunkTag.put("Players", players);
                     }
-                    if (allFlags > 0 || !players.isEmpty()) {
+                    if (allFlags > 0 || allyFlags > 0 || !players.isEmpty()) {
                         chunkList.add(chunkTag);
                     }
                 }
@@ -311,7 +326,7 @@ final class TeamLinkManager {
     LcClaimEconomySavedData.TeamLinkEntry getOrCreateLink(UUID ftbTeamId) {
         return teamLinks.computeIfAbsent(ftbTeamId, id -> {
             markDirty.run();
-            return new LcClaimEconomySavedData.TeamLinkEntry(id, -1L, null, false, new TeamQueuedChanges(), Set.of(), Set.of(), Map.of(), Map.of());
+            return new LcClaimEconomySavedData.TeamLinkEntry(id, -1L, null, false, new TeamQueuedChanges(), Set.of(), Set.of(), Map.of(), Map.of(), Map.of());
         });
     }
 
@@ -396,7 +411,7 @@ final class TeamLinkManager {
             teamLinks.put(teamId, entry.withProtectionLocked(locked));
             markDirty.run();
         } else if (entry == null && locked) {
-            teamLinks.put(teamId, new LcClaimEconomySavedData.TeamLinkEntry(teamId, -1L, null, true, new TeamQueuedChanges(), Set.of(), Set.of(), Map.of(), Map.of()));
+            teamLinks.put(teamId, new LcClaimEconomySavedData.TeamLinkEntry(teamId, -1L, null, true, new TeamQueuedChanges(), Set.of(), Set.of(), Map.of(), Map.of(), Map.of()));
             markDirty.run();
         }
     }
@@ -512,15 +527,50 @@ final class TeamLinkManager {
         return true;
     }
 
+    int getChunkAllyPermissionFlags(UUID teamId, String chunkKey) {
+        LcClaimEconomySavedData.TeamLinkEntry entry = teamLinks.get(teamId);
+        if (entry == null) {
+            return 0;
+        }
+        Integer flags = entry.chunkAllyPermissions().get(chunkKey);
+        return flags == null ? 0 : flags;
+    }
+
+    boolean setChunkAllyPermissionFlags(UUID teamId, String chunkKey, int flags) {
+        LcClaimEconomySavedData.TeamLinkEntry entry = getOrCreateLink(teamId);
+        Map<String, Integer> updated = new HashMap<>(entry.chunkAllyPermissions());
+
+        if (flags <= 0) {
+            if (updated.remove(chunkKey) == null) {
+                return false;
+            }
+        } else {
+            Integer previous = updated.put(chunkKey, flags);
+            if (previous != null && previous == flags) {
+                return false;
+            }
+        }
+
+        teamLinks.put(teamId, entry.withChunkAllyPermissions(Map.copyOf(updated)));
+        markDirty.run();
+        return true;
+    }
+
     boolean clearChunkUserPermissions(String chunkKey) {
         boolean changed = false;
         for (LcClaimEconomySavedData.TeamLinkEntry entry : List.copyOf(teamLinks.values())) {
-            if (entry.chunkUserPermissions().containsKey(chunkKey) || entry.chunkAllPlayerPermissions().containsKey(chunkKey)) {
+            if (entry.chunkUserPermissions().containsKey(chunkKey)
+                    || entry.chunkAllPlayerPermissions().containsKey(chunkKey)
+                    || entry.chunkAllyPermissions().containsKey(chunkKey)) {
                 Map<String, Map<UUID, Integer>> updated = new HashMap<>(entry.chunkUserPermissions());
                 updated.remove(chunkKey);
                 Map<String, Integer> updatedAll = new HashMap<>(entry.chunkAllPlayerPermissions());
                 updatedAll.remove(chunkKey);
-                teamLinks.put(entry.ftbTeamId(), entry.withChunkUserPermissions(Map.copyOf(updated)).withChunkAllPlayerPermissions(Map.copyOf(updatedAll)));
+                Map<String, Integer> updatedAllies = new HashMap<>(entry.chunkAllyPermissions());
+                updatedAllies.remove(chunkKey);
+                teamLinks.put(entry.ftbTeamId(), entry.withChunkUserPermissions(Map.copyOf(updated))
+                        .withChunkAllPlayerPermissions(Map.copyOf(updatedAll))
+                        .withChunkAllyPermissions(Map.copyOf(updatedAllies)));
                 changed = true;
             }
         }

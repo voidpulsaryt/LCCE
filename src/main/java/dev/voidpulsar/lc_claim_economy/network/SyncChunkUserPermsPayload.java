@@ -34,6 +34,7 @@ public record SyncChunkUserPermsPayload(String chunkKey, boolean canManage, List
                     buffer.writeUtf(entry.displayName());
                     buffer.writeVarInt(entry.flags());
                     buffer.writeBoolean(entry.allPlayers());
+                    buffer.writeBoolean(entry.allAllies());
                 }
             },
             buffer -> {
@@ -46,7 +47,8 @@ public record SyncChunkUserPermsPayload(String chunkKey, boolean canManage, List
                     String name = buffer.readUtf();
                     int flags = buffer.readVarInt();
                     boolean allPlayers = buffer.readBoolean();
-                    entries.add(new ChunkUserPermissionEntry(id, name, flags, allPlayers));
+                    boolean allAllies = buffer.readBoolean();
+                    entries.add(new ChunkUserPermissionEntry(id, name, flags, allPlayers, allAllies));
                 }
                 return new SyncChunkUserPermsPayload(chunkKey, canManage, entries);
             }

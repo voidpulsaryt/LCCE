@@ -7,6 +7,7 @@ import dev.ftb.mods.ftbchunks.api.Protection;
 import dev.ftb.mods.ftblibrary.math.ChunkDimPos;
 import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
+import dev.ftb.mods.ftbteams.api.TeamRank;
 import dev.voidpulsar.lc_claim_economy.data.ChunkCoordKey;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.network.ChunkUserPermissionEntry;
@@ -27,6 +28,9 @@ import java.util.UUID;
 public final class ChunkUserPermissionService {
     private static final String ALL_PLAYERS_REF = "*";
     private static final UUID ALL_PLAYERS_ID = new UUID(0L, 0L);
+    /** Grants any player whose rank on the claim's owning team resolves to {@link TeamRank#ALLY} - i.e. a member of a different, allied team, not this team's own roster. */
+    private static final String ALL_ALLIES_REF = "**";
+    private static final UUID ALL_ALLIES_ID = new UUID(0L, 1L);
 
     private ChunkUserPermissionService() {
     }
@@ -50,17 +54,20 @@ public final class ChunkUserPermissionService {
     private static List<ChunkUserPermissionEntry> buildPermissionEntries(MinecraftServer server, UUID teamId, String normalizedKey) {
         LcClaimEconomySavedData data = LcClaimEconomySavedData.get(server);
         Map<UUID, Integer> perPlayerFlags = data.getChunkUserPermissions(teamId, normalizedKey);
-        List<ChunkUserPermissionEntry> entries = new ArrayList<>(perPlayerFlags.size() + 1);
+        List<ChunkUserPermissionEntry> entries = new ArrayList<>(perPlayerFlags.size() + 2);
 
         int allFlags = ChunkPermissionFlags.sanitize(data.getChunkAllPlayerPermissionFlags(teamId, normalizedKey));
-        entries.add(new ChunkUserPermissionEntry(ALL_PLAYERS_ID, "All Players", allFlags, true));
+        entries.add(new ChunkUserPermissionEntry(ALL_PLAYERS_ID, "All Players", allFlags, true, false));
+
+        int allyFlags = ChunkPermissionFlags.sanitize(data.getChunkAllyPermissionFlags(teamId, normalizedKey));
+        entries.add(new ChunkUserPermissionEntry(ALL_ALLIES_ID, "All Allies", allyFlags, false, true));
 
         for (Map.Entry<UUID, Integer> entry : perPlayerFlags.entrySet()) {
             int flags = ChunkPermissionFlags.sanitize(entry.getValue() == null ? 0 : entry.getValue());
             if (flags <= 0) {
                 continue;
             }
-            entries.add(new ChunkUserPermissionEntry(entry.getKey(), resolvePlayerName(server, entry.getKey()), flags, false));
+            entries.add(new ChunkUserPermissionEntry(entry.getKey(), resolvePlayerName(server, entry.getKey()), flags, false, false));
         }
 
         entries.sort(Comparator.comparing(ChunkUserPermissionEntry::displayName, String.CASE_INSENSITIVE_ORDER));
@@ -103,6 +110,8 @@ public final class ChunkUserPermissionService {
 
         if (ALL_PLAYERS_REF.equals(playerRef)) {
             applyAllPlayersUpdate(actor, ownerTeam.getTeamId(), normalizedKey, sanitized);
+        } else if (ALL_ALLIES_REF.equals(playerRef)) {
+            applyAllAlliesUpdate(actor, ownerTeam.getTeamId(), normalizedKey, sanitized);
         } else {
             applySinglePlayerUpdate(actor, ownerTeam.getTeamId(), normalizedKey, playerRef, sanitized);
         }
@@ -115,6 +124,18 @@ public final class ChunkUserPermissionService {
             String messageKey = sanitizedFlags <= 0
                     ? "message.lc_claim_economy.chunk_user_perm_all_removed"
                     : "message.lc_claim_economy.chunk_user_perm_all_updated";
+            actor.displayClientMessage(Component.translatable(messageKey), false);
+        }
+        syncToPlayer(actor, normalizedKey);
+    }
+
+    private static void applyAllAlliesUpdate(ServerPlayer actor, UUID teamId, String normalizedKey, int sanitizedFlags) {
+        LcClaimEconomySavedData data = LcClaimEconomySavedData.get(actor.server);
+        boolean changed = data.setChunkAllyPermissionFlags(teamId, normalizedKey, sanitizedFlags);
+        if (changed) {
+            String messageKey = sanitizedFlags <= 0
+                    ? "message.lc_claim_economy.chunk_user_perm_allies_removed"
+                    : "message.lc_claim_economy.chunk_user_perm_allies_updated";
             actor.displayClientMessage(Component.translatable(messageKey), false);
         }
         syncToPlayer(actor, normalizedKey);
@@ -143,7 +164,11 @@ public final class ChunkUserPermissionService {
      * Per-player chunk permissions only ever grant access on top of the default
      * protection wall - they never apply to a player who's already a team member
      * (members go through the normal rank/protection rules instead), and only cover
-     * the specific {@link Protection} bit(s) the caller is asking about.
+     * the specific {@link Protection} bit(s) the caller is asking about. A player whose
+     * rank on the owning team is exactly {@link TeamRank#ALLY} (a member of a different,
+     * allied team - see {@link TeamRankBridge}) is also eligible for whatever the team
+     * has separately granted to "All Allies", stacked on top of any per-player/all-players
+     * grant they might also individually have.
      */
     public static boolean isExplicitlyAllowed(ServerPlayer player, @Nullable ClaimedChunk chunk, Protection protection) {
         if (player == null || chunk == null || chunk.getTeamData().getTeam() == null) {
@@ -151,7 +176,8 @@ public final class ChunkUserPermissionService {
         }
 
         Team team = chunk.getTeamData().getTeam();
-        if (team.getRankForPlayer(player.getUUID()).isMemberOrBetter()) {
+        TeamRank rank = team.getRankForPlayer(player.getUUID());
+        if (rank.isMemberOrBetter()) {
             return false;
         }
 
@@ -164,6 +190,9 @@ public final class ChunkUserPermissionService {
         String key = ChunkCoordKey.encode(chunk.getPos());
         int grantedFlags = data.getChunkUserPermissionFlags(team.getTeamId(), key, player.getUUID())
                 | data.getChunkAllPlayerPermissionFlags(team.getTeamId(), key);
+        if (rank == TeamRank.ALLY) {
+            grantedFlags |= data.getChunkAllyPermissionFlags(team.getTeamId(), key);
+        }
         return (ChunkPermissionFlags.sanitize(grantedFlags) & requiredBit) != 0;
     }
 
