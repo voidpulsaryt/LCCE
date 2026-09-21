@@ -34,9 +34,13 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Only ever called from {@link DashboardApi} behind {@code ModCompat.isFtbAvailable()} -
- * see {@link WebDataService}'s javadoc for why that separation matters. FTB
- * Chunks/Teams only; there is no Open Parties and Claims dashboard backend.
+ * All of the FTB-Chunks-specific work behind the dashboard API - resolving a
+ * player's team, reading/writing its protection properties, and assembling
+ * the big dashboard JSON blob. Kept behind {@link DashboardApi}'s
+ * {@code ModCompat.isFtbAvailable()} check for the same class-boundary reason
+ * documented on {@link WebDataService}: this file is free to import
+ * {@code dev.ftb.mods.*} types precisely because nothing outside the web
+ * package ever calls it directly.
  */
 final class FtbDashboardService {
     private FtbDashboardService() {
@@ -45,29 +49,37 @@ final class FtbDashboardService {
     private record ProtectionMeta(String name, String desc, long priceCopper) {
     }
 
-    /** Order and metadata for the protection toggles shown on the dashboard. */
+    /**
+     * The protection toggles shown on the dashboard, in display order. Built fresh on
+     * every call (rather than cached) so a price changed in the config screen shows up
+     * immediately without needing a server restart - these lists are tiny, so the cost
+     * of rebuilding is negligible next to that.
+     */
     private static Map<TeamProperty<?>, ProtectionMeta> protectionCatalog() {
-        var config = LcClaimEconomyConfig.SERVER;
+        var prices = LcClaimEconomyConfig.SERVER;
         Map<TeamProperty<?>, ProtectionMeta> catalog = new LinkedHashMap<>();
         catalog.put(dev.ftb.mods.ftbchunks.api.FTBChunksProperties.ALLOW_PVP,
-                new ProtectionMeta("Disable PvP", "Prevents PvP combat inside your claims.", config.pvpDisablePrice.get()));
+                new ProtectionMeta("Disable PvP", "Prevents PvP combat inside your claims.", prices.pvpDisablePrice.get()));
         catalog.put(dev.ftb.mods.ftbchunks.api.FTBChunksProperties.ALLOW_EXPLOSIONS,
-                new ProtectionMeta("Explosion protection", "Blocks explosion damage to claimed terrain.", config.explosionProtectionPrice.get()));
+                new ProtectionMeta("Explosion protection", "Blocks explosion damage to claimed terrain.", prices.explosionProtectionPrice.get()));
         catalog.put(dev.ftb.mods.ftbchunks.api.FTBChunksProperties.ALLOW_MOB_GRIEFING,
-                new ProtectionMeta("Mob-grief protection", "Stops mobs from breaking blocks in claims.", config.mobGriefProtectionPrice.get()));
+                new ProtectionMeta("Mob-grief protection", "Stops mobs from breaking blocks in claims.", prices.mobGriefProtectionPrice.get()));
         catalog.put(dev.ftb.mods.ftbchunks.api.FTBChunksProperties.BLOCK_EDIT_MODE,
-                new ProtectionMeta("Block edit: private", "Only team members can place/break blocks.", config.blockEditProtectionPrice.get()));
+                new ProtectionMeta("Block edit: private", "Only team members can place/break blocks.", prices.blockEditProtectionPrice.get()));
         catalog.put(dev.ftb.mods.ftbchunks.api.FTBChunksProperties.BLOCK_INTERACT_MODE,
-                new ProtectionMeta("Block interact: private", "Only team members can use doors, levers, etc.", config.blockInteractProtectionPrice.get()));
+                new ProtectionMeta("Block interact: private", "Only team members can use doors, levers, etc.", prices.blockInteractProtectionPrice.get()));
         catalog.put(dev.ftb.mods.ftbchunks.api.FTBChunksProperties.ENTITY_INTERACT_MODE,
-                new ProtectionMeta("Entity interact: private", "Only team members can interact with entities.", config.entityInteractProtectionPrice.get()));
+                new ProtectionMeta("Entity interact: private", "Only team members can interact with entities.", prices.entityInteractProtectionPrice.get()));
         return catalog;
     }
 
-    /** Whether the given property's live value counts as "protected" (switch shown on). */
+    // FTBChunksProperties mixes two representations for what's conceptually a single on/off
+    // switch: some are plain booleans (ALLOW_*, where false means "protection is on"), others
+    // are PrivacyMode (where anything but PUBLIC means "protection is on"). The dashboard only
+    // ever shows a single toggle, so this normalizes both down to that one boolean.
     private static boolean isActive(Team team, TeamProperty<?> property, Object liveValue) {
-        if (liveValue instanceof Boolean b) {
-            return !b; // ALLOW_* booleans: false = protected
+        if (liveValue instanceof Boolean allowed) {
+            return !allowed;
         }
         if (liveValue instanceof PrivacyMode mode) {
             return mode != PrivacyMode.PUBLIC;
@@ -78,10 +90,10 @@ final class FtbDashboardService {
     /** Inverse of {@link #isActive} - the raw property value to set when the dashboard switch is toggled to {@code active}. */
     @SuppressWarnings("unchecked")
     private static <T> void applyActive(Team team, TeamProperty<T> property, boolean active) {
-        T current = team.getProperty(property);
-        if (current instanceof Boolean) {
+        T currentValue = team.getProperty(property);
+        if (currentValue instanceof Boolean) {
             team.setProperty(property, (T) Boolean.valueOf(!active));
-        } else if (current instanceof PrivacyMode) {
+        } else if (currentValue instanceof PrivacyMode) {
             team.setProperty(property, (T) (active ? PrivacyMode.PRIVATE : PrivacyMode.PUBLIC));
         }
     }
@@ -138,6 +150,9 @@ final class FtbDashboardService {
         long totalCopper = costs.totalUpkeepCopper() + forceLoadCopper;
         boolean canAfford = ConflictService.canAffordUpkeep(server, team, pendingState, account);
 
+        // -1 is the sentinel for "no upkeep scheduled yet" (e.g. team just formed); the client
+        // treats a negative value as "don't show a countdown" rather than a wall-clock time.
+        // Otherwise convert the remaining game ticks to seconds at the fixed 20 ticks/sec rate.
         long nextUpkeepTick = savedData.getNextUpkeepTick(team.getTeamId());
         long gameTime = server.overworld().getGameTime();
         long secondsUntilNextCharge = nextUpkeepTick < 0L ? -1L : Math.max(0L, (nextUpkeepTick - gameTime) / 20L);
@@ -162,7 +177,6 @@ final class FtbDashboardService {
                 .field("secondsUntilNextCharge", secondsUntilNextCharge);
 
         JsonWriter landJson = buildLandJson(chunkData, pendingState);
-        JsonWriter protectionsJson = null; // placeholder replaced below (JsonWriter has no array-of-objects-at-root helper)
         List<JsonWriter> protectionEntries = buildProtectionEntries(team, pendingState);
         List<JsonWriter> rosterEntries = buildRosterEntries(server, team);
         JsonWriter warsJson = buildWarsJson(server, team);
@@ -216,16 +230,16 @@ final class FtbDashboardService {
     }
 
     private static List<JsonWriter> buildProtectionEntries(Team team, TeamQueuedChanges pendingState) {
-        List<JsonWriter> entries = new java.util.ArrayList<>();
-        for (var entry : protectionCatalog().entrySet()) {
-            TeamProperty<?> property = entry.getKey();
-            ProtectionMeta meta = entry.getValue();
+        List<JsonWriter> rows = new java.util.ArrayList<>();
+        for (var catalogEntry : protectionCatalog().entrySet()) {
+            TeamProperty<?> property = catalogEntry.getKey();
+            ProtectionMeta meta = catalogEntry.getValue();
             Object liveValue = team.getProperty(property);
             boolean active = isActive(team, property, liveValue);
 
             String key = SafeguardPricing.propertyKey(property);
             String pendingRaw = pendingState.pendingProperties().get(key);
-            JsonWriter json = JsonWriter.object()
+            JsonWriter row = JsonWriter.object()
                     .field("key", key)
                     .field("name", meta.name())
                     .field("desc", meta.desc())
@@ -233,18 +247,21 @@ final class FtbDashboardService {
                     .field("active", active);
             if (pendingRaw != null) {
                 boolean pendingActive = pendingValueIsActive(property, pendingRaw, liveValue);
-                json.field("pendingValue", pendingActive ? "on (next period)" : "off (next period)");
+                row.field("pendingValue", pendingActive ? "on (next period)" : "off (next period)");
             }
-            entries.add(json);
+            rows.add(row);
         }
-        return entries;
+        return rows;
     }
 
+    // The unchecked cast is safe here: liveValue always came from team.getProperty(property)
+    // for this same TeamProperty<T>, so it's guaranteed to already be a T - deserializePropertyValue
+    // only needs it typed as T to have something to fall back to if pendingRaw fails to parse.
     private static <T> boolean pendingValueIsActive(TeamProperty<T> property, String pendingRaw, Object liveValue) {
         @SuppressWarnings("unchecked")
-        T fallback = (T) liveValue;
-        T deserialized = SafeguardPricing.deserializePropertyValue(property, pendingRaw, fallback);
-        return isActive(null, property, deserialized);
+        T fallbackValue = (T) liveValue;
+        T resolvedPendingValue = SafeguardPricing.deserializePropertyValue(property, pendingRaw, fallbackValue);
+        return isActive(null, property, resolvedPendingValue);
     }
 
     private static List<JsonWriter> buildRosterEntries(MinecraftServer server, Team team) {

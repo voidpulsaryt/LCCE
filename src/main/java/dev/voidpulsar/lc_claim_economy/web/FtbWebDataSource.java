@@ -14,9 +14,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Only ever called from {@link WebDataService} behind
- * {@code ModCompat.isFtbAvailable()} - see that class's javadoc for why
- * this separation matters.
+ * Turns the live set of FTB teams into the plain {@link LeaderboardEntry} rows
+ * the public leaderboard page renders. Called only from {@link WebDataService}
+ * behind {@code ModCompat.isFtbAvailable()} - see that class's javadoc for why
+ * FTB types are confined to this file.
  */
 final class FtbWebDataSource {
     private FtbWebDataSource() {
@@ -26,24 +27,26 @@ final class FtbWebDataSource {
         List<LeaderboardEntry> entries = new ArrayList<>();
         for (Team team : TeamRegistry.trackedTeams(server)) {
             try {
-                entries.add(toEntry(server, team));
+                entries.add(buildEntry(server, team));
             } catch (Exception e) {
+                // One team failing to resolve (e.g. mid-deletion) shouldn't blank the whole
+                // leaderboard for everyone else - skip it and keep going.
                 LcClaimEconomy.LOGGER.warn("Web leaderboard: failed to read FTB team {}", team.getTeamId(), e);
             }
         }
         return entries;
     }
 
-    private static LeaderboardEntry toEntry(MinecraftServer server, Team team) {
+    private static LeaderboardEntry buildEntry(MinecraftServer server, Team team) {
         BankLedgerAccess.ensurePartyAccountExists(server, team);
         IBankAccount account = BankLedgerAccess.getAccountForTeam(server, team);
-        long balance = CurrencyAmounts.totalCopper(account);
+        long balanceCopper = CurrencyAmounts.totalCopper(account);
 
         int claimedChunks = FTBChunksAPI.api().isManagerLoaded()
                 ? FTBChunksAPI.api().getManager().getOrCreateData(team).getClaimedChunks().size()
                 : 0;
 
-        return new LeaderboardEntry(ConflictService.displayName(team), balance, claimedChunks);
+        return new LeaderboardEntry(ConflictService.displayName(team), balanceCopper, claimedChunks);
     }
 
     static int trackedAccountCount(MinecraftServer server) {

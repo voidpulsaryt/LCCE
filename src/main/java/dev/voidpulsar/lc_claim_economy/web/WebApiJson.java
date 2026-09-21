@@ -4,6 +4,7 @@ import net.minecraft.server.MinecraftServer;
 
 import java.util.List;
 
+/** Assembles the single JSON document the public {@code /api/data} leaderboard endpoint returns. */
 final class WebApiJson {
     private WebApiJson() {
     }

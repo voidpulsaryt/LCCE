@@ -11,13 +11,13 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Backend-agnostic data access for the built-in web server. This class's
- * own method signatures/fields must never reference any
- * {@code dev.ftb.mods.*} or {@code xaero.pac.*} type - see
- * {@code ModCompat}'s javadoc. The actual FTB/OP&C-specific collection work
- * lives in {@link FtbWebDataSource} (this package) and
- * {@link OpcWebDataSource} (the {@code opc} package), each only ever called
- * from here behind the matching {@code ModCompat} check.
+ * The one place the web server asks "give me the leaderboard/info data" without
+ * caring which claim backend is actually installed. Nothing in this class's own
+ * signatures or fields may reference {@code dev.ftb.mods.*} or {@code xaero.pac.*}
+ * types (see {@code ModCompat}'s javadoc) - that's what keeps this class loadable
+ * even on a server that has neither mod present. The backend-specific reading
+ * happens in {@link FtbWebDataSource} or {@link OpcWebDataSource}, picked at
+ * runtime by whichever {@code ModCompat} check actually passes.
  */
 public final class WebDataService {
     private WebDataService() {

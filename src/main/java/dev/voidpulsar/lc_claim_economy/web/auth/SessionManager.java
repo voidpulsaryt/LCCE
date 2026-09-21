@@ -8,11 +8,11 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Dashboard login sessions, keyed by an opaque bearer token stored in an
- * {@code HttpOnly} cookie. Held entirely in memory - a server restart signs
- * every dashboard session out, which is an acceptable (and safer) default
- * for a lightweight companion web server rather than persisting session
- * tokens to disk.
+ * Tracks which bearer token (the value stored in the dashboard's
+ * {@code HttpOnly} cookie) currently belongs to which player. Intentionally
+ * in-memory only - persisting tokens to disk would mean a leaked save file
+ * doubles as a leaked login, and forcing everyone to log back in after a
+ * restart is a small price for not having that risk at all.
  */
 public final class SessionManager {
     private static final int TOKEN_BYTES = 32;
@@ -25,7 +25,7 @@ public final class SessionManager {
     }
 
     String create(UUID playerId, int ttlMinutes, long nowMillis) {
-        String token = generateToken();
+        String token = mintToken();
         long expiresAt = nowMillis + ttlMinutes * 60_000L;
         sessionsByToken.put(token, new WebSession(token, playerId, expiresAt));
         return token;
@@ -56,9 +56,11 @@ public final class SessionManager {
         }
     }
 
-    private String generateToken() {
-        byte[] bytes = new byte[TOKEN_BYTES];
-        random.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    // URL-safe + unpadded so the value drops straight into a Set-Cookie header without
+    // needing any further encoding, and 32 random bytes leaves guessing infeasible.
+    private String mintToken() {
+        byte[] randomBytes = new byte[TOKEN_BYTES];
+        random.nextBytes(randomBytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
     }
 }

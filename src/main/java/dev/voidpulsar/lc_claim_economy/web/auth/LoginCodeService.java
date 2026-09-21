@@ -7,30 +7,32 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Short-lived, single-use codes pairing a web dashboard login to a player's
- * UUID. A player generates one in-game (see the {@code /lcce web login}
- * command) and enters it on the web login page - no password is ever
- * stored or transmitted, since there isn't one to steal.
- * <p>
- * Held entirely in memory: codes don't need to survive a server restart, and
- * doing so would only extend how long a leaked/overheard code stays live.
+ * Bridges an in-game player to the web dashboard without ever needing a
+ * password: run {@code /lcce web login} and it stamps out a short code tied
+ * to your UUID, type that into the browser and it's exchanged for a session.
+ * Nothing here is a secret worth persisting, so codes live and die entirely
+ * in memory - a restart wiping them out just means stale codes can't be
+ * redeemed later, which is strictly a safety improvement, not a loss.
  */
 public final class LoginCodeService {
-    private static final String ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
+    // Excludes 0/O/1/I on purpose - a player is reading this off a chat message and
+    // typing it back on a different device, so visually ambiguous characters cost
+    // real support time.
+    private static final String CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
     private static final int CODE_LENGTH = 8;
 
     private final SecureRandom random = new SecureRandom();
-    private final Map<String, LoginCode> codesByValue = new ConcurrentHashMap<>();
+    private final Map<String, LoginCode> activeCodes = new ConcurrentHashMap<>();
 
     public String issue(UUID playerId, int ttlMinutes) {
         return issue(playerId, ttlMinutes, System.currentTimeMillis());
     }
 
     String issue(UUID playerId, int ttlMinutes, long nowMillis) {
-        sweepExpired(nowMillis);
-        String code = generateCode();
+        pruneExpired(nowMillis);
+        String code = mintCode();
         long expiresAt = nowMillis + ttlMinutes * 60_000L;
-        codesByValue.put(code, new LoginCode(code, playerId, expiresAt));
+        activeCodes.put(code, new LoginCode(code, playerId, expiresAt));
         return code;
     }
 
@@ -43,22 +45,25 @@ public final class LoginCodeService {
         if (code == null) {
             return Optional.empty();
         }
-        LoginCode entry = codesByValue.remove(code.trim().toUpperCase(java.util.Locale.ROOT));
-        if (entry == null || entry.isExpired(nowMillis)) {
+        LoginCode matched = activeCodes.remove(code.trim().toUpperCase(java.util.Locale.ROOT));
+        if (matched == null || matched.isExpired(nowMillis)) {
             return Optional.empty();
         }
-        return Optional.of(entry.playerId());
+        return Optional.of(matched.playerId());
     }
 
-    private void sweepExpired(long nowMillis) {
-        codesByValue.values().removeIf(entry -> entry.isExpired(nowMillis));
+    // Runs on every issue() rather than on a timer - this service has no background
+    // thread of its own, and login codes are issued often enough (each /lcce web
+    // login) that expired entries never accumulate for long between sweeps.
+    private void pruneExpired(long nowMillis) {
+        activeCodes.values().removeIf(entry -> entry.isExpired(nowMillis));
     }
 
-    private String generateCode() {
-        StringBuilder sb = new StringBuilder(CODE_LENGTH);
+    private String mintCode() {
+        StringBuilder code = new StringBuilder(CODE_LENGTH);
         for (int i = 0; i < CODE_LENGTH; i++) {
-            sb.append(ALPHABET.charAt(random.nextInt(ALPHABET.length())));
+            code.append(CODE_ALPHABET.charAt(random.nextInt(CODE_ALPHABET.length())));
         }
-        return sb.toString();
+        return code.toString();
     }
 }
