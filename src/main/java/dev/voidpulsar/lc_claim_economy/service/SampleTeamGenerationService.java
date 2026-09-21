@@ -26,6 +26,14 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * Backs the debug-only {@code /lcce seed_test_teams}/{@code clear_test_teams}/
+ * {@code count_test_teams} commands (see {@code debugTestTeamCommands} config, off by
+ * default and meant to stay off on production servers). Spins up numbered "WarTestNN"
+ * teams with one claimed chunk each and a preset mix of incoming/outgoing wars against
+ * whichever team ran the command, purely so the war UI has realistic-looking data to
+ * develop and screenshot against without needing a real multi-team server session.
+ */
 public final class SampleTeamGenerationService {
     public static final String TEAM_PREFIX = "WarTest";
     public static final int DEFAULT_COUNT = 20;
@@ -73,7 +81,7 @@ public final class SampleTeamGenerationService {
         int total = 0;
         int withClaims = 0;
         for (Team team : manager.getTeams()) {
-            if (!isTestTeamName(team.getName().getString())) {
+            if (!matchesTestTeamPrefix(team.getName().getString())) {
                 continue;
             }
             total++;
@@ -95,7 +103,7 @@ public final class SampleTeamGenerationService {
     public static List<Team> findAllTestTeams(TeamManager manager) {
         List<Team> testTeams = new ArrayList<>();
         for (Team team : manager.getTeams()) {
-            if (isTestTeamName(team.getName().getString())) {
+            if (matchesTestTeamPrefix(team.getName().getString())) {
                 testTeams.add(team);
             }
         }
@@ -118,7 +126,7 @@ public final class SampleTeamGenerationService {
         return null;
     }
 
-    private static boolean isTestTeamName(String name) {
+    private static boolean matchesTestTeamPrefix(String name) {
         return name.startsWith(TEAM_PREFIX);
     }
 

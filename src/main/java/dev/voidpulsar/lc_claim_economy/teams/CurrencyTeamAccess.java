@@ -22,33 +22,33 @@ import java.util.Map;
  * failing silently mid-sync.
  */
 public final class CurrencyTeamAccess {
-    private static final Field TEAM_OWNER;
-    private static final Field TEAM_NAME;
-    private static final Field TEAM_ADMINS;
-    private static final Field TEAM_MEMBERS;
-    private static final Field TEAM_BANK_ACCOUNT;
-    private static final Field CACHE_TEAMS;
-    private static final Method CACHE_GET_NEXT_ID;
+    private static final Field OWNER_FIELD;
+    private static final Field NAME_FIELD;
+    private static final Field ADMINS_FIELD;
+    private static final Field MEMBERS_FIELD;
+    private static final Field BANK_ACCOUNT_FIELD;
+    private static final Field CACHE_TEAM_MAP_FIELD;
+    private static final Method CACHE_NEXT_ID_METHOD;
 
     static {
         try {
-            TEAM_OWNER = Team.class.getDeclaredField("owner");
-            TEAM_OWNER.setAccessible(true);
-            TEAM_NAME = Team.class.getDeclaredField("teamName");
-            TEAM_NAME.setAccessible(true);
-            TEAM_ADMINS = Team.class.getDeclaredField("admins");
-            TEAM_ADMINS.setAccessible(true);
-            TEAM_MEMBERS = Team.class.getDeclaredField("members");
-            TEAM_MEMBERS.setAccessible(true);
-            TEAM_BANK_ACCOUNT = Team.class.getDeclaredField("bankAccount");
-            TEAM_BANK_ACCOUNT.setAccessible(true);
-            CACHE_TEAMS = TeamDataCache.class.getDeclaredField("teams");
-            CACHE_TEAMS.setAccessible(true);
-            CACHE_GET_NEXT_ID = TeamDataCache.class.getDeclaredMethod("getNextID");
-            CACHE_GET_NEXT_ID.setAccessible(true);
+            OWNER_FIELD = reflectField(Team.class, "owner");
+            NAME_FIELD = reflectField(Team.class, "teamName");
+            ADMINS_FIELD = reflectField(Team.class, "admins");
+            MEMBERS_FIELD = reflectField(Team.class, "members");
+            BANK_ACCOUNT_FIELD = reflectField(Team.class, "bankAccount");
+            CACHE_TEAM_MAP_FIELD = reflectField(TeamDataCache.class, "teams");
+            CACHE_NEXT_ID_METHOD = TeamDataCache.class.getDeclaredMethod("getNextID");
+            CACHE_NEXT_ID_METHOD.setAccessible(true);
         } catch (ReflectiveOperationException exception) {
             throw new ExceptionInInitializerError(exception);
         }
+    }
+
+    private static Field reflectField(Class<?> owner, String fieldName) throws ReflectiveOperationException {
+        Field field = owner.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return field;
     }
 
     private CurrencyTeamAccess() {
@@ -63,47 +63,39 @@ public final class CurrencyTeamAccess {
     }
 
     static Team registerTeam(PlayerReference owner, String name) {
-        TeamDataCache cache = cache();
-        if (cache == null) {
+        TeamDataCache dataCache = cache();
+        if (dataCache == null) {
             throw new IllegalStateException("LC team data is not loaded yet");
         }
         try {
-            long id = (long) CACHE_GET_NEXT_ID.invoke(cache);
-            Team team = Team.of(id, owner, name).initialize();
+            long newId = (long) CACHE_NEXT_ID_METHOD.invoke(dataCache);
+            Team newTeam = Team.of(newId, owner, name).initialize();
             @SuppressWarnings("unchecked")
-            Map<Long, Team> teams = (Map<Long, Team>) CACHE_TEAMS.get(cache);
-            teams.put(id, team);
-            cache.markTeamDirty(id);
-            return team;
+            Map<Long, Team> teamMap = (Map<Long, Team>) CACHE_TEAM_MAP_FIELD.get(dataCache);
+            teamMap.put(newId, newTeam);
+            dataCache.markTeamDirty(newId);
+            return newTeam;
         } catch (ReflectiveOperationException exception) {
             throw new IllegalStateException("Failed to register LC team", exception);
         }
     }
 
     static void setOwner(Team team, PlayerReference owner) {
-        try {
-            TEAM_OWNER.set(team, owner);
-        } catch (IllegalAccessException exception) {
-            throw new IllegalStateException("Failed to set LC team owner", exception);
-        }
+        writeField(OWNER_FIELD, team, owner, "owner");
     }
 
     static void setName(Team team, String name) {
-        try {
-            TEAM_NAME.set(team, name);
-            TeamBankAccount bankAccount = (TeamBankAccount) TEAM_BANK_ACCOUNT.get(team);
-            if (bankAccount != null) {
-                bankAccount.updateOwnersName(name);
-            }
-        } catch (IllegalAccessException exception) {
-            throw new IllegalStateException("Failed to set LC team name", exception);
+        writeField(NAME_FIELD, team, name, "name");
+        TeamBankAccount linkedAccount = readBankAccount(team);
+        if (linkedAccount != null) {
+            linkedAccount.updateOwnersName(name);
         }
     }
 
     @SuppressWarnings("unchecked")
     static List<PlayerReference> admins(Team team) {
         try {
-            return (List<PlayerReference>) TEAM_ADMINS.get(team);
+            return (List<PlayerReference>) ADMINS_FIELD.get(team);
         } catch (IllegalAccessException exception) {
             throw new IllegalStateException("Failed to read LC team admins", exception);
         }
@@ -112,7 +104,7 @@ public final class CurrencyTeamAccess {
     @SuppressWarnings("unchecked")
     static List<PlayerReference> members(Team team) {
         try {
-            return (List<PlayerReference>) TEAM_MEMBERS.get(team);
+            return (List<PlayerReference>) MEMBERS_FIELD.get(team);
         } catch (IllegalAccessException exception) {
             throw new IllegalStateException("Failed to read LC team members", exception);
         }
@@ -123,9 +115,9 @@ public final class CurrencyTeamAccess {
             return;
         }
         try {
-            TeamBankAccount bankAccount = new TeamBankAccount(team, team::markDirty);
-            bankAccount.updateOwnersName(team.getName());
-            TEAM_BANK_ACCOUNT.set(team, bankAccount);
+            TeamBankAccount newAccount = new TeamBankAccount(team, team::markDirty);
+            newAccount.updateOwnersName(team.getName());
+            BANK_ACCOUNT_FIELD.set(team, newAccount);
             team.markDirty();
         } catch (IllegalAccessException exception) {
             throw new IllegalStateException("Failed to create LC team bank account", exception);
@@ -137,10 +129,27 @@ public final class CurrencyTeamAccess {
     }
 
     static PlayerReference ensureNamed(PlayerReference reference, String name) {
-        String current = reference.getName(false);
-        if (current != null && !current.isBlank()) {
+        String existingName = reference.getName(false);
+        if (existingName != null && !existingName.isBlank()) {
             return reference;
         }
         return reference.copyWithName(name);
+    }
+
+    @Nullable
+    private static TeamBankAccount readBankAccount(Team team) {
+        try {
+            return (TeamBankAccount) BANK_ACCOUNT_FIELD.get(team);
+        } catch (IllegalAccessException exception) {
+            throw new IllegalStateException("Failed to read LC team bank account", exception);
+        }
+    }
+
+    private static void writeField(Field field, Team team, Object value, String label) {
+        try {
+            field.set(team, value);
+        } catch (IllegalAccessException exception) {
+            throw new IllegalStateException("Failed to set LC team " + label, exception);
+        }
     }
 }
