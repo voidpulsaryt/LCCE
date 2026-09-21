@@ -1,86 +1,84 @@
 package dev.voidpulsar.lc_claim_economy.web;
 
 /**
- * Minimal JSON string builder for the handful of flat shapes the web
- * server's API needs (objects of primitives/strings, arrays of objects).
- * Deliberately dependency-free rather than relying on Gson being present
- * on the runtime classpath, since that isn't a declared dependency of this
- * mod.
+ * Hand-rolled JSON object builder covering only what the dashboard/leaderboard
+ * endpoints actually emit: flat objects of primitives/strings, plus nested
+ * objects and arrays-of-objects one level deep. Written by hand instead of
+ * pulling in Gson because the mod has no JSON library dependency to spare -
+ * every response shape here is small and known ahead of time, so a real
+ * parser/serializer would be overkill.
  */
 final class JsonWriter {
-    private final StringBuilder sb = new StringBuilder();
-    private boolean needsComma = false;
+    private final StringBuilder buffer = new StringBuilder();
+    private boolean fieldAlreadyWritten = false;
 
     static JsonWriter object() {
         JsonWriter writer = new JsonWriter();
-        writer.sb.append('{');
+        writer.buffer.append('{');
         return writer;
     }
 
     JsonWriter field(String name, String value) {
-        comma();
-        key(name);
-        sb.append(quote(value));
+        separateFromPrevious();
+        writeKey(name);
+        buffer.append(escapeAndQuote(value));
         return this;
     }
 
     JsonWriter field(String name, long value) {
-        comma();
-        key(name);
-        sb.append(value);
+        separateFromPrevious();
+        writeKey(name);
+        buffer.append(value);
         return this;
     }
 
     JsonWriter field(String name, boolean value) {
-        comma();
-        key(name);
-        sb.append(value);
+        separateFromPrevious();
+        writeKey(name);
+        buffer.append(value);
         return this;
     }
 
     JsonWriter field(String name, JsonWriter nested) {
-        comma();
-        key(name);
-        sb.append(nested.sb).append(nested.closer());
+        separateFromPrevious();
+        writeKey(name);
+        buffer.append(nested.buffer).append('}');
         return this;
     }
 
     JsonWriter arrayField(String name, java.util.List<JsonWriter> items) {
-        comma();
-        key(name);
-        sb.append('[');
-        boolean first = true;
-        for (JsonWriter item : items) {
-            if (!first) {
-                sb.append(',');
+        separateFromPrevious();
+        writeKey(name);
+        buffer.append('[');
+        for (int i = 0; i < items.size(); i++) {
+            if (i > 0) {
+                buffer.append(',');
             }
-            first = false;
-            sb.append(item.sb).append(item.closer());
+            JsonWriter item = items.get(i);
+            buffer.append(item.buffer).append('}');
         }
-        sb.append(']');
+        buffer.append(']');
         return this;
     }
 
     String build() {
-        return sb.append('}').toString();
+        return buffer.append('}').toString();
     }
 
-    private String closer() {
-        return "}";
-    }
-
-    private void comma() {
-        if (needsComma) {
-            sb.append(',');
+    // Every field call after the first needs a leading comma; the closing '{' from
+    // object() means there's nothing to separate from on the very first call.
+    private void separateFromPrevious() {
+        if (fieldAlreadyWritten) {
+            buffer.append(',');
         }
-        needsComma = true;
+        fieldAlreadyWritten = true;
     }
 
-    private void key(String name) {
-        sb.append(quote(name)).append(':');
+    private void writeKey(String name) {
+        buffer.append(escapeAndQuote(name)).append(':');
     }
 
-    private static String quote(String value) {
+    private static String escapeAndQuote(String value) {
         StringBuilder out = new StringBuilder(value.length() + 2);
         out.append('"');
         for (int i = 0; i < value.length(); i++) {

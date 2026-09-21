@@ -32,7 +32,7 @@ import java.util.stream.Stream;
  * <ul>
  *     <li>Force-load upkeep: {@code forceLoadUpkeepPrice} per force-loaded
  *     chunk, same as the FTB side.</li>
- *     <li>Protection upkeep: build chunks pay {@link OpcSafeguardPricing}'s
+ *     <li>Protection upkeep: build chunks pay {@link OpcProtectionPricing}'s
  *     build base price per chunk, land chunks (marked via
  *     {@code /lcce opc_chunktype land}, see
  *     {@link OpcChunkTypeCommand}) pay the land base price once per
@@ -217,12 +217,12 @@ public final class OpcBillingCycleService {
 
         long copper = 0L;
         if (buildBillable > 0) {
-            copper += OpcSafeguardPricing.calculateBuildBasePrice(config) * buildBillable;
+            copper += OpcProtectionPricing.calculateBuildBasePrice(config) * buildBillable;
         }
         if (landBillable > 0) {
             int groupSize = Math.max(1, LcClaimEconomyConfig.SERVER.landChunkGroupSize.get());
             int units = (landBillable + groupSize - 1) / groupSize;
-            copper += OpcSafeguardPricing.calculateLandBasePrice(config) * units;
+            copper += OpcProtectionPricing.calculateLandBasePrice(config) * units;
         }
         return copper;
     }

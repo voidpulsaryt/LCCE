@@ -111,7 +111,7 @@ public class BillingCycleService {
         }
 
         MoneyValue projectedCost = ConflictService.calculateTotalUpkeepCost(server, team, pendingState);
-        LcClaimEconomy.LOGGER.info("[PendingDebug] Upkeep for team {}: chunks={}, forceLoads={}, cost={}, pendingEmpty={}",
+        LcClaimEconomy.LOGGER.debug("Upkeep for team {}: chunks={}, forceLoads={}, cost={}, pendingEmpty={}",
                 team.getShortName(), chunkCount, forceLoadCount, projectedCost.getString(), pendingState.isEmpty());
 
         BillingSettlementService.SettlementResult result = BillingSettlementService.settle(server, team);

@@ -21,7 +21,7 @@ import java.util.UUID;
  * closest per-owner equivalent exposed by its public config API, so
  * {@link OpcBillingCycleService} toggles it off in place of a real protection
  * lock when upkeep can't be paid, and restores it once the owner's balance
- * recovers. {@link OpcSafeguardPricing} reads the same resolved config to
+ * recovers. {@link OpcProtectionPricing} reads the same resolved config to
  * price protection upkeep.
  */
 final class OpcPlayerConfigAccess {

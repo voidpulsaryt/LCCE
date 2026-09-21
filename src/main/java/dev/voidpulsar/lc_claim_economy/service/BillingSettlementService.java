@@ -257,12 +257,6 @@ public final class BillingSettlementService {
         return updated;
     }
 
-    private static Component protectionLabel(TeamProperty<?> property) {
-        return Component.translatable(
-                "message.lc_claim_economy.upkeep_priority.protection." + SafeguardPricing.propertyKey(property)
-        );
-    }
-
     private static TeamQueuedChanges clearForceLoadPending(TeamQueuedChanges pendingState) {
         TeamQueuedChanges updated = pendingState;
         for (String key : pendingState.pendingForceLoads()) {

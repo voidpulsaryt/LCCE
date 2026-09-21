@@ -111,33 +111,21 @@ public final class TeamRegistry {
     }
 
     public static List<Team> trackedTeams(MinecraftServer server) {
-        List<Team> tracked = new ArrayList<>();
-        for (Team team : allStoredTeams(server)) {
-            if (isTracked(server, team)) {
-                tracked.add(team);
-            }
-        }
-        return tracked;
+        return allStoredTeams(server).stream()
+                .filter(team -> isTracked(server, team))
+                .toList();
     }
 
     public static List<Team> singlePlayerTeams(MinecraftServer server) {
-        List<Team> singles = new ArrayList<>();
-        for (Team team : allStoredTeams(server)) {
-            if (isSinglePlayerTeam(team)) {
-                singles.add(team);
-            }
-        }
-        return singles;
+        return allStoredTeams(server).stream()
+                .filter(TeamRegistry::isSinglePlayerTeam)
+                .toList();
     }
 
     public static List<Team> activeParties(MinecraftServer server) {
-        List<Team> parties = new ArrayList<>();
-        for (Team team : allStoredTeams(server)) {
-            if (isActiveParty(server, team)) {
-                parties.add(team);
-            }
-        }
-        return parties;
+        return allStoredTeams(server).stream()
+                .filter(team -> isActiveParty(server, team))
+                .toList();
     }
 
     /**

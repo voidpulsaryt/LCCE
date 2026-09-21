@@ -15,17 +15,15 @@ public final class QueuedStateBroadcast {
 
     public static void syncToPlayer(ServerPlayer player) {
         if (!FTBTeamsAPI.api().isManagerLoaded()) {
-            LcClaimEconomy.LOGGER.info("[PendingDebug] syncToPlayer {}: team manager not loaded", player.getScoreboardName());
             return;
         }
         Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
         if (team == null) {
-            LcClaimEconomy.LOGGER.info("[PendingDebug] syncToPlayer {}: no team, sending EMPTY", player.getScoreboardName());
             PacketDistributor.sendToPlayer(player, QueuedStateBroadcastPayload.EMPTY);
             return;
         }
         QueuedStateBroadcastPayload payload = createPayload(player.server, team);
-        LcClaimEconomy.LOGGER.info("[PendingDebug] syncToPlayer {}: team={}, properties={}, forceLoads={}, forceUnloads={}",
+        LcClaimEconomy.LOGGER.debug("syncToPlayer {}: team={}, properties={}, forceLoads={}, forceUnloads={}",
                 player.getScoreboardName(), team.getShortName(),
                 payload.pendingProperties(), payload.pendingForceLoads(), payload.pendingForceUnloads());
         PacketDistributor.sendToPlayer(player, payload);
@@ -33,7 +31,7 @@ public final class QueuedStateBroadcast {
 
     public static void syncTeam(MinecraftServer server, Team team) {
         QueuedStateBroadcastPayload payload = createPayload(server, team);
-        LcClaimEconomy.LOGGER.info("[PendingDebug] syncTeam {}: properties={}, forceLoads={}, forceUnloads={}, recipients={}",
+        LcClaimEconomy.LOGGER.debug("syncTeam {}: properties={}, forceLoads={}, forceUnloads={}, recipients={}",
                 team.getShortName(), payload.pendingProperties(), payload.pendingForceLoads(),
                 payload.pendingForceUnloads(), team.getOnlineMembers().size());
         for (ServerPlayer member : team.getOnlineMembers()) {

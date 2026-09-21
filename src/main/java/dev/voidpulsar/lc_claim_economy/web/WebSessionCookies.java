@@ -7,8 +7,11 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Session-cookie handling for the login-gated dashboard - reading the session cookie
- * off a request and resolving it to a logged-in player via {@link DashboardSessions}.
+ * Turns the raw {@code Cookie} header into a resolved player id for the
+ * dashboard's login-gated routes. {@link EmbeddedWebServer}'s handlers never
+ * touch the cookie string themselves - they only ever see an
+ * {@code Optional<UUID>}, so a change to the cookie name or format is
+ * isolated to this one file.
  */
 final class WebSessionCookies {
     static final String SESSION_COOKIE = "lce_session";
@@ -21,10 +24,10 @@ final class WebSessionCookies {
         if (cookieHeader == null) {
             return null;
         }
-        for (String part : cookieHeader.split(";")) {
-            String trimmed = part.trim();
-            if (trimmed.startsWith(SESSION_COOKIE + "=")) {
-                return trimmed.substring(SESSION_COOKIE.length() + 1);
+        for (String rawCookie : cookieHeader.split(";")) {
+            String cookie = rawCookie.trim();
+            if (cookie.startsWith(SESSION_COOKIE + "=")) {
+                return cookie.substring(SESSION_COOKIE.length() + 1);
             }
         }
         return null;
@@ -34,7 +37,11 @@ final class WebSessionCookies {
         return DashboardSessions.SESSIONS.resolve(sessionToken(exchange));
     }
 
-    /** Checks method + session for a POST action endpoint; sends the error response itself if either fails. */
+    /**
+     * Combines the method check and the session lookup that every mutating dashboard
+     * endpoint needs up front - written this way so each handler in {@link EmbeddedWebServer}
+     * can bail out with one line instead of repeating both checks (and their error responses).
+     */
     static Optional<UUID> requirePostSession(HttpExchange exchange) throws IOException {
         if (!"POST".equalsIgnoreCase(exchange.getRequestMethod())) {
             WebResponses.sendPlain(exchange, 405, "Method Not Allowed");

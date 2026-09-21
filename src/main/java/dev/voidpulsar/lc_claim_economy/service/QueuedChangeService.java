@@ -33,7 +33,7 @@ public final class QueuedChangeService {
             return;
         }
 
-        LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: applying pending changes: properties={}, forceLoads={}, forceUnloads={}, warDeclares={}, warEnds={}",
+        LcClaimEconomy.LOGGER.debug("Team {}: applying pending changes: properties={}, forceLoads={}, forceUnloads={}, warDeclares={}, warEnds={}",
                 team.getShortName(),
                 pendingState.pendingProperties(),
                 pendingState.pendingForceLoads(),
@@ -75,7 +75,7 @@ public final class QueuedChangeService {
         for (var entry : pendingState.pendingProperties().entrySet()) {
             TeamProperty<?> property = findProperty(entry.getKey());
             if (property == null) {
-                LcClaimEconomy.LOGGER.warn("[PendingDebug] Team {}: unknown pending property key '{}', skipping",
+                LcClaimEconomy.LOGGER.warn("Team {}: unknown pending property key '{}', skipping",
                         team.getShortName(), entry.getKey());
                 continue;
             }
@@ -111,13 +111,13 @@ public final class QueuedChangeService {
         for (UUID targetId : pendingState.pendingWarDeclares()) {
             if (savedData.setWarTarget(teamId, targetId, true)) {
                 partners.add(targetId);
-                LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: applied pending war declare on {}", team.getShortName(), targetId);
+                LcClaimEconomy.LOGGER.debug("Team {}: applied pending war declare on {}", team.getShortName(), targetId);
             }
         }
         for (UUID targetId : pendingState.pendingWarEnds()) {
             if (savedData.setWarTarget(teamId, targetId, false)) {
                 partners.add(targetId);
-                LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: applied pending war end with {}", team.getShortName(), targetId);
+                LcClaimEconomy.LOGGER.debug("Team {}: applied pending war end with {}", team.getShortName(), targetId);
             }
         }
 
@@ -140,7 +140,7 @@ public final class QueuedChangeService {
         // the new value unconditionally to all online team members, which is
         // exactly who needs to see the applied change in their properties menu.
         team.syncOnePropertyToTeam(property, value);
-        LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: applied pending {} = {} (synced to team)",
+        LcClaimEconomy.LOGGER.debug("Team {}: applied pending {} = {} (synced to team)",
                 team.getShortName(), SafeguardPricing.propertyKey(property), value);
     }
 

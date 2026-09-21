@@ -11,6 +11,16 @@ import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Lightman's Currency's {@code Team} exposes almost none of its mutable state through public
+ * setters (owner/name/admins/members/bank account are all package-private fields with no
+ * accessor), because normal gameplay only ever changes them through LC's own team-management
+ * screens. This mod needs to push FTB/OP&C party state onto an LC team programmatically instead,
+ * so these fields are reached through reflection rather than forking or wrapping LC's team class.
+ * All lookups are done once in the static initializer and fail fast (as an
+ * {@link ExceptionInInitializerError}) if LC ever renames one of these fields, rather than
+ * failing silently mid-sync.
+ */
 public final class CurrencyTeamAccess {
     private static final Field TEAM_OWNER;
     private static final Field TEAM_NAME;

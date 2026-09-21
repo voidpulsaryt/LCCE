@@ -77,7 +77,7 @@ public class ChunkLoadPinHandler {
         }
 
         savedData.setPendingState(team.getTeamId(), updated);
-        dev.voidpulsar.lc_claim_economy.LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: force-load queued for chunk {}",
+        dev.voidpulsar.lc_claim_economy.LcClaimEconomy.LOGGER.debug("Team {}: force-load queued for chunk {}",
                 team.getShortName(), chunkKey);
         QueuedStateBroadcast.syncTeam(server, team);
         notifyForceLoadPending(team);

@@ -29,8 +29,8 @@ public class TeamPropertyHandler {
 
     private void onTeamPropertiesChanged(TeamPropertiesChangedEvent event) {
         if (SafeguardEnforcementService.isReverting() || SafeguardEnforcementService.isApplying()) {
-            LcClaimEconomy.LOGGER.info("[PendingDebug] PROPERTIES_CHANGED ignored (reverting={}, applying={})",
-                    SafeguardEnforcementService.isReverting(), SafeguardEnforcementService.isApplying());
+            // Our own revertProperty/applyPendingProperties calls fire this same event -
+            // without this guard we'd recurse into our own reaction to our own edit.
             return;
         }
 
@@ -53,7 +53,7 @@ public class TeamPropertyHandler {
 
         if (hasPropertyChanged(previous, team, FTBChunksProperties.CLAIM_VISIBILITY)
                 && team.getProperty(FTBChunksProperties.CLAIM_VISIBILITY) != PrivacyMode.PUBLIC) {
-            LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: claim_visibility change to {} rejected (always public)",
+            LcClaimEconomy.LOGGER.debug("Team {}: claim_visibility change to {} rejected (always public)",
                     team.getShortName(), team.getProperty(FTBChunksProperties.CLAIM_VISIBILITY));
             SafeguardEnforcementService.runReverting(() -> {
                 team.setProperty(FTBChunksProperties.CLAIM_VISIBILITY, PrivacyMode.PUBLIC);
@@ -75,8 +75,6 @@ public class TeamPropertyHandler {
                 if (pendingState.pendingProperties().containsKey(key)) {
                     pendingState = pendingState.withoutPendingProperty(key);
                     savedData.setPendingState(team.getTeamId(), pendingState);
-                    LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: {} switched back to current value, pending cancelled; pending now: {}",
-                            team.getShortName(), key, pendingState.pendingProperties());
                     notifyTeam(team, "message.lc_claim_economy.protection_pending_cancelled");
                 }
                 continue;
@@ -84,7 +82,7 @@ public class TeamPropertyHandler {
 
             Object previousValue = previous.get(property);
             Object newValue = team.getProperty(property);
-            LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: {} changed {} -> {}",
+            LcClaimEconomy.LOGGER.debug("Team {}: {} changed {} -> {}",
                     team.getShortName(), key, previousValue, newValue);
 
             if (SafeguardRollbackService.isDismantled(team, property, pendingState)) {
@@ -98,8 +96,6 @@ public class TeamPropertyHandler {
             if (existingPending != null) {
                 if (existingPending.equals(serializedNew)) {
                     // Matches already-queued value — revert live display, keep pending.
-                    LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: {} matches queued value {}, keeping pending",
-                            team.getShortName(), key, existingPending);
                     revertProperty(server, team, previous, property);
                     continue;
                 }
@@ -112,16 +108,12 @@ public class TeamPropertyHandler {
                 if (activePrice == submittedPrice) {
                     pendingState = droppedState;
                     savedData.setPendingState(team.getTeamId(), pendingState);
-                    LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: {} cost-neutral vs active, applied immediately; pending now: {}",
-                            team.getShortName(), key, pendingState.pendingProperties());
                     continue;
                 }
 
                 pendingState = pendingState.withPendingProperty(key, serializedNew);
                 savedData.setPendingState(team.getTeamId(), pendingState);
                 revertProperty(server, team, previous, property);
-                LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: {} pending replaced {} -> {}; pending now: {}",
-                        team.getShortName(), key, existingPending, serializedNew, pendingState.pendingProperties());
                 notifyProtectionPending(team);
                 continue;
             }
@@ -132,15 +124,11 @@ public class TeamPropertyHandler {
             TeamQueuedChanges simulatedState = pendingState.withPendingProperty(key, serializedNew);
             long oldPrice = SafeguardPricing.calculateProtectionCopper(previous, pendingState.pendingProperties(), counts);
             long newPrice = SafeguardPricing.calculateProtectionCopper(previous, simulatedState.pendingProperties(), counts);
-            LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: {} base price {} -> {}",
-                    team.getShortName(), key, oldPrice, newPrice);
 
             if (oldPrice == newPrice && !shouldQueueProtectionPendingWhenTotalUnchanged(
                     property, previous, pendingState, simulatedState)) {
                 // Cost-neutral change — apply immediately without queuing.
                 savedData.setPendingState(team.getTeamId(), pendingState);
-                LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: {} applied immediately (price unchanged)",
-                        team.getShortName(), key);
                 continue;
             }
 
@@ -150,8 +138,6 @@ public class TeamPropertyHandler {
             pendingState = simulatedState;
             savedData.setPendingState(team.getTeamId(), pendingState);
             revertProperty(server, team, previous, property);
-            LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: {} queued as pending; pending now: {}",
-                    team.getShortName(), key, pendingState.pendingProperties());
             notifyProtectionPending(team);
         }
 
@@ -182,8 +168,6 @@ public class TeamPropertyHandler {
             notifyProtectionPending(team);
         }
         savedData.setPendingState(team.getTeamId(), updated);
-        LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: dismantled {} pending updated to {}; pending now: {}",
-                team.getShortName(), key, serializedNew, updated.pendingProperties());
         return updated;
     }
 
@@ -223,8 +207,6 @@ public class TeamPropertyHandler {
             // client cache always matches the server's active value.
             team.syncOnePropertyToTeam(property, value);
         });
-        LcClaimEconomy.LOGGER.info("[PendingDebug] Team {}: reverted {} to {} (synced to team)",
-                team.getShortName(), SafeguardPricing.propertyKey(property), value);
     }
 
     private static void notifyProtectionPending(Team team) {

@@ -15,22 +15,24 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Small built-in HTTP server (JDK's own {@link HttpServer}, no new mod
- * dependency) serving two independent things, both gated by their own config
- * flags:
+ * Wraps the JDK's own {@link HttpServer} rather than pulling in a web framework -
+ * the whole surface here is a dozen-odd routes serving small JSON payloads, which
+ * doesn't justify a new dependency. Two independent things are served, each behind
+ * its own config flag so a server owner can run either, both, or neither:
  * <ul>
- *   <li>{@code /} and {@code /api/data} - the read-only, unauthenticated
- *   leaderboard/info page (see {@code webEnabled}). Every request re-reads
- *   live data straight from {@link WebDataService} - no caching needed.</li>
- *   <li>{@code /dashboard} and {@code /api/*} dashboard routes - the
- *   login-gated player dashboard (see {@code webDashboardEnabled}), backed
- *   by {@link DashboardApi}, {@link DashboardSessions}, and short-lived
- *   session cookies. FTB Chunks/Teams only.</li>
+ *   <li>{@code /} and {@code /api/data} - public, unauthenticated leaderboard/info
+ *   page (gated by {@code webEnabled}). Nothing is cached; every hit re-reads live
+ *   state from {@link WebDataService} since the underlying data changes constantly
+ *   and there's no reason to serve it stale.</li>
+ *   <li>{@code /dashboard} and {@code /api/*} - the login-gated per-player
+ *   dashboard (gated by {@code webDashboardEnabled}), backed by {@link DashboardApi},
+ *   {@link DashboardSessions}, and short-lived session cookies. Only works where FTB
+ *   Chunks/Teams is the active backend.</li>
  * </ul>
- * Route table and per-endpoint request/response shaping live here; the
- * transport-level I/O plumbing (reading bodies, writing responses, loading
- * mod resources) is {@link WebResponses}, and session-cookie handling is
- * {@link WebSessionCookies} - kept separate so each stays single-purpose.
+ * This class owns the route table and decides what each endpoint's request/response
+ * looks like; it deliberately doesn't do its own byte-pushing or cookie-parsing -
+ * that's {@link WebResponses} and {@link WebSessionCookies} respectively, split out
+ * so a change to, say, how bodies get read doesn't require touching route logic.
  */
 public final class EmbeddedWebServer {
     private static final String INDEX_RESOURCE = "/web/index.html";
@@ -87,9 +89,9 @@ public final class EmbeddedWebServer {
                 httpServer.createContext("/api/login", exchange -> handleLogin(exchange, server));
                 httpServer.createContext("/api/logout", this::handleLogout);
                 httpServer.createContext("/api/me", exchange -> handleMe(exchange, server));
-                // Registered alongside the more specific /api/dashboard/* action contexts below -
-                // HttpServer resolves each request to the longest matching prefix, so this exact
-                // path only ever serves the dashboard data GET, never the action POSTs.
+                // JDK HttpServer dispatches by longest-matching-prefix, so registering the more
+                // specific /api/dashboard/* action paths below doesn't steal requests away from
+                // this exact path - it only ever sees the plain dashboard-data GET.
                 httpServer.createContext("/api/dashboard", exchange -> handleDashboardData(exchange, server));
                 httpServer.createContext("/api/dashboard/protection", exchange -> handleProtection(exchange, server));
                 httpServer.createContext("/api/dashboard/peaceful", exchange -> handlePeaceful(exchange, server));
@@ -98,7 +100,7 @@ public final class EmbeddedWebServer {
                 httpServer.createContext("/api/dashboard/war", exchange -> handleWar(exchange, server));
             }
 
-            httpServer.setExecutor(Executors.newFixedThreadPool(4, daemonThreadFactory()));
+            httpServer.setExecutor(Executors.newFixedThreadPool(4, daemonWebThreadFactory()));
             httpServer.start();
             LcClaimEconomy.LOGGER.info("Claim Economy web server started on {}:{} (dashboard: {})", bindAddress, port, dashboardEnabled ? "enabled" : "disabled");
         } catch (IOException e) {
@@ -305,10 +307,12 @@ public final class EmbeddedWebServer {
 
     // ---------------- Helpers ----------------
 
-    private static ThreadFactory daemonThreadFactory() {
-        AtomicInteger counter = new AtomicInteger(1);
-        return runnable -> {
-            Thread thread = new Thread(runnable, "lc-claim-economy-web-" + counter.getAndIncrement());
+    // Daemon so a lingering request thread can never keep the JVM alive past server shutdown -
+    // stop() already calls httpServer.stop(0), this is just a belt-and-suspenders guarantee.
+    private static ThreadFactory daemonWebThreadFactory() {
+        AtomicInteger nextThreadNumber = new AtomicInteger(1);
+        return task -> {
+            Thread thread = new Thread(task, "lc-claim-economy-web-" + nextThreadNumber.getAndIncrement());
             thread.setDaemon(true);
             return thread;
         };

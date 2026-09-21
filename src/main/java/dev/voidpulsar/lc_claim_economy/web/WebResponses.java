@@ -9,11 +9,15 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Pure I/O plumbing for {@link EmbeddedWebServer}'s HTTP handlers - reading request
- * bodies, loading mod-resource bytes, and writing plain/resource/JSON responses. No
- * route table, no session handling, no domain logic.
+ * Everything {@link EmbeddedWebServer}'s handlers need to talk HTTP but shouldn't
+ * have to think about inline: draining a request body, pulling a resource out of
+ * the mod jar, and writing a response with the right headers. Nothing here knows
+ * what a route or a session is - that separation is what lets the handler methods
+ * in {@link EmbeddedWebServer} read as pure "decide what to send", not plumbing.
  */
 final class WebResponses {
+    // Dashboard POST bodies are tiny (a key + a bool, at most a couple of fields) -
+    // this just guards against a malformed/hostile client streaming something huge.
     private static final int MAX_BODY_BYTES = 8192;
 
     private WebResponses() {
@@ -21,18 +25,18 @@ final class WebResponses {
 
     static String readBody(HttpExchange exchange) throws IOException {
         try (InputStream in = exchange.getRequestBody()) {
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            byte[] chunk = new byte[512];
-            int read;
-            int total = 0;
-            while ((read = in.read(chunk)) != -1) {
-                total += read;
-                if (total > MAX_BODY_BYTES) {
+            ByteArrayOutputStream collected = new ByteArrayOutputStream();
+            byte[] readBuf = new byte[512];
+            int bytesRead;
+            int totalRead = 0;
+            while ((bytesRead = in.read(readBuf)) != -1) {
+                totalRead += bytesRead;
+                if (totalRead > MAX_BODY_BYTES) {
                     break;
                 }
-                buffer.write(chunk, 0, read);
+                collected.write(readBuf, 0, bytesRead);
             }
-            return buffer.toString(StandardCharsets.UTF_8);
+            return collected.toString(StandardCharsets.UTF_8);
         }
     }
 
@@ -67,14 +71,15 @@ final class WebResponses {
         }
     }
 
+    /** Null return means "not found" - callers use that to decide whether to log and skip starting the affected route. */
     static byte[] loadResource(String path) {
         try (InputStream in = WebResponses.class.getResourceAsStream(path)) {
             if (in == null) {
                 return null;
             }
-            ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-            in.transferTo(buffer);
-            return buffer.toByteArray();
+            ByteArrayOutputStream collected = new ByteArrayOutputStream();
+            in.transferTo(collected);
+            return collected.toByteArray();
         } catch (IOException e) {
             return null;
         }

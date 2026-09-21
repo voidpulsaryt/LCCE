@@ -58,7 +58,7 @@ public record QueuedStateBroadcastPayload(
 
     public static void handleClient(QueuedStateBroadcastPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
-            LcClaimEconomy.LOGGER.info("[PendingDebug/Client] received pending state: properties={}, forceLoads={}, forceUnloads={}, landChunks={}, buildChunks={}",
+            LcClaimEconomy.LOGGER.debug("Client received pending state: properties={}, forceLoads={}, forceUnloads={}, landChunks={}, buildChunks={}",
                     payload.pendingProperties, payload.pendingForceLoads, payload.pendingForceUnloads,
                     payload.pendingLandChunks, payload.pendingBuildChunks);
             ClientQueuedChanges.update(

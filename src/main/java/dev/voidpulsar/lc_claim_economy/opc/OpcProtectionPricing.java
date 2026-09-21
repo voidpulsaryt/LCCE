@@ -27,61 +27,64 @@ import xaero.pac.common.server.player.config.api.v2.PlayerConfigOptions;
  * block-edit and block-interact ("item use") exceptions are priced, since
  * those are the only two land protections FTB Chunks itself exposes.
  */
-final class OpcSafeguardPricing {
-    private OpcSafeguardPricing() {
+final class OpcProtectionPricing {
+    private OpcProtectionPricing() {
     }
 
     static long calculateBuildBasePrice(IPlayerConfigAPI config) {
         if (!isProtectionEnabled(config)) {
             return 0L;
         }
-        long base = 0L;
-        if (!groupExemptsEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_BLOCKS_BY_MOBS)) {
-            base += LcClaimEconomyConfig.SERVER.mobGriefProtectionPrice.get();
+        long total = 0L;
+        if (!groupCoversEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_BLOCKS_BY_MOBS)) {
+            total += LcClaimEconomyConfig.SERVER.mobGriefProtectionPrice.get();
         }
-        if (!boolExempt(config, PlayerConfigOptions.CLAIM_EXCEPTION_BLOCKS_BY_EXPLOSIONS)) {
-            base += LcClaimEconomyConfig.SERVER.explosionProtectionPrice.get();
+        if (!flagCoversEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_BLOCKS_BY_EXPLOSIONS)) {
+            total += LcClaimEconomyConfig.SERVER.explosionProtectionPrice.get();
         }
-        if (!boolExempt(config, PlayerConfigOptions.CLAIM_EXCEPTION_PLAYERS_BY_PLAYERS)) {
-            base += LcClaimEconomyConfig.SERVER.pvpDisablePrice.get();
+        if (!flagCoversEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_PLAYERS_BY_PLAYERS)) {
+            total += LcClaimEconomyConfig.SERVER.pvpDisablePrice.get();
         }
-        if (!groupExemptsEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_ITEM_USE)) {
-            base += LcClaimEconomyConfig.SERVER.blockInteractProtectionPrice.get();
+        if (!groupCoversEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_ITEM_USE)) {
+            total += LcClaimEconomyConfig.SERVER.blockInteractProtectionPrice.get();
         }
-        if (!groupExemptsEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_BLOCKS_BY_PLAYERS)) {
-            base += LcClaimEconomyConfig.SERVER.blockEditProtectionPrice.get();
+        if (!groupCoversEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_BLOCKS_BY_PLAYERS)) {
+            total += LcClaimEconomyConfig.SERVER.blockEditProtectionPrice.get();
         }
-        if (!groupExemptsEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_ENTITIES_BY_PLAYERS)) {
-            base += LcClaimEconomyConfig.SERVER.entityInteractProtectionPrice.get();
+        if (!groupCoversEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_ENTITIES_BY_PLAYERS)) {
+            total += LcClaimEconomyConfig.SERVER.entityInteractProtectionPrice.get();
         }
-        return base;
+        return total;
     }
 
     static long calculateLandBasePrice(IPlayerConfigAPI config) {
         if (!isProtectionEnabled(config)) {
             return 0L;
         }
-        long base = 0L;
-        if (!groupExemptsEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_ITEM_USE)) {
-            base += LcClaimEconomyConfig.SERVER.blockInteractProtectionPrice.get();
+        long total = 0L;
+        if (!groupCoversEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_ITEM_USE)) {
+            total += LcClaimEconomyConfig.SERVER.blockInteractProtectionPrice.get();
         }
-        if (!groupExemptsEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_BLOCKS_BY_PLAYERS)) {
-            base += LcClaimEconomyConfig.SERVER.blockEditProtectionPrice.get();
+        if (!groupCoversEveryone(config, PlayerConfigOptions.CLAIM_EXCEPTION_BLOCKS_BY_PLAYERS)) {
+            total += LcClaimEconomyConfig.SERVER.blockEditProtectionPrice.get();
         }
-        return base;
+        return total;
     }
 
     private static boolean isProtectionEnabled(IPlayerConfigAPI config) {
+        // Treat an unset value (null) as "protected" - matches OP&C's own default for
+        // this option, and an absent option shouldn't silently disable pricing.
         Boolean enabled = config.getEffective(PlayerConfigOptions.PROTECT_CLAIMED_CHUNKS);
         return enabled == null || enabled;
     }
 
-    private static boolean groupExemptsEveryone(IPlayerConfigAPI config, IPlayerConfigOptionSpecAPI<String> option) {
-        String value = config.getEffective(option);
-        return PlayerConfigConstants.EVERYONE_EXCEPTION_ID.equals(value);
+    /** True when the exception group named by this option is the built-in "everyone" group. */
+    private static boolean groupCoversEveryone(IPlayerConfigAPI config, IPlayerConfigOptionSpecAPI<String> option) {
+        String groupId = config.getEffective(option);
+        return PlayerConfigConstants.EVERYONE_EXCEPTION_ID.equals(groupId);
     }
 
-    private static boolean boolExempt(IPlayerConfigAPI config, IPlayerConfigOptionSpecAPI<Boolean> option) {
+    private static boolean flagCoversEveryone(IPlayerConfigAPI config, IPlayerConfigOptionSpecAPI<Boolean> option) {
         Boolean value = config.getEffective(option);
         return value != null && value;
     }
