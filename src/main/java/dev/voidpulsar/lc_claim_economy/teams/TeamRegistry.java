@@ -10,7 +10,7 @@ import dev.voidpulsar.lc_claim_economy.service.ConflictService;
 import net.minecraft.server.MinecraftServer;
 
 import javax.annotation.Nullable;
-import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Predicate;
@@ -101,12 +101,8 @@ public final class TeamRegistry {
 
         TeamManager teamManager = FTBTeamsAPI.api().getManager();
         UUID soloTeamId = team.getTeamId();
-        for (UUID memberUuid : team.getMembers()) {
-            if (isMemberCurrentlyOn(teamManager, memberUuid, soloTeamId)) {
-                return true;
-            }
-        }
-        return false;
+        return team.getMembers().stream()
+                .anyMatch(memberUuid -> isMemberCurrentlyOn(teamManager, memberUuid, soloTeamId));
     }
 
     private static boolean isMemberCurrentlyOn(TeamManager teamManager, UUID memberUuid, UUID teamId) {
@@ -151,15 +147,9 @@ public final class TeamRegistry {
         return selectFrom(allStoredTeams(server), candidate -> isActiveParty(server, candidate));
     }
 
-    /** Shared accumulate-and-filter step so each listing method above doesn't repeat the loop. */
-    private static List<Team> selectFrom(Iterable<Team> source, Predicate<Team> predicate) {
-        List<Team> matches = new ArrayList<>();
-        for (Team candidate : source) {
-            if (predicate.test(candidate)) {
-                matches.add(candidate);
-            }
-        }
-        return matches;
+    /** Shared filter step so each listing method above declares its rule instead of repeating a loop. */
+    private static List<Team> selectFrom(Collection<Team> source, Predicate<Team> predicate) {
+        return source.stream().filter(predicate).toList();
     }
 
     // ------------------------------------------------------------------

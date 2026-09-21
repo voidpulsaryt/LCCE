@@ -31,6 +31,42 @@ public class ChunkLoadPinHandler {
     private record LoadScope(MinecraftServer server, LcClaimEconomySavedData economyData, TeamQueuedChanges queuedState, String positionKey) {
     }
 
+    /**
+     * The two directions differ only in which physical chunk state makes the request a
+     * no-op and which queued-state builder they call - encoded here as per-constant
+     * strategy methods (classic enum-strategy dispatch) so {@link #queueDirectionChange}
+     * can share one tail implementation instead of {@code beforeLoad}/{@code beforeUnload}
+     * each re-deriving the same "cancel, else queue" flow independently.
+     */
+    private enum Direction {
+        LOAD {
+            @Override
+            boolean alreadyInTargetState(ClaimedChunk chunk) {
+                return chunk.isForceLoaded();
+            }
+
+            @Override
+            TeamQueuedChanges withPending(TeamQueuedChanges state, String positionKey) {
+                return state.withPendingForceLoad(positionKey);
+            }
+        },
+        UNLOAD {
+            @Override
+            boolean alreadyInTargetState(ClaimedChunk chunk) {
+                return !chunk.isForceLoaded();
+            }
+
+            @Override
+            TeamQueuedChanges withPending(TeamQueuedChanges state, String positionKey) {
+                return state.withPendingForceUnload(positionKey);
+            }
+        };
+
+        abstract boolean alreadyInTargetState(ClaimedChunk chunk);
+
+        abstract TeamQueuedChanges withPending(TeamQueuedChanges state, String positionKey);
+    }
+
     private CompoundEventResult<ClaimResult> beforeLoad(CommandSourceStack source, ClaimedChunk chunk) {
         CompoundEventResult<ClaimResult> denied = checkBasicAuthorization(source, chunk);
         if (denied != null) {
@@ -47,26 +83,7 @@ public class ChunkLoadPinHandler {
             return CompoundEventResult.interruptFalse(ClaimResult.customProblem("message.lc_claim_economy.protection_locked_change"));
         }
 
-        // A second load click while one's already queued reads as "never mind" -
-        // same idea as cycling a protection setting back to cancel it.
-        CompoundEventResult<ClaimResult> toggledOff = tryCancelExisting(scope, team);
-        if (toggledOff != null) {
-            return toggledOff;
-        }
-        if (chunk.isForceLoaded()) {
-            return CompoundEventResult.pass();
-        }
-
-        TeamQueuedChanges withNewLoad = scope.queuedState().withPendingForceLoad(scope.positionKey());
-        if (!SafeguardEnforcementService.canAffordNextPeriod(scope.server(), team, withNewLoad)) {
-            return CompoundEventResult.interruptFalse(ClaimResult.customProblem("message.lc_claim_economy.insufficient_funds_protection"));
-        }
-
-        scope.economyData().setPendingState(team.getTeamId(), withNewLoad);
-        LcClaimEconomy.LOGGER.debug("Team {}: force-load queued for chunk {}", team.getShortName(), scope.positionKey());
-        QueuedStateBroadcast.syncTeam(scope.server(), team);
-        notifyForceLoadPending(team);
-        return CompoundEventResult.interruptFalse(ClaimResult.success());
+        return queueDirectionChange(scope, team, chunk, Direction.LOAD, true);
     }
 
     private CompoundEventResult<ClaimResult> beforeUnload(CommandSourceStack source, ClaimedChunk chunk) {
@@ -81,16 +98,34 @@ public class ChunkLoadPinHandler {
             return CompoundEventResult.pass();
         }
 
+        return queueDirectionChange(scope, team, chunk, Direction.UNLOAD, false);
+    }
+
+    /**
+     * Shared tail for both directions: undo an opposing/matching queued change if one
+     * exists (same idea as cycling a protection setting back to cancel it), skip if the
+     * chunk is physically already where this direction wants it, then queue the change -
+     * gated by an affordability check only when the caller asks for one (load-only).
+     */
+    private CompoundEventResult<ClaimResult> queueDirectionChange(
+            LoadScope scope, Team team, ClaimedChunk chunk, Direction direction, boolean requireAffordabilityCheck) {
         CompoundEventResult<ClaimResult> toggledOff = tryCancelExisting(scope, team);
         if (toggledOff != null) {
             return toggledOff;
         }
-        if (!chunk.isForceLoaded()) {
+        if (direction.alreadyInTargetState(chunk)) {
             return CompoundEventResult.pass();
         }
 
-        TeamQueuedChanges withNewUnload = scope.queuedState().withPendingForceUnload(scope.positionKey());
-        scope.economyData().setPendingState(team.getTeamId(), withNewUnload);
+        TeamQueuedChanges withNewChange = direction.withPending(scope.queuedState(), scope.positionKey());
+        if (requireAffordabilityCheck && !SafeguardEnforcementService.canAffordNextPeriod(scope.server(), team, withNewChange)) {
+            return CompoundEventResult.interruptFalse(ClaimResult.customProblem("message.lc_claim_economy.insufficient_funds_protection"));
+        }
+
+        scope.economyData().setPendingState(team.getTeamId(), withNewChange);
+        if (direction == Direction.LOAD) {
+            LcClaimEconomy.LOGGER.debug("Team {}: force-load queued for chunk {}", team.getShortName(), scope.positionKey());
+        }
         QueuedStateBroadcast.syncTeam(scope.server(), team);
         notifyForceLoadPending(team);
         return CompoundEventResult.interruptFalse(ClaimResult.success());
@@ -125,16 +160,31 @@ public class ChunkLoadPinHandler {
         return new LoadScope(server, economyData, queuedState, positionKey);
     }
 
+    /** Which direction (if any) is currently queued for a chunk, classified once so the cancel step below can switch on it instead of re-testing both predicates. */
+    private enum QueuedDirection { LOAD, UNLOAD, NONE }
+
+    private static QueuedDirection queuedDirectionFor(LoadScope scope) {
+        if (scope.queuedState().isPendingForceLoad(scope.positionKey())) {
+            return QueuedDirection.LOAD;
+        }
+        if (scope.queuedState().isPendingForceUnload(scope.positionKey())) {
+            return QueuedDirection.UNLOAD;
+        }
+        return QueuedDirection.NONE;
+    }
+
     /** If a load or unload is already queued for this chunk, undo it and report the toggle-off; otherwise null. */
     @Nullable
     private CompoundEventResult<ClaimResult> tryCancelExisting(LoadScope scope, Team team) {
-        if (scope.queuedState().isPendingForceLoad(scope.positionKey())) {
-            return cancelQueuedChange(scope.server(), team, scope.economyData(), scope.queuedState().withoutPendingForceLoad(scope.positionKey()));
+        TeamQueuedChanges withoutEntry = switch (queuedDirectionFor(scope)) {
+            case LOAD -> scope.queuedState().withoutPendingForceLoad(scope.positionKey());
+            case UNLOAD -> scope.queuedState().withoutPendingForceUnload(scope.positionKey());
+            case NONE -> null;
+        };
+        if (withoutEntry == null) {
+            return null;
         }
-        if (scope.queuedState().isPendingForceUnload(scope.positionKey())) {
-            return cancelQueuedChange(scope.server(), team, scope.economyData(), scope.queuedState().withoutPendingForceUnload(scope.positionKey()));
-        }
-        return null;
+        return cancelQueuedChange(scope.server(), team, scope.economyData(), withoutEntry);
     }
 
     /**

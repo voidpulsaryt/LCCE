@@ -12,11 +12,14 @@ import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.data.TeamQueuedChanges;
 import dev.voidpulsar.lc_claim_economy.teams.TeamRegistry;
 import io.github.lightman314.lightmanscurrency.api.money.value.MoneyValue;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
+import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 public class BillingCycleService {
 
@@ -41,10 +44,29 @@ public class BillingCycleService {
         }
     }
 
+    /** Which of the four mutually-exclusive things this tick should do for one team's countdown. */
+    private enum UpkeepPhase { UNINITIALIZED, PAUSED, NOT_DUE, DUE }
+
+    private static UpkeepPhase classifyPhase(
+            MinecraftServer server, Team team, UpkeepOnlineRequirement requirement, long gameTime, long nextUpkeepTick) {
+        if (nextUpkeepTick < 0L) {
+            return UpkeepPhase.UNINITIALIZED;
+        }
+        if (isPaused(server, team, requirement)) {
+            return UpkeepPhase.PAUSED;
+        }
+        if (gameTime < nextUpkeepTick) {
+            return UpkeepPhase.NOT_DUE;
+        }
+        return UpkeepPhase.DUE;
+    }
+
     /**
      * Each team gets its own countdown (rather than one shared server-wide clock) so that
      * {@link UpkeepOnlineRequirement#TEAM_MEMBER_ONLINE} can pause a single team's billing
-     * independently of every other team's online members.
+     * independently of every other team's online members. The countdown's current state is
+     * classified once into {@link UpkeepPhase} and then dispatched, rather than re-testing
+     * the same conditions across a chain of early returns.
      */
     private void tickTeam(
             MinecraftServer server,
@@ -57,22 +79,17 @@ public class BillingCycleService {
         UUID teamId = team.getTeamId();
         long nextUpkeepTick = savedData.getNextUpkeepTick(teamId);
 
-        if (nextUpkeepTick < 0L) {
-            savedData.setNextUpkeepTick(teamId, gameTime + periodTicks);
-            return;
+        switch (classifyPhase(server, team, requirement, gameTime, nextUpkeepTick)) {
+            case UNINITIALIZED -> savedData.setNextUpkeepTick(teamId, gameTime + periodTicks);
+            case PAUSED -> savedData.setNextUpkeepTick(teamId, nextUpkeepTick + 1);
+            case NOT_DUE -> {
+                // Nothing to do yet - wait for a later tick.
+            }
+            case DUE -> {
+                savedData.setNextUpkeepTick(teamId, gameTime + periodTicks);
+                processTeamUpkeep(server, team);
+            }
         }
-
-        if (isPaused(server, team, requirement)) {
-            savedData.setNextUpkeepTick(teamId, nextUpkeepTick + 1);
-            return;
-        }
-
-        if (gameTime < nextUpkeepTick) {
-            return;
-        }
-
-        savedData.setNextUpkeepTick(teamId, gameTime + periodTicks);
-        processTeamUpkeep(server, team);
     }
 
     private static boolean isPaused(MinecraftServer server, Team team, UpkeepOnlineRequirement requirement) {
@@ -116,20 +133,22 @@ public class BillingCycleService {
 
         BillingSettlementService.SettlementResult result = BillingSettlementService.settle(server, team);
 
-        if (result.anythingRestored()) {
-            SafeguardEnforcementService.notifyTeam(server, team,
-                    BillingMessageComposer.buildRestorationSummary(result.restoredProtections(), result.restoredWarNames()));
+        // A declarative table of (should-we-say-this, what-would-we-say) pairs, checked and
+        // sent in order, rather than three independent if-blocks each repeating the same
+        // "build message, then notify" shape.
+        record ConditionalNotice(boolean applies, Supplier<Component> message) {
         }
-
-        if (result.anythingSuspended()) {
-            SafeguardEnforcementService.notifyTeam(server, team,
-                    BillingMessageComposer.buildSuspensionSummary(result.suspendedProtections(), result.warsSuspended()));
-        }
-
-        if (!result.unaffordableRestorations().isEmpty()) {
-            SafeguardEnforcementService.notifyTeam(server, team,
-                    BillingMessageComposer.buildUnaffordableRestorationMessage(result.unaffordableRestorations()));
-        }
+        List<ConditionalNotice> notices = List.of(
+                new ConditionalNotice(result.anythingRestored(),
+                        () -> BillingMessageComposer.buildRestorationSummary(result.restoredProtections(), result.restoredWarNames())),
+                new ConditionalNotice(result.anythingSuspended(),
+                        () -> BillingMessageComposer.buildSuspensionSummary(result.suspendedProtections(), result.warsSuspended())),
+                new ConditionalNotice(!result.unaffordableRestorations().isEmpty(),
+                        () -> BillingMessageComposer.buildUnaffordableRestorationMessage(result.unaffordableRestorations()))
+        );
+        notices.stream()
+                .filter(ConditionalNotice::applies)
+                .forEach(notice -> SafeguardEnforcementService.notifyTeam(server, team, notice.message().get()));
 
         BillingBreakdown breakdown = BillingBreakdown.capture(
                 server,
@@ -144,12 +163,11 @@ public class BillingCycleService {
             return;
         }
 
-        if (result.charged().isEmpty()) {
-            SafeguardEnforcementService.tryUnlock(server, team);
-            return;
-        }
-
+        // Unlocking applies whenever payment succeeded, regardless of whether anything was
+        // actually charged; only a non-zero charge also gets a manager-facing summary.
         SafeguardEnforcementService.tryUnlock(server, team);
-        SafeguardEnforcementService.notifyTeamManagers(server, team, BillingMessageComposer.buildSummary(breakdown));
+        if (!result.charged().isEmpty()) {
+            SafeguardEnforcementService.notifyTeamManagers(server, team, BillingMessageComposer.buildSummary(breakdown));
+        }
     }
 }

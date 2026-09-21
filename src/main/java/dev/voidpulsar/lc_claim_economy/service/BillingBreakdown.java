@@ -14,7 +14,10 @@ import net.minecraft.server.MinecraftServer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import dev.ftb.mods.ftbchunks.api.FTBChunksProperties;
 
@@ -134,77 +137,80 @@ public record BillingBreakdown(
                 || pendingBuildChunkCount > 0;
     }
 
+    /** Concatenates the two directional view lists into one, tagging each with its direction as it maps across rather than appending into a shared accumulator. */
     private static List<WarLine> collectWarLines(MinecraftServer server, Team team) {
-        List<WarLine> lines = new ArrayList<>();
-        appendWarLines(lines, ConflictService.buildBilledIncomingViews(server, team), true);
-        appendWarLines(lines, ConflictService.buildBilledOutgoingViews(server, team), false);
-        return lines;
+        return Stream.concat(
+                ConflictService.buildBilledIncomingViews(server, team).stream()
+                        .map(view -> new WarLine(view.displayName(), view.warCostCopper(), true)),
+                ConflictService.buildBilledOutgoingViews(server, team).stream()
+                        .map(view -> new WarLine(view.displayName(), view.warCostCopper(), false))
+        ).toList();
     }
 
-    private static void appendWarLines(List<WarLine> lines, List<ConflictService.WarTeamView> views, boolean incoming) {
-        for (ConflictService.WarTeamView view : views) {
-            lines.add(new WarLine(view.displayName(), view.warCostCopper(), incoming));
-        }
-    }
-
+    /**
+     * Each candidate protection line is expressed as a rule that either produces a line or
+     * doesn't ({@code Optional}), evaluated in order and flattened - a declarative table
+     * instead of six independent "append if applicable" statements.
+     */
     private static List<ProtectionLine> collectBuildProtectionLines(Team team) {
-        List<ProtectionLine> lines = new ArrayList<>();
         var config = LcClaimEconomyConfig.SERVER;
-
-        addBooleanLine(lines, team, FTBChunksProperties.ALLOW_MOB_GRIEFING,
-                "message.lc_claim_economy.upkeep_detail.mob_grief", config.mobGriefProtectionPrice.get());
-        addBooleanLine(lines, team, FTBChunksProperties.ALLOW_EXPLOSIONS,
-                "message.lc_claim_economy.upkeep_detail.explosions", config.explosionProtectionPrice.get());
-        addBooleanLine(lines, team, FTBChunksProperties.ALLOW_PVP,
-                "message.lc_claim_economy.upkeep_detail.pvp", config.pvpDisablePrice.get());
-        addPrivacyLine(lines, team.getProperty(FTBChunksProperties.BLOCK_INTERACT_MODE),
-                "message.lc_claim_economy.upkeep_detail.block_interact", config.blockInteractProtectionPrice.get());
-        addPrivacyLine(lines, team.getProperty(FTBChunksProperties.BLOCK_EDIT_MODE),
-                "message.lc_claim_economy.upkeep_detail.block_edit", config.blockEditProtectionPrice.get());
-        addPrivacyLine(lines, team.getProperty(FTBChunksProperties.ENTITY_INTERACT_MODE),
-                "message.lc_claim_economy.upkeep_detail.entity_interact", config.entityInteractProtectionPrice.get());
-        return lines;
+        List<Supplier<Optional<ProtectionLine>>> rules = List.of(
+                () -> booleanLine(team, FTBChunksProperties.ALLOW_MOB_GRIEFING,
+                        "message.lc_claim_economy.upkeep_detail.mob_grief", config.mobGriefProtectionPrice.get()),
+                () -> booleanLine(team, FTBChunksProperties.ALLOW_EXPLOSIONS,
+                        "message.lc_claim_economy.upkeep_detail.explosions", config.explosionProtectionPrice.get()),
+                () -> booleanLine(team, FTBChunksProperties.ALLOW_PVP,
+                        "message.lc_claim_economy.upkeep_detail.pvp", config.pvpDisablePrice.get()),
+                () -> privacyLine(team.getProperty(FTBChunksProperties.BLOCK_INTERACT_MODE),
+                        "message.lc_claim_economy.upkeep_detail.block_interact", config.blockInteractProtectionPrice.get()),
+                () -> privacyLine(team.getProperty(FTBChunksProperties.BLOCK_EDIT_MODE),
+                        "message.lc_claim_economy.upkeep_detail.block_edit", config.blockEditProtectionPrice.get()),
+                () -> privacyLine(team.getProperty(FTBChunksProperties.ENTITY_INTERACT_MODE),
+                        "message.lc_claim_economy.upkeep_detail.entity_interact", config.entityInteractProtectionPrice.get())
+        );
+        return rules.stream().map(Supplier::get).flatMap(Optional::stream).toList();
     }
 
-    private static void addBooleanLine(List<ProtectionLine> lines, Team team, TeamProperty<Boolean> property, String labelKey, long price) {
-        if (!team.getProperty(property)) {
-            lines.add(new ProtectionLine(labelKey, price));
-        }
+    private static Optional<ProtectionLine> booleanLine(Team team, TeamProperty<Boolean> property, String labelKey, long price) {
+        return team.getProperty(property) ? Optional.empty() : Optional.of(new ProtectionLine(labelKey, price));
     }
 
     private static List<ProtectionLine> collectLandProtectionLines(Team team) {
-        List<ProtectionLine> lines = new ArrayList<>();
         var config = LcClaimEconomyConfig.SERVER;
-
-        addPrivacyLine(lines, team.getProperty(LandProperties.LAND_BLOCK_INTERACT_MODE),
-                "message.lc_claim_economy.upkeep_detail.block_interact", config.blockInteractProtectionPrice.get());
-        addPrivacyLine(lines, team.getProperty(LandProperties.LAND_BLOCK_EDIT_MODE),
-                "message.lc_claim_economy.upkeep_detail.block_edit", config.blockEditProtectionPrice.get());
-        return lines;
+        List<Supplier<Optional<ProtectionLine>>> rules = List.of(
+                () -> privacyLine(team.getProperty(LandProperties.LAND_BLOCK_INTERACT_MODE),
+                        "message.lc_claim_economy.upkeep_detail.block_interact", config.blockInteractProtectionPrice.get()),
+                () -> privacyLine(team.getProperty(LandProperties.LAND_BLOCK_EDIT_MODE),
+                        "message.lc_claim_economy.upkeep_detail.block_edit", config.blockEditProtectionPrice.get())
+        );
+        return rules.stream().map(Supplier::get).flatMap(Optional::stream).toList();
     }
 
-    private static void addPrivacyLine(List<ProtectionLine> lines, PrivacyMode mode, String labelKey, long price) {
-        if (mode != PrivacyMode.PUBLIC) {
-            lines.add(new ProtectionLine(labelKey, price, mode.name()));
-        }
+    private static Optional<ProtectionLine> privacyLine(PrivacyMode mode, String labelKey, long price) {
+        return mode == PrivacyMode.PUBLIC ? Optional.empty() : Optional.of(new ProtectionLine(labelKey, price, mode.name()));
     }
 
     private static List<PendingProtectionLine> collectPendingProtections(Team team, TeamQueuedChanges pendingState) {
-        List<PendingProtectionLine> lines = new ArrayList<>();
-        for (TeamProperty<?> property : SafeguardPricing.PROTECTION_PROPERTIES) {
-            String key = SafeguardPricing.propertyKey(property);
-            if (!pendingState.hasPendingProperty(key)) {
-                continue;
-            }
-            String desiredValue = formatPendingPropertyValue(property, pendingState.pendingProperties().get(key));
-            String labelKey = "message.lc_claim_economy.upkeep_priority.protection." + key;
-            if (SafeguardRollbackService.isDismantled(team, property, pendingState)) {
-                lines.add(new PendingProtectionLine(labelKey, desiredValue, true));
-            } else if (SafeguardRollbackService.hasPendingApply(team, property, pendingState)) {
-                lines.add(new PendingProtectionLine(labelKey, desiredValue, false));
-            }
+        return SafeguardPricing.PROTECTION_PROPERTIES.stream()
+                .map(property -> pendingProtectionLineFor(team, property, pendingState))
+                .flatMap(Optional::stream)
+                .toList();
+    }
+
+    private static Optional<PendingProtectionLine> pendingProtectionLineFor(Team team, TeamProperty<?> property, TeamQueuedChanges pendingState) {
+        String key = SafeguardPricing.propertyKey(property);
+        if (!pendingState.hasPendingProperty(key)) {
+            return Optional.empty();
         }
-        return lines;
+        String desiredValue = formatPendingPropertyValue(property, pendingState.pendingProperties().get(key));
+        String labelKey = "message.lc_claim_economy.upkeep_priority.protection." + key;
+        if (SafeguardRollbackService.isDismantled(team, property, pendingState)) {
+            return Optional.of(new PendingProtectionLine(labelKey, desiredValue, true));
+        }
+        if (SafeguardRollbackService.hasPendingApply(team, property, pendingState)) {
+            return Optional.of(new PendingProtectionLine(labelKey, desiredValue, false));
+        }
+        return Optional.empty();
     }
 
     private static List<PendingWarLine> collectPendingWars(
@@ -212,16 +218,10 @@ public record BillingBreakdown(
             Team team,
             TeamQueuedChanges pendingState
     ) {
-        List<PendingWarLine> lines = new ArrayList<>();
-        appendPendingWarLines(lines, server, pendingState.pendingWarDeclares(), false);
-        appendPendingWarLines(lines, server, pendingState.pendingWarEnds(), true);
-        return lines;
-    }
-
-    private static void appendPendingWarLines(List<PendingWarLine> lines, MinecraftServer server, java.util.Collection<UUID> targetIds, boolean endWar) {
-        for (UUID targetId : targetIds) {
-            lines.add(new PendingWarLine(resolveTeamName(server, targetId), endWar));
-        }
+        return Stream.concat(
+                pendingState.pendingWarDeclares().stream().map(id -> new PendingWarLine(resolveTeamName(server, id), false)),
+                pendingState.pendingWarEnds().stream().map(id -> new PendingWarLine(resolveTeamName(server, id), true))
+        ).toList();
     }
 
     private static String resolveTeamName(MinecraftServer server, UUID teamId) {

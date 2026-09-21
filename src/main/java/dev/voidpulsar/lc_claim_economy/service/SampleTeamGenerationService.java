@@ -23,8 +23,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * Backs the debug-only {@code /lcce seed_test_teams}/{@code clear_test_teams}/
@@ -91,14 +94,11 @@ public final class SampleTeamGenerationService {
                 ? testTeams.stream().filter(team -> ConflictService.isClaimTeam(server, team)).count()
                 : 0L;
 
-        int filledSlots = 0;
-        for (int slot = 1; slot <= DEFAULT_COUNT; slot++) {
-            if (resolveSlot(teamManager, slot) != null) {
-                filledSlots++;
-            }
-        }
+        long filledSlots = IntStream.rangeClosed(1, DEFAULT_COUNT)
+                .filter(slot -> resolveSlot(teamManager, slot) != null)
+                .count();
 
-        return new CountResult(testTeams.size(), (int) claimedCount, filledSlots);
+        return new CountResult(testTeams.size(), (int) claimedCount, (int) filledSlots);
     }
 
     public static List<Team> findAllTestTeams(TeamManager teamManager) {
@@ -282,19 +282,15 @@ public final class SampleTeamGenerationService {
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         UUID runnerTeamId = runnerTeam.getTeamId();
 
-        List<Team> candidates = new ArrayList<>();
-        for (int slot = 1; slot <= slotLimit; slot++) {
-            Team slotTeam = resolveSlot(teamManager, slot);
-            if (slotTeam != null && ConflictService.isClaimTeam(server, slotTeam)) {
-                candidates.add(slotTeam);
-            }
-        }
+        List<Team> candidates = IntStream.rangeClosed(1, slotLimit)
+                .mapToObj(slot -> resolveSlot(teamManager, slot))
+                .filter(Objects::nonNull)
+                .filter(slotTeam -> ConflictService.isClaimTeam(server, slotTeam))
+                .collect(Collectors.toCollection(ArrayList::new));
         if (candidates.isEmpty()) {
-            for (Team team : findAllTestTeams(teamManager)) {
-                if (ConflictService.isClaimTeam(server, team)) {
-                    candidates.add(team);
-                }
-            }
+            candidates = findAllTestTeams(teamManager).stream()
+                    .filter(team -> ConflictService.isClaimTeam(server, team))
+                    .collect(Collectors.toCollection(ArrayList::new));
         }
 
         clearDemoWarLinks(savedData, runnerTeamId, candidates);
@@ -302,13 +298,12 @@ public final class SampleTeamGenerationService {
         int incomingCount = Math.min(DEMO_INCOMING_COUNT, candidates.size());
         int outgoingCount = Math.min(DEMO_OUTGOING_COUNT, Math.max(0, candidates.size() - incomingCount));
 
-        for (int i = 0; i < incomingCount; i++) {
-            savedData.setWarTarget(candidates.get(i).getTeamId(), runnerTeamId, true);
-        }
+        List<Team> finalCandidates = candidates;
+        IntStream.range(0, incomingCount)
+                .forEach(i -> savedData.setWarTarget(finalCandidates.get(i).getTeamId(), runnerTeamId, true));
 
-        for (int i = 0; i < outgoingCount; i++) {
-            savedData.setWarTarget(runnerTeamId, candidates.get(incomingCount + i).getTeamId(), true);
-        }
+        IntStream.range(0, outgoingCount)
+                .forEach(i -> savedData.setWarTarget(runnerTeamId, finalCandidates.get(incomingCount + i).getTeamId(), true));
 
         int availableTargets = Math.max(0, candidates.size() - incomingCount - outgoingCount);
         return new DemoWarPlan(incomingCount, outgoingCount, availableTargets);
@@ -316,22 +311,17 @@ public final class SampleTeamGenerationService {
 
     /** Clears any war link between {@code centerTeamId} and the given demo teams, in either direction. */
     private static void clearDemoWarLinks(LcClaimEconomySavedData savedData, UUID centerTeamId, List<Team> demoTeams) {
-        Set<UUID> demoTeamIds = new HashSet<>();
-        for (Team team : demoTeams) {
-            demoTeamIds.add(team.getTeamId());
-        }
+        Set<UUID> demoTeamIds = demoTeams.stream()
+                .map(Team::getTeamId)
+                .collect(Collectors.toCollection(HashSet::new));
 
-        for (UUID targetId : new HashSet<>(savedData.getWarTargets(centerTeamId))) {
-            if (demoTeamIds.contains(targetId)) {
-                savedData.setWarTarget(centerTeamId, targetId, false);
-            }
-        }
+        new HashSet<>(savedData.getWarTargets(centerTeamId)).stream()
+                .filter(demoTeamIds::contains)
+                .forEach(targetId -> savedData.setWarTarget(centerTeamId, targetId, false));
 
-        for (Team team : demoTeams) {
-            UUID demoTeamId = team.getTeamId();
-            if (savedData.isAtWarWith(demoTeamId, centerTeamId)) {
-                savedData.setWarTarget(demoTeamId, centerTeamId, false);
-            }
-        }
+        demoTeams.stream()
+                .map(Team::getTeamId)
+                .filter(demoTeamId -> savedData.isAtWarWith(demoTeamId, centerTeamId))
+                .forEach(demoTeamId -> savedData.setWarTarget(demoTeamId, centerTeamId, false));
     }
 }

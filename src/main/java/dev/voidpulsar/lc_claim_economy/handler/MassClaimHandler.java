@@ -46,6 +46,15 @@ public final class MassClaimHandler {
     private MassClaimHandler() {
     }
 
+    /**
+     * Modeled as a short-circuiting pipeline over {@link Optional} rather than a ladder of
+     * early returns: each stage either produces the next intermediate value (team,
+     * then the billable-claim plan, then the priced shortfall) or the whole chain collapses
+     * to empty - which is exactly the "let the batch through" outcome an early {@code return
+     * false} would have produced at that point. Evaluation order and every side effect
+     * (dry-run claiming, account creation, the chat message, the rejection ack) fire in the
+     * same sequence as the original guard-clause version.
+     */
     public static boolean rejectIfInsufficientFunds(
             RequestChunkChangePacket bulkRequest,
             ServerPlayer requester,
@@ -62,38 +71,64 @@ public final class MassClaimHandler {
         if (unitPrice <= 0L) {
             return false;
         }
-        if (!FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
-            return false;
-        }
 
-        Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(requester).orElse(null);
-        if (team == null || !BankLedgerAccess.canPurchaseForTeam(team, requester.getUUID())) {
-            return false;
-        }
-
-        int claimableCount = tallyClaimableChunks(source, chunkTeamData, bulkRequest.chunks(), requester.serverLevel());
-        if (claimableCount <= 1) {
-            return false;
-        }
-
-        int billableClaims = ComplimentaryChunkAllotment.countPaidClaimsInBatch(chunkTeamData.getClaimedChunks().size(), claimableCount);
-        if (billableClaims <= 0) {
-            return false;
-        }
-
-        BankLedgerAccess.ensurePartyAccountExists(requester.server, team);
-        IBankAccount account = BankLedgerAccess.getAccountForPlayer(requester.server, requester);
-        MoneyValue totalCost = CurrencyAmounts.fromCopper(unitPrice * billableClaims);
-        if (account.getMoneyStorage().containsValue(totalCost)) {
-            return false;
-        }
-
-        reportShortfall(requester, bulkRequest, account, totalCost, billableClaims);
-        return true;
+        return resolvePurchasingTeam(requester)
+                .flatMap(team -> resolveBillablePlan(source, chunkTeamData, bulkRequest, requester, team))
+                .flatMap(plan -> resolveShortfall(requester, unitPrice, plan))
+                .map(shortfall -> {
+                    reportShortfall(requester, bulkRequest, shortfall.account(), shortfall.totalCost(), shortfall.billableClaims());
+                    return Boolean.TRUE;
+                })
+                .orElse(Boolean.FALSE);
     }
 
     private static boolean isBulkClaimAttempt(RequestChunkChangePacket bulkRequest) {
         return bulkRequest.action() == RequestChunkChangePacket.ChunkChangeOp.CLAIM && bulkRequest.chunks().size() > 1;
+    }
+
+    /** Stage 1: the requester's team, but only if the relevant managers are up and that team can actually pay. */
+    private static Optional<Team> resolvePurchasingTeam(ServerPlayer requester) {
+        if (!FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
+            return Optional.empty();
+        }
+        return FTBTeamsAPI.api().getManager().getTeamForPlayer(requester)
+                .filter(team -> BankLedgerAccess.canPurchaseForTeam(team, requester.getUUID()));
+    }
+
+    private record BillablePlan(Team team, int billableClaims) {
+    }
+
+    /** Stage 2: dry-runs the batch, then prices only the claims past the free allotment. */
+    private static Optional<BillablePlan> resolveBillablePlan(
+            CommandSourceStack source,
+            ChunkTeamData chunkTeamData,
+            RequestChunkChangePacket bulkRequest,
+            ServerPlayer requester,
+            Team team
+    ) {
+        int claimableCount = tallyClaimableChunks(source, chunkTeamData, bulkRequest.chunks(), requester.serverLevel());
+        if (claimableCount <= 1) {
+            return Optional.empty();
+        }
+        int billableClaims = ComplimentaryChunkAllotment.countPaidClaimsInBatch(chunkTeamData.getClaimedChunks().size(), claimableCount);
+        if (billableClaims <= 0) {
+            return Optional.empty();
+        }
+        return Optional.of(new BillablePlan(team, billableClaims));
+    }
+
+    private record Shortfall(IBankAccount account, MoneyValue totalCost, int billableClaims) {
+    }
+
+    /** Stage 3: prices the plan against the team's actual balance; empty means the team can afford it. */
+    private static Optional<Shortfall> resolveShortfall(ServerPlayer requester, long unitPrice, BillablePlan plan) {
+        BankLedgerAccess.ensurePartyAccountExists(requester.server, plan.team());
+        IBankAccount account = BankLedgerAccess.getAccountForPlayer(requester.server, requester);
+        MoneyValue totalCost = CurrencyAmounts.fromCopper(unitPrice * plan.billableClaims());
+        if (account.getMoneyStorage().containsValue(totalCost)) {
+            return Optional.empty();
+        }
+        return Optional.of(new Shortfall(account, totalCost, plan.billableClaims()));
     }
 
     /** Tells the requester why the batch was rejected, then rewinds the client to pre-drag state. */
@@ -158,14 +193,9 @@ public final class MassClaimHandler {
     ) {
         ClaimTransferContext.beginValidation();
         try {
-            int claimableCount = 0;
-            for (XZ pos : chunks) {
-                ClaimResult result = chunkTeamData.claim(source, pos.dim(level), true);
-                if (result.isSuccess()) {
-                    claimableCount++;
-                }
-            }
-            return claimableCount;
+            return (int) chunks.stream()
+                    .filter(pos -> chunkTeamData.claim(source, pos.dim(level), true).isSuccess())
+                    .count();
         } finally {
             ClaimTransferContext.endValidation();
         }

@@ -24,6 +24,9 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
+import java.util.List;
+import java.util.function.Consumer;
+
 /**
  * Every FTB Teams lifecycle event a team's bank account or claim-visibility
  * setting could depend on funnels through here, so the party bank account is
@@ -74,11 +77,13 @@ public class TeamLifecycleWatcher {
 
     private void onPlayerLeftParty(PlayerLeftPartyTeamEvent event) {
         MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
-        if (event.getTeamDeleted()) {
-            settlePartyDissolution(activeServer, event);
-        } else {
-            guaranteeAccountExists(event.getTeam());
-        }
+        // Dispatched through a two-entry lookup keyed by whether the party survived the
+        // departure, rather than an inline if/else, so the "what happens to the old
+        // party" decision reads as a table instead of a branch.
+        Consumer<PlayerLeftPartyTeamEvent> onDeparture = event.getTeamDeleted()
+                ? e -> settlePartyDissolution(activeServer, e)
+                : e -> guaranteeAccountExists(e.getTeam());
+        onDeparture.accept(event);
         // The player's new solo/fallback team also needs an account regardless
         // of whether the party they left still exists.
         guaranteeAccountExists(event.getPlayerTeam());
@@ -118,10 +123,13 @@ public class TeamLifecycleWatcher {
     }
 
     private void syncArrivalState(MinecraftServer activeServer, ServerPlayer arrivingPlayer) {
-        ClaimPricingBroadcast.syncToPlayer(arrivingPlayer);
-        QueuedStateBroadcast.syncToPlayer(arrivingPlayer);
-        dev.voidpulsar.lc_claim_economy.service.LandChunkService.syncToPlayer(arrivingPlayer);
-        ConflictSyncCoordinator.syncToPlayer(arrivingPlayer);
+        List<Runnable> immediateSyncs = List.of(
+                () -> ClaimPricingBroadcast.syncToPlayer(arrivingPlayer),
+                () -> QueuedStateBroadcast.syncToPlayer(arrivingPlayer),
+                () -> dev.voidpulsar.lc_claim_economy.service.LandChunkService.syncToPlayer(arrivingPlayer),
+                () -> ConflictSyncCoordinator.syncToPlayer(arrivingPlayer)
+        );
+        immediateSyncs.forEach(Runnable::run);
         // Retry once on the next server tick: right after a full restart, the
         // client's play-phase packet handler isn't guaranteed to be registered
         // yet when this login event fires, so the first sync can be dropped.

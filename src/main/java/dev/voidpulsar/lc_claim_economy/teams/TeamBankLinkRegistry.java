@@ -195,18 +195,13 @@ public final class TeamBankLinkRegistry {
         LcClaimEconomySavedData store = LcClaimEconomySavedData.get(server);
         List<LcClaimEconomySavedData.TeamLinkEntry> snapshot = new ArrayList<>(store.getAllLinks());
 
-        int mutationCount = 0;
-        for (LcClaimEconomySavedData.TeamLinkEntry link : snapshot) {
-            if (reconcileEntry(server, store, link)) {
-                mutationCount++;
-            }
-        }
+        long mutationCount = snapshot.stream()
+                .filter(link -> reconcileEntry(server, store, link))
+                .count();
 
-        for (Team party : TeamRegistry.activeParties(server)) {
-            CurrencyTeamLinkService.ensureLinked(server, party);
-        }
+        TeamRegistry.activeParties(server).forEach(party -> CurrencyTeamLinkService.ensureLinked(server, party));
 
-        return mutationCount;
+        return (int) mutationCount;
     }
 
     private static boolean canReconcile(MinecraftServer server) {
@@ -216,20 +211,31 @@ public final class TeamBankLinkRegistry {
         return FTBTeamsAPI.api().isManagerLoaded();
     }
 
-    /** Applies whichever single stale-link rule (if any) matches this entry; reports whether it mutated the store. */
-    private static boolean reconcileEntry(MinecraftServer server, LcClaimEconomySavedData store, LcClaimEconomySavedData.TeamLinkEntry link) {
-        Team storedTeam = findStoredTeam(server, link.ftbTeamId());
+    /** Which stale-link rule (if any) currently applies to a link entry, computed once and dispatched via a lookup rather than re-tested per branch. */
+    private enum StaleLinkReason { DELETED_TEAM, MISSING_LC_TEAM, EMPTIED_PARTY, NONE }
 
+    private static StaleLinkReason classifyStaleness(LcClaimEconomySavedData.TeamLinkEntry link, @Nullable Team storedTeam) {
         if (storedTeam == null) {
-            return reconcileDeletedTeam(server, link);
+            return StaleLinkReason.DELETED_TEAM;
         }
         if (link.lcTeamId() > 0 && findLcTeam(link.lcTeamId()) == null) {
-            return reconcileMissingLcTeam(store, link);
+            return StaleLinkReason.MISSING_LC_TEAM;
         }
         if (storedTeam.isPartyTeam() && link.lcTeamId() > 0 && storedTeam.getMembers().isEmpty()) {
-            return reconcileEmptiedParty(store, link);
+            return StaleLinkReason.EMPTIED_PARTY;
         }
-        return false;
+        return StaleLinkReason.NONE;
+    }
+
+    /** Classifies the entry, then dispatches to whichever resolution matches; reports whether it mutated the store. */
+    private static boolean reconcileEntry(MinecraftServer server, LcClaimEconomySavedData store, LcClaimEconomySavedData.TeamLinkEntry link) {
+        Team storedTeam = findStoredTeam(server, link.ftbTeamId());
+        return switch (classifyStaleness(link, storedTeam)) {
+            case DELETED_TEAM -> reconcileDeletedTeam(server, link);
+            case MISSING_LC_TEAM -> reconcileMissingLcTeam(store, link);
+            case EMPTIED_PARTY -> reconcileEmptiedParty(store, link);
+            case NONE -> false;
+        };
     }
 
     private static boolean reconcileDeletedTeam(MinecraftServer server, LcClaimEconomySavedData.TeamLinkEntry link) {

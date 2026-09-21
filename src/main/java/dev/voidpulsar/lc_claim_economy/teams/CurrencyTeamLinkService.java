@@ -17,9 +17,12 @@ import net.minecraft.server.level.ServerPlayer;
 import javax.annotation.Nullable;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
+import java.util.stream.Collectors;
 
 /**
  * Keeps a Lightman's Currency team mirrored onto whichever FTB party it's linked to -
@@ -60,11 +63,19 @@ public final class CurrencyTeamLinkService {
         }
     }
 
+    /**
+     * Evaluated as an ordered rule list rather than one compound expression so each
+     * precondition reads as a named, independent gate; still short-circuits on the first
+     * failing gate exactly like the equivalent {@code &&} chain would.
+     */
     private static boolean isEligibleForLink(MinecraftServer server, Team ftbTeam) {
-        return ftbTeam.isPartyTeam()
-                && ftbTeam.isValid()
-                && TeamBankLinkRegistry.isFtbPartyInUse(server, ftbTeam)
-                && CurrencyTeamAccess.cache() != null;
+        List<BooleanSupplier> gates = List.of(
+                ftbTeam::isPartyTeam,
+                ftbTeam::isValid,
+                () -> TeamBankLinkRegistry.isFtbPartyInUse(server, ftbTeam),
+                () -> CurrencyTeamAccess.cache() != null
+        );
+        return gates.stream().allMatch(BooleanSupplier::getAsBoolean);
     }
 
     private static Object lockFor(UUID ftbTeamId) {
@@ -156,7 +167,10 @@ public final class CurrencyTeamLinkService {
      * Between sessions a player can end up owning a second, orphaned LC team under the same
      * name (e.g. from an interrupted link, or manually created via LC's own team screen) -
      * sweeps those away so {@code /lctm} etc. only ever shows the one team this party is
-     * actually linked to.
+     * actually linked to. Builds the full set of LC team ids that must survive this pass
+     * (every currently linked id plus the one just resolved for this party) once, then
+     * queries that set per-candidate rather than re-deriving "is this the linked team" per
+     * iteration.
      */
     private static void pruneDuplicateLcTeams(Team ftbTeam, LcClaimEconomySavedData data, long linkedLcTeamId) {
         TeamDataCache cache = CurrencyTeamAccess.cache();
@@ -164,16 +178,20 @@ public final class CurrencyTeamLinkService {
             return;
         }
 
+        Set<Long> protectedIds = new HashSet<>(data.getLinkedLcTeamIds());
+        protectedIds.add(linkedLcTeamId);
+
         String expectedName = clampToMaxNameLength(ftbTeam.getShortName());
         UUID ownerId = ftbTeam.getOwner();
-        Set<Long> linkedIds = data.getLinkedLcTeamIds();
 
-        for (ITeam candidate : cache.getAllTeams()) {
-            if (!isUnlinkedDuplicate(candidate, linkedLcTeamId, linkedIds, ownerId, expectedName)) {
-                continue;
-            }
+        List<ITeam> duplicates = cache.getAllTeams().stream()
+                .filter(candidate -> !protectedIds.contains(candidate.getID()))
+                .filter(candidate -> ownerId.equals(candidate.getOwner().id))
+                .filter(candidate -> expectedName.equals(candidate.getName()))
+                .toList();
 
-            long duplicateId = candidate.getID();
+        for (ITeam duplicate : duplicates) {
+            long duplicateId = duplicate.getID();
             CurrencyTeamPurgeGuard.runAllowed(() -> cache.removeTeam(duplicateId));
             LcClaimEconomy.LOGGER.info(
                     "Removed duplicate LC team {} for FTB party {} (linked team is {})",
@@ -184,13 +202,13 @@ public final class CurrencyTeamLinkService {
         }
     }
 
-    private static boolean isUnlinkedDuplicate(ITeam candidate, long linkedLcTeamId, Set<Long> linkedIds, UUID ownerId, String expectedName) {
-        if (candidate.getID() == linkedLcTeamId || linkedIds.contains(candidate.getID())) {
-            return false;
-        }
-        return ownerId.equals(candidate.getOwner().id) && expectedName.equals(candidate.getName());
-    }
-
+    /**
+     * Runs the sync as an ordered pipeline of independent stages rather than one long
+     * imperative body - each stage is a self-contained unit of work over the same
+     * {@code (server, ftbTeam, lcTeam, entry)} context, executed strictly in list order so
+     * the observable effects (which fields get touched, in what sequence) are identical to
+     * running the equivalent statements inline.
+     */
     private static void applyPartyStateToLcTeam(
             MinecraftServer server,
             Team ftbTeam,
@@ -198,20 +216,29 @@ public final class CurrencyTeamLinkService {
             LcClaimEconomySavedData.TeamLinkEntry entry
     ) {
         UUID ownerId = ftbTeam.getOwner();
+        List<Runnable> stages = List.of(
+                () -> syncOwner(server, lcTeam, ownerId),
+                () -> syncName(ftbTeam, lcTeam),
+                () -> reconcileRoster(server, ftbTeam, lcTeam, ownerId),
+                () -> provisionBankAccount(ftbTeam, lcTeam),
+                () -> migrateLegacyFunds(server, entry, lcTeam)
+        );
+        stages.forEach(Runnable::run);
+        lcTeam.markDirty();
+    }
+
+    private static void syncOwner(MinecraftServer server, io.github.lightman314.lightmanscurrency.common.teams.Team lcTeam, UUID ownerId) {
         PlayerReference ownerRef = toPlayerReference(server, ownerId);
         if (!ownerRef.is(lcTeam.getOwner())) {
             CurrencyTeamAccess.setOwner(lcTeam, ownerRef);
         }
+    }
 
+    private static void syncName(Team ftbTeam, io.github.lightman314.lightmanscurrency.common.teams.Team lcTeam) {
         String clampedName = clampToMaxNameLength(ftbTeam.getShortName());
         if (!clampedName.equals(lcTeam.getName())) {
             CurrencyTeamAccess.setName(lcTeam, clampedName);
         }
-
-        reconcileRoster(server, ftbTeam, lcTeam, ownerId);
-        provisionBankAccount(ftbTeam, lcTeam);
-        migrateLegacyFunds(server, entry, lcTeam);
-        lcTeam.markDirty();
     }
 
     /** Adds/removes/reclassifies admins and members so the LC roster matches the FTB party's current one exactly. */
@@ -221,23 +248,9 @@ public final class CurrencyTeamLinkService {
             io.github.lightman314.lightmanscurrency.common.teams.Team lcTeam,
             UUID ownerId
     ) {
-        Set<UUID> wantedAdmins = new HashSet<>();
-        Set<UUID> wantedMembers = new HashSet<>();
-
-        for (UUID playerId : ftbTeam.getMembers()) {
-            if (playerId.equals(ownerId)) {
-                continue;
-            }
-            TeamRank rank = ftbTeam.getRankForPlayer(playerId);
-            if (!TeamRankBridge.isTrackedMember(rank)) {
-                continue;
-            }
-            if (TeamRankBridge.isLcAdmin(rank, playerId, ownerId)) {
-                wantedAdmins.add(playerId);
-            } else if (TeamRankBridge.isLcMember(rank, playerId, ownerId)) {
-                wantedMembers.add(playerId);
-            }
-        }
+        Map<Boolean, Set<UUID>> desired = classifyDesiredRoster(ftbTeam, ownerId);
+        Set<UUID> wantedAdmins = desired.get(Boolean.TRUE);
+        Set<UUID> wantedMembers = desired.get(Boolean.FALSE);
 
         List<PlayerReference> currentAdmins = CurrencyTeamAccess.admins(lcTeam);
         List<PlayerReference> currentMembers = CurrencyTeamAccess.members(lcTeam);
@@ -249,6 +262,31 @@ public final class CurrencyTeamLinkService {
         relocateAll(server, wantedMembers, currentAdmins, currentMembers);
 
         refreshCachedNames(server, lcTeam);
+    }
+
+    /** One party member paired with their resolved rank, so the rank lookup happens exactly once per member. */
+    private record RankedMember(UUID id, TeamRank rank) {
+    }
+
+    /**
+     * Classifies every tracked, non-owner party member into the admin bucket ({@code true})
+     * or the member bucket ({@code false}) via a declarative filter+partition pipeline,
+     * instead of an imperative loop with nested if/else branches. {@link TeamRankBridge}'s
+     * admin/member checks are mutually exclusive for any rank that passes
+     * {@code isTrackedMember}, so partitioning on "is admin" is equivalent to the original
+     * if-admin-else-if-member branching.
+     */
+    private static Map<Boolean, Set<UUID>> classifyDesiredRoster(Team ftbTeam, UUID ownerId) {
+        return ftbTeam.getMembers().stream()
+                .filter(id -> !id.equals(ownerId))
+                .map(id -> new RankedMember(id, ftbTeam.getRankForPlayer(id)))
+                .filter(member -> TeamRankBridge.isTrackedMember(member.rank()))
+                .filter(member -> TeamRankBridge.isLcAdmin(member.rank(), member.id(), ownerId)
+                        || TeamRankBridge.isLcMember(member.rank(), member.id(), ownerId))
+                .collect(Collectors.partitioningBy(
+                        member -> TeamRankBridge.isLcAdmin(member.rank(), member.id(), ownerId),
+                        Collectors.mapping(RankedMember::id, Collectors.toCollection(HashSet::new))
+                ));
     }
 
     /** Removes any roster entry whose id fell out of the wanted set, without touching entries still wanted. */
@@ -324,12 +362,9 @@ public final class CurrencyTeamLinkService {
             return;
         }
 
-        List<MoneyValue> heldValues = new java.util.ArrayList<>();
-        for (MoneyValue value : legacyAccount.getMoneyStorage().allValues()) {
-            if (!value.isEmpty()) {
-                heldValues.add(value);
-            }
-        }
+        List<MoneyValue> heldValues = legacyAccount.getMoneyStorage().allValues().stream()
+                .filter(value -> !value.isEmpty())
+                .toList();
         if (heldValues.isEmpty()) {
             return;
         }

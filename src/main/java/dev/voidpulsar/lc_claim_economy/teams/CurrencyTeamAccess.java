@@ -22,21 +22,54 @@ import java.util.Map;
  * failing silently mid-sync.
  */
 public final class CurrencyTeamAccess {
-    private static final Field OWNER_FIELD;
-    private static final Field NAME_FIELD;
-    private static final Field ADMINS_FIELD;
-    private static final Field MEMBERS_FIELD;
-    private static final Field BANK_ACCOUNT_FIELD;
+
+    /**
+     * One reflected {@link Team} field bundled with a typed, labeled read/write pair -
+     * a single generic accessor shape shared by every field below, instead of a raw
+     * {@link Field} constant plus a separately-labeled call into a generic helper method
+     * per site. The label feeds directly into this field's own failure messages, so error
+     * text stays identical to what a dedicated per-field method would have produced.
+     */
+    private record FieldAccessor<T>(Field field, String label) {
+        static <T> FieldAccessor<T> of(Class<?> owner, String fieldName, String label) throws ReflectiveOperationException {
+            Field field = owner.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            return new FieldAccessor<>(field, label);
+        }
+
+        @SuppressWarnings("unchecked")
+        T get(Object target) {
+            try {
+                return (T) field.get(target);
+            } catch (IllegalAccessException exception) {
+                throw new IllegalStateException("Failed to read LC team " + label, exception);
+            }
+        }
+
+        void set(Object target, T value) {
+            try {
+                field.set(target, value);
+            } catch (IllegalAccessException exception) {
+                throw new IllegalStateException("Failed to set LC team " + label, exception);
+            }
+        }
+    }
+
+    private static final FieldAccessor<PlayerReference> OWNER;
+    private static final FieldAccessor<String> NAME;
+    private static final FieldAccessor<List<PlayerReference>> ADMINS;
+    private static final FieldAccessor<List<PlayerReference>> MEMBERS;
+    private static final FieldAccessor<TeamBankAccount> BANK_ACCOUNT;
     private static final Field CACHE_TEAM_MAP_FIELD;
     private static final Method CACHE_NEXT_ID_METHOD;
 
     static {
         try {
-            OWNER_FIELD = reflectField(Team.class, "owner");
-            NAME_FIELD = reflectField(Team.class, "teamName");
-            ADMINS_FIELD = reflectField(Team.class, "admins");
-            MEMBERS_FIELD = reflectField(Team.class, "members");
-            BANK_ACCOUNT_FIELD = reflectField(Team.class, "bankAccount");
+            OWNER = FieldAccessor.of(Team.class, "owner", "owner");
+            NAME = FieldAccessor.of(Team.class, "teamName", "name");
+            ADMINS = FieldAccessor.of(Team.class, "admins", "admins");
+            MEMBERS = FieldAccessor.of(Team.class, "members", "members");
+            BANK_ACCOUNT = FieldAccessor.of(Team.class, "bankAccount", "bank account");
             CACHE_TEAM_MAP_FIELD = reflectField(TeamDataCache.class, "teams");
             CACHE_NEXT_ID_METHOD = TeamDataCache.class.getDeclaredMethod("getNextID");
             CACHE_NEXT_ID_METHOD.setAccessible(true);
@@ -81,23 +114,23 @@ public final class CurrencyTeamAccess {
     }
 
     static void setOwner(Team team, PlayerReference owner) {
-        writeField(OWNER_FIELD, team, owner, "owner");
+        OWNER.set(team, owner);
     }
 
     static void setName(Team team, String name) {
-        writeField(NAME_FIELD, team, name, "name");
-        TeamBankAccount linkedAccount = readBankAccount(team);
+        NAME.set(team, name);
+        TeamBankAccount linkedAccount = BANK_ACCOUNT.get(team);
         if (linkedAccount != null) {
             linkedAccount.updateOwnersName(name);
         }
     }
 
     static List<PlayerReference> admins(Team team) {
-        return readField(ADMINS_FIELD, team, "admins");
+        return ADMINS.get(team);
     }
 
     static List<PlayerReference> members(Team team) {
-        return readField(MEMBERS_FIELD, team, "members");
+        return MEMBERS.get(team);
     }
 
     static void createBankAccount(Team team) {
@@ -107,7 +140,7 @@ public final class CurrencyTeamAccess {
         try {
             TeamBankAccount newAccount = new TeamBankAccount(team, team::markDirty);
             newAccount.updateOwnersName(team.getName());
-            BANK_ACCOUNT_FIELD.set(team, newAccount);
+            BANK_ACCOUNT.field().set(team, newAccount);
             team.markDirty();
         } catch (IllegalAccessException exception) {
             throw new IllegalStateException("Failed to create LC team bank account", exception);
@@ -124,27 +157,5 @@ public final class CurrencyTeamAccess {
             return reference;
         }
         return reference.copyWithName(name);
-    }
-
-    @Nullable
-    private static TeamBankAccount readBankAccount(Team team) {
-        return readField(BANK_ACCOUNT_FIELD, team, "bank account");
-    }
-
-    @SuppressWarnings("unchecked")
-    private static <T> T readField(Field field, Team team, String label) {
-        try {
-            return (T) field.get(team);
-        } catch (IllegalAccessException exception) {
-            throw new IllegalStateException("Failed to read LC team " + label, exception);
-        }
-    }
-
-    private static void writeField(Field field, Team team, Object value, String label) {
-        try {
-            field.set(team, value);
-        } catch (IllegalAccessException exception) {
-            throw new IllegalStateException("Failed to set LC team " + label, exception);
-        }
     }
 }
