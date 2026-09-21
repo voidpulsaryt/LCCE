@@ -22,21 +22,23 @@ import java.util.Set;
  * {@link #EMPTY} is sent to players with no team so the client always has something to render.
  */
 public record QueuedStateBroadcastPayload(
-        Map<String, String> pendingProperties,
-        Set<String> pendingForceLoads,
-        Set<String> pendingForceUnloads,
-        Set<String> pendingLandChunks,
-        Set<String> pendingBuildChunks
+        Map<String, String> queuedPropertyEdits,
+        Set<String> queuedForceLoadKeys,
+        Set<String> queuedForceUnloadKeys,
+        Set<String> queuedLandChunkKeys,
+        Set<String> queuedBuildChunkKeys
 ) implements CustomPacketPayload {
     public static final Type<QueuedStateBroadcastPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "sync_pending_state"));
     public static final QueuedStateBroadcastPayload EMPTY = new QueuedStateBroadcastPayload(Map.of(), Set.of(), Set.of(), Set.of(), Set.of());
+    // Wire order below must stay exactly as-is (properties, force-loads, force-unloads, land, build) -
+    // it is the on-the-wire packet layout, independent of the record component names above.
     public static final StreamCodec<FriendlyByteBuf, QueuedStateBroadcastPayload> STREAM_CODEC = StreamCodec.of(
             (buffer, payload) -> {
-                writePropertyMap(buffer, payload.pendingProperties);
-                buffer.writeCollection(payload.pendingForceLoads, FriendlyByteBuf::writeUtf);
-                buffer.writeCollection(payload.pendingForceUnloads, FriendlyByteBuf::writeUtf);
-                buffer.writeCollection(payload.pendingLandChunks, FriendlyByteBuf::writeUtf);
-                buffer.writeCollection(payload.pendingBuildChunks, FriendlyByteBuf::writeUtf);
+                writePropertyMap(buffer, payload.queuedPropertyEdits);
+                buffer.writeCollection(payload.queuedForceLoadKeys, FriendlyByteBuf::writeUtf);
+                buffer.writeCollection(payload.queuedForceUnloadKeys, FriendlyByteBuf::writeUtf);
+                buffer.writeCollection(payload.queuedLandChunkKeys, FriendlyByteBuf::writeUtf);
+                buffer.writeCollection(payload.queuedBuildChunkKeys, FriendlyByteBuf::writeUtf);
             },
             buffer -> new QueuedStateBroadcastPayload(
                     readPropertyMap(buffer),
@@ -75,14 +77,14 @@ public record QueuedStateBroadcastPayload(
 
     private static void applyToClient(QueuedStateBroadcastPayload payload) {
         LcClaimEconomy.LOGGER.debug("Client received pending state: properties={}, forceLoads={}, forceUnloads={}, landChunks={}, buildChunks={}",
-                payload.pendingProperties, payload.pendingForceLoads, payload.pendingForceUnloads,
-                payload.pendingLandChunks, payload.pendingBuildChunks);
+                payload.queuedPropertyEdits, payload.queuedForceLoadKeys, payload.queuedForceUnloadKeys,
+                payload.queuedLandChunkKeys, payload.queuedBuildChunkKeys);
         ClientQueuedChanges.update(
-                payload.pendingProperties,
-                payload.pendingForceLoads,
-                payload.pendingForceUnloads,
-                payload.pendingLandChunks,
-                payload.pendingBuildChunks
+                payload.queuedPropertyEdits,
+                payload.queuedForceLoadKeys,
+                payload.queuedForceUnloadKeys,
+                payload.queuedLandChunkKeys,
+                payload.queuedBuildChunkKeys
         );
         refreshClientScreens();
     }

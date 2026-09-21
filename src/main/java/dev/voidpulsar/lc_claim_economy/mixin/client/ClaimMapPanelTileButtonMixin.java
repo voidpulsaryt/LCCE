@@ -151,14 +151,11 @@ public class ClaimMapPanelTileButtonMixin {
             ).withStyle(ChatFormatting.DARK_GRAY));
         }
 
-        for (PendingKind kind : PENDING_KINDS) {
-            if (kind.check().test(dimension, chunkX, chunkZ)) {
-                list.blankLine();
-                list.add(Component.translatable(kind.tooltipKey(), SafeguardPriceDisplay.upkeepPeriodLabel())
-                        .withStyle(ChatFormatting.GOLD));
-                return;
-            }
-        }
+        firstMatchingPendingKind(dimension, chunkX, chunkZ).ifPresent(kind -> {
+            list.blankLine();
+            list.add(Component.translatable(kind.tooltipKey(), SafeguardPriceDisplay.upkeepPeriodLabel())
+                    .withStyle(ChatFormatting.GOLD));
+        });
     }
 
     @Inject(method = "drawBackground", at = @At("RETURN"), remap = false)
@@ -175,11 +172,10 @@ public class ClaimMapPanelTileButtonMixin {
         int chunkX = chunkPos.x();
         int chunkZ = chunkPos.z();
 
-        for (PendingKind kind : PENDING_KINDS) {
-            if (kind.check().test(dimension, chunkX, chunkZ)) {
-                drawPattern(graphics, x, y, w, h, Color4I.rgb(kind.overlayColor()).withAlpha(PENDING_OVERLAY_ALPHA));
-                return;
-            }
+        java.util.Optional<PendingKind> matchedKind = firstMatchingPendingKind(dimension, chunkX, chunkZ);
+        if (matchedKind.isPresent()) {
+            drawPattern(graphics, x, y, w, h, Color4I.rgb(matchedKind.get().overlayColor()).withAlpha(PENDING_OVERLAY_ALPHA));
+            return;
         }
 
         // Checked last and separately from the pending-change patterns above: a chunk can be
@@ -189,6 +185,13 @@ public class ClaimMapPanelTileButtonMixin {
         if (ClientMarket.listingFor(ChunkCoordKey.encode(dimension.location(), chunkX, chunkZ)) != null) {
             drawPattern(graphics, x, y, w, h, Color4I.rgb(FOR_SALE_COLOR).withAlpha(FOR_SALE_OVERLAY_ALPHA));
         }
+    }
+
+    /** First entry in {@link #PENDING_KINDS} (priority order) whose check matches this chunk, if any. */
+    private static java.util.Optional<PendingKind> firstMatchingPendingKind(ResourceKey<Level> dimension, int chunkX, int chunkZ) {
+        return PENDING_KINDS.stream()
+                .filter(kind -> kind.check().test(dimension, chunkX, chunkZ))
+                .findFirst();
     }
 
     private static void drawPattern(GuiGraphics graphics, int x, int y, int w, int h, Color4I color) {

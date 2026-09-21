@@ -22,7 +22,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -127,12 +126,10 @@ public class ClaimMapPanelMixin implements ClaimMapPanelAltToggleAccess {
         }
 
         ResourceKey<Level> dimension = chunkScreen.getDimension().dimension;
-        List<String> keys = new ArrayList<>();
-        for (XZ pos : Set.copyOf(selectedChunks)) {
-            if (lcClaimEconomy$hasClaimAt(pos)) {
-                keys.add(ChunkCoordKey.encode(dimension.location(), pos.x(), pos.z()));
-            }
-        }
+        List<String> keys = Set.copyOf(selectedChunks).stream()
+                .filter(this::lcClaimEconomy$hasClaimAt)
+                .map(pos -> ChunkCoordKey.encode(dimension.location(), pos.x(), pos.z()))
+                .toList();
 
         if (!keys.isEmpty()) {
             if (keys.size() == 1) {

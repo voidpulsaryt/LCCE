@@ -47,13 +47,13 @@ public final class QueuedStateBroadcast {
     private static void logPlayerSync(ServerPlayer player, Team team, QueuedStateBroadcastPayload payload) {
         LcClaimEconomy.LOGGER.debug("syncToPlayer {}: team={}, properties={}, forceLoads={}, forceUnloads={}",
                 player.getScoreboardName(), team.getShortName(),
-                payload.pendingProperties(), payload.pendingForceLoads(), payload.pendingForceUnloads());
+                payload.queuedPropertyEdits(), payload.queuedForceLoadKeys(), payload.queuedForceUnloadKeys());
     }
 
     private static void logTeamSync(Team team, QueuedStateBroadcastPayload payload) {
         LcClaimEconomy.LOGGER.debug("syncTeam {}: properties={}, forceLoads={}, forceUnloads={}, recipients={}",
-                team.getShortName(), payload.pendingProperties(), payload.pendingForceLoads(),
-                payload.pendingForceUnloads(), team.getOnlineMembers().size());
+                team.getShortName(), payload.queuedPropertyEdits(), payload.queuedForceLoadKeys(),
+                payload.queuedForceUnloadKeys(), team.getOnlineMembers().size());
     }
 
     public static QueuedStateBroadcastPayload createPayload(MinecraftServer server, Team team) {

@@ -29,6 +29,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
 import javax.annotation.Nullable;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -191,14 +193,11 @@ public class ChunkAcquisitionHandler {
             return 0;
         }
         UUID teamId = owningTeam.getId();
-        int count = 0;
-        for (ClaimedChunk candidate : FTBChunksAPI.api().getManager().getAllClaimedChunks()) {
-            Team candidateTeam = candidate.getTeamData().getTeam();
-            if (candidateTeam != null && candidateTeam.getId().equals(teamId)) {
-                count++;
-            }
-        }
-        return count;
+        return (int) FTBChunksAPI.api().getManager().getAllClaimedChunks().stream()
+                .map(candidate -> candidate.getTeamData().getTeam())
+                .filter(Objects::nonNull)
+                .filter(candidateTeam -> candidateTeam.getId().equals(teamId))
+                .count();
     }
 
     /**
@@ -254,16 +253,32 @@ public class ChunkAcquisitionHandler {
         }
     }
 
+    /**
+     * Runs the claim purchase as a short-circuiting pipeline: {@link #resolvePurchasingPlayer}
+     * gates on whether there's even a player/APIs to work with, then {@link #attemptPurchase}
+     * carries that player forward through the remaining team/rank/price/funds gates and, only
+     * if every one of them clears, performs the actual withdrawal. Each stage hands the next
+     * one strictly more context than it received, rather than one method re-deriving state
+     * across a flat sequence of early returns.
+     */
     private CompoundEventResult<ClaimResult> chargeForClaim(CommandSourceStack source, long priceCopper) {
         if (ClaimTransferContext.isValidating()) {
             return CompoundEventResult.pass();
         }
+        return resolvePurchasingPlayer(source)
+                .map(player -> attemptPurchase(source, player, priceCopper))
+                .orElseGet(CompoundEventResult::pass);
+    }
 
+    private Optional<ServerPlayer> resolvePurchasingPlayer(CommandSourceStack source) {
         ServerPlayer player = source.getPlayer();
         if (player == null || !FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
-            return CompoundEventResult.pass();
+            return Optional.empty();
         }
+        return Optional.of(player);
+    }
 
+    private CompoundEventResult<ClaimResult> attemptPurchase(CommandSourceStack source, ServerPlayer player, long priceCopper) {
         Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
         if (team == null) {
             return CompoundEventResult.pass();
@@ -285,6 +300,10 @@ public class ChunkAcquisitionHandler {
             return CompoundEventResult.interruptFalse(rejectForInsufficientFunds(player, account, price, priceCopper));
         }
 
+        return executeChargeAndNotify(player, account, price, priceCopper);
+    }
+
+    private CompoundEventResult<ClaimResult> executeChargeAndNotify(ServerPlayer player, IBankAccount account, MoneyValue price, long priceCopper) {
         account.withdrawMoney(price);
         LcClaimEconomySavedData.get(player.server).recordClaimPurchase(priceCopper);
         if (ClaimTransferContext.isExecuting()) {

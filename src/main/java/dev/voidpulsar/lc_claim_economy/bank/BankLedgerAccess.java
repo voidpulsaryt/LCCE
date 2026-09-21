@@ -3,7 +3,6 @@ package dev.voidpulsar.lc_claim_economy.bank;
 import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
 import dev.ftb.mods.ftbteams.api.TeamManager;
-import dev.ftb.mods.ftbteams.api.TeamRank;
 import dev.voidpulsar.lc_claim_economy.teams.CurrencyTeamLinkService;
 import io.github.lightman314.lightmanscurrency.api.misc.player.PlayerReference;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
@@ -17,7 +16,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
 import javax.annotation.Nullable;
-import java.util.Optional;
 import java.util.UUID;
 
 public final class BankLedgerAccess {
@@ -33,28 +31,23 @@ public final class BankLedgerAccess {
      * the link/account bootstrap was skipped somewhere, not a legitimate "no account" state.
      */
     public static IBankAccount getAccountForTeam(MinecraftServer server, Team team) {
-        if (team.isPartyTeam()) {
-            return requireAccount(
-                    CurrencyTeamLinkService.getBankAccount(server, team),
-                    "Missing LC team bank account for FTB party " + team.getId()
-            );
-        }
-        return requireAccount(
-                PlayerBankReference.of(team.getId()).get(),
-                "Missing personal bank account for player team " + team.getId()
-        );
+        return team.isPartyTeam()
+                ? requireAccount(
+                        CurrencyTeamLinkService.getBankAccount(server, team),
+                        "Missing LC team bank account for FTB party " + team.getId())
+                : requireAccount(
+                        PlayerBankReference.of(team.getId()).get(),
+                        "Missing personal bank account for player team " + team.getId());
     }
 
     /** Same resolution as {@link #getAccountForTeam}, but starting from a player rather than an already-known team. */
     public static IBankAccount getAccountForPlayer(MinecraftServer server, ServerPlayer player) {
-        Optional<Team> playerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(player);
-        if (playerTeam.isPresent()) {
-            return getAccountForTeam(server, playerTeam.get());
-        }
-        return requireAccount(
-                PlayerBankReference.of(player.getUUID()).get(),
-                "Missing personal bank account for player " + player.getUUID()
-        );
+        return FTBTeamsAPI.api().getManager().getTeamForPlayer(player)
+                .map(playerTeam -> getAccountForTeam(server, playerTeam))
+                .orElseGet(() -> requireAccount(
+                        PlayerBankReference.of(player.getUUID()).get(),
+                        "Missing personal bank account for player " + player.getUUID()
+                ));
     }
 
     private static IBankAccount requireAccount(@Nullable IBankAccount account, String errorIfMissing) {
@@ -82,11 +75,7 @@ public final class BankLedgerAccess {
 
     /** A solo player always spends their own money freely; a party member needs officer+ rank so rank-and-file members can't drain the shared account. */
     public static boolean canPurchaseForTeam(Team team, UUID playerId) {
-        if (!team.isPartyTeam()) {
-            return true;
-        }
-        TeamRank purchaserRank = team.getRankForPlayer(playerId);
-        return purchaserRank.isOfficerOrBetter();
+        return !team.isPartyTeam() || team.getRankForPlayer(playerId).isOfficerOrBetter();
     }
 
     /** No-op for a solo team or an already-disbanded one - otherwise makes sure the party's LC team link (and its bank account) exists before anything tries to touch it. */

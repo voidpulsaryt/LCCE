@@ -77,12 +77,8 @@ public final class SafeguardEnforcementService {
         }
 
         MoneyValue upkeepCost = ConflictService.calculateTotalUpkeepCost(server, team, queuedChanges);
-        if (upkeepCost.isEmpty()) {
-            return true;
-        }
-
-        IBankAccount teamAccount = BankLedgerAccess.getAccountForTeam(server, team);
-        return teamAccount.getMoneyStorage().containsValue(upkeepCost);
+        return upkeepCost.isEmpty()
+                || BankLedgerAccess.getAccountForTeam(server, team).getMoneyStorage().containsValue(upkeepCost);
     }
 
     // ------------------------------------------------------------------
@@ -115,18 +111,13 @@ public final class SafeguardEnforcementService {
     }
 
     public static void notifyTeam(MinecraftServer server, Team team, Component message) {
-        for (ServerPlayer onlineMember : team.getOnlineMembers()) {
-            onlineMember.displayClientMessage(message, false);
-        }
+        team.getOnlineMembers().forEach(onlineMember -> onlineMember.displayClientMessage(message, false));
     }
 
     /** Same as {@link #notifyTeam(MinecraftServer, Team, Component)} but skips regular party members. */
     public static void notifyTeamManagers(MinecraftServer server, Team team, Component message) {
-        for (ServerPlayer onlineMember : team.getOnlineMembers()) {
-            boolean isManager = !team.isPartyTeam() || team.getRankForPlayer(onlineMember.getUUID()).isOfficerOrBetter();
-            if (isManager) {
-                onlineMember.displayClientMessage(message, false);
-            }
-        }
+        team.getOnlineMembers().stream()
+                .filter(onlineMember -> !team.isPartyTeam() || team.getRankForPlayer(onlineMember.getUUID()).isOfficerOrBetter())
+                .forEach(onlineMember -> onlineMember.displayClientMessage(message, false));
     }
 }

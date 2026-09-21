@@ -14,8 +14,33 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.fml.loading.FMLEnvironment;
 
 import javax.annotation.Nullable;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.IntFunction;
+import java.util.function.IntPredicate;
+import java.util.function.Supplier;
 
 public final class SafeguardPriceDisplay {
+
+    /** Boolean-style toggles where {@code true} means "protection off". */
+    private static final Set<String> ALLOW_STYLE_KEYS =
+            Set.of("allow_mob_griefing", "allow_explosions", "allow_pvp");
+
+    /** Privacy-mode toggles where anything but {@code PUBLIC} is a billable restriction. */
+    private static final Set<String> PRIVACY_STYLE_KEYS =
+            Set.of("block_interact_mode", "block_edit_mode", "entity_interact_mode");
+
+    /** Server-side config price lookup, keyed the same as {@link #ALLOW_STYLE_KEYS} / {@link #PRIVACY_STYLE_KEYS} combined. */
+    private static final Map<String, Supplier<Long>> SERVER_PRICE_LOOKUP = Map.ofEntries(
+            Map.entry("allow_mob_griefing", () -> LcClaimEconomyConfig.SERVER.mobGriefProtectionPrice.get()),
+            Map.entry("allow_explosions", () -> LcClaimEconomyConfig.SERVER.explosionProtectionPrice.get()),
+            Map.entry("allow_pvp", () -> LcClaimEconomyConfig.SERVER.pvpDisablePrice.get()),
+            Map.entry("block_interact_mode", () -> LcClaimEconomyConfig.SERVER.blockInteractProtectionPrice.get()),
+            Map.entry("block_edit_mode", () -> LcClaimEconomyConfig.SERVER.blockEditProtectionPrice.get()),
+            Map.entry("entity_interact_mode", () -> LcClaimEconomyConfig.SERVER.entityInteractProtectionPrice.get())
+    );
+
     private SafeguardPriceDisplay() {
     }
 
@@ -34,15 +59,8 @@ public final class SafeguardPriceDisplay {
             return ClientPricingCache.defaultProtectionPrice(key);
         }
 
-        return switch (key) {
-            case "allow_mob_griefing" -> LcClaimEconomyConfig.SERVER.mobGriefProtectionPrice.get();
-            case "allow_explosions" -> LcClaimEconomyConfig.SERVER.explosionProtectionPrice.get();
-            case "allow_pvp" -> LcClaimEconomyConfig.SERVER.pvpDisablePrice.get();
-            case "block_interact_mode" -> LcClaimEconomyConfig.SERVER.blockInteractProtectionPrice.get();
-            case "block_edit_mode" -> LcClaimEconomyConfig.SERVER.blockEditProtectionPrice.get();
-            case "entity_interact_mode" -> LcClaimEconomyConfig.SERVER.entityInteractProtectionPrice.get();
-            default -> null;
-        };
+        Supplier<Long> priceSource = SERVER_PRICE_LOOKUP.get(key);
+        return priceSource != null ? priceSource.get() : null;
     }
 
     @Nullable
@@ -59,14 +77,13 @@ public final class SafeguardPriceDisplay {
         if (key == null) {
             return false;
         }
-
-        return switch (key) {
-            case "allow_mob_griefing", "allow_explosions", "allow_pvp" ->
-                    value instanceof Boolean enabled && !enabled;
-            case "block_interact_mode", "block_edit_mode", "entity_interact_mode" ->
-                    value instanceof PrivacyMode mode && mode != PrivacyMode.PUBLIC;
-            default -> false;
-        };
+        if (ALLOW_STYLE_KEYS.contains(key)) {
+            return value instanceof Boolean enabled && !enabled;
+        }
+        if (PRIVACY_STYLE_KEYS.contains(key)) {
+            return value instanceof PrivacyMode mode && mode != PrivacyMode.PUBLIC;
+        }
+        return false;
     }
 
     /**
@@ -85,9 +102,7 @@ public final class SafeguardPriceDisplay {
 
     public static boolean isAllowStyleProtectionKey(String configId) {
         String key = baseProtectionKey(configId);
-        return "allow_mob_griefing".equals(key)
-                || "allow_explosions".equals(key)
-                || "allow_pvp".equals(key);
+        return key != null && ALLOW_STYLE_KEYS.contains(key);
     }
 
     public static Component formatPricePerChunk(long copper) {
@@ -95,36 +110,49 @@ public final class SafeguardPriceDisplay {
     }
 
     public static Component upkeepPeriodLabel() {
-        int minutes = FMLEnvironment.dist == Dist.CLIENT ? ClientPricingCache.upkeepPeriodMinutes() : -1;
-        if (minutes <= 0) {
-            if (FMLEnvironment.dist == Dist.CLIENT) {
-                return formatUpkeepPeriodLabel(60);
-            }
-            minutes = LcClaimEconomyConfig.SERVER.upkeepPeriodMinutes.get();
-        }
+        int minutes = FMLEnvironment.dist == Dist.CLIENT
+                ? clientUpkeepMinutesOrDefault()
+                : LcClaimEconomyConfig.SERVER.upkeepPeriodMinutes.get();
         return formatUpkeepPeriodLabel(minutes);
     }
 
+    /** Synced upkeep-period minutes, falling back to a flat 60 (never the config default) when nothing has synced yet. */
+    private static int clientUpkeepMinutesOrDefault() {
+        int synced = ClientPricingCache.upkeepPeriodMinutes();
+        return synced > 0 ? synced : 60;
+    }
+
+    /**
+     * Rules are evaluated in order and the first match wins, mirroring the historical
+     * if-chain exactly - including that a multiple of 1440 is always also a multiple of
+     * 60, so the "one_day"/"days" rules below never actually fire before the "hours" rule
+     * does. Kept in place rather than pruned so the resolution order is provably unchanged.
+     */
+    private static final List<UpkeepPeriodRule> UPKEEP_PERIOD_RULES = List.of(
+            new UpkeepPeriodRule(minutes -> minutes <= 1,
+                    minutes -> Component.translatable("message.lc_claim_economy.upkeep_period.one_minute")),
+            new UpkeepPeriodRule(minutes -> minutes < 60,
+                    minutes -> Component.translatable("message.lc_claim_economy.upkeep_period.minutes", minutes)),
+            new UpkeepPeriodRule(minutes -> minutes == 60,
+                    minutes -> Component.translatable("message.lc_claim_economy.upkeep_period.one_hour")),
+            new UpkeepPeriodRule(minutes -> minutes % 60 == 0,
+                    minutes -> Component.translatable("message.lc_claim_economy.upkeep_period.hours", minutes / 60)),
+            new UpkeepPeriodRule(minutes -> minutes == 1440,
+                    minutes -> Component.translatable("message.lc_claim_economy.upkeep_period.one_day")),
+            new UpkeepPeriodRule(minutes -> minutes % 1440 == 0,
+                    minutes -> Component.translatable("message.lc_claim_economy.upkeep_period.days", minutes / 1440))
+    );
+
     public static Component formatUpkeepPeriodLabel(int minutes) {
-        if (minutes <= 1) {
-            return Component.translatable("message.lc_claim_economy.upkeep_period.one_minute");
-        }
-        if (minutes < 60) {
-            return Component.translatable("message.lc_claim_economy.upkeep_period.minutes", minutes);
-        }
-        if (minutes == 60) {
-            return Component.translatable("message.lc_claim_economy.upkeep_period.one_hour");
-        }
-        if (minutes % 60 == 0) {
-            return Component.translatable("message.lc_claim_economy.upkeep_period.hours", minutes / 60);
-        }
-        if (minutes == 1440) {
-            return Component.translatable("message.lc_claim_economy.upkeep_period.one_day");
-        }
-        if (minutes % 1440 == 0) {
-            return Component.translatable("message.lc_claim_economy.upkeep_period.days", minutes / 1440);
+        for (UpkeepPeriodRule rule : UPKEEP_PERIOD_RULES) {
+            if (rule.matches().test(minutes)) {
+                return rule.render().apply(minutes);
+            }
         }
         return Component.translatable("message.lc_claim_economy.upkeep_period.minutes", minutes);
+    }
+
+    private record UpkeepPeriodRule(IntPredicate matches, IntFunction<Component> render) {
     }
 
     /**
@@ -140,27 +168,27 @@ public final class SafeguardPriceDisplay {
         return key.startsWith("land_") ? key.substring("land_".length()) : key;
     }
 
+    /**
+     * Strips a leading {@code namespace:} (first colon only), then descends into the last
+     * {@code /}-separated segment and finally the last {@code .}-separated segment of that -
+     * config paths from FTB Library group configs are dot-separated (e.g.
+     * {@code "ftbteamsconfig.ftbchunks.allow_pvp"}).
+     */
     @Nullable
     public static String normalizePropertyKey(String configId) {
         if (configId == null || configId.isBlank()) {
             return null;
         }
 
-        String key = configId;
-        int colon = key.indexOf(':');
-        if (colon >= 0) {
-            key = key.substring(colon + 1);
-        }
-        int slash = key.lastIndexOf('/');
-        if (slash >= 0) {
-            key = key.substring(slash + 1);
-        }
-        // Config paths from FTB Library group configs are dot-separated
-        // (e.g. "ftbteamsconfig.ftbchunks.allow_pvp").
-        int dot = key.lastIndexOf('.');
-        if (dot >= 0) {
-            key = key.substring(dot + 1);
-        }
+        int colon = configId.indexOf(':');
+        String withoutNamespace = colon >= 0 ? configId.substring(colon + 1) : configId;
+
+        String[] pathSegments = withoutNamespace.split("/", -1);
+        String lastPathSegment = pathSegments[pathSegments.length - 1];
+
+        String[] groupSegments = lastPathSegment.split("\\.", -1);
+        String key = groupSegments[groupSegments.length - 1];
+
         return key.isBlank() ? null : key;
     }
 

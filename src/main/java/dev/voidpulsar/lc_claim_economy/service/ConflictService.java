@@ -23,10 +23,9 @@ import net.minecraft.server.level.ServerPlayer;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -144,15 +143,16 @@ public final class ConflictService {
         long inboundCopper = ConflictBillingMath.sumOrdinalIncomingTerms(baseline, inboundCount);
 
         Set<UUID> hostileIds = ledger.getWarTargets(squad.getTeamId());
-        long outboundCopper = 0L;
-        for (UUID hostileId : hostileIds) {
-            Team foe = TeamRegistry.resolve(srv, hostileId);
-            if (foe == null || !isClaimTeam(srv, foe)) {
-                continue;
-            }
-            long foeBaseline = baseUpkeepCopper(srv, foe, ledger.getPendingState(hostileId));
-            outboundCopper += ConflictBillingMath.outgoingWarCostCopper(foeBaseline);
-        }
+        long outboundCopper = hostileIds.stream()
+                .mapToLong(hostileId -> {
+                    Team foe = TeamRegistry.resolve(srv, hostileId);
+                    if (foe == null || !isClaimTeam(srv, foe)) {
+                        return 0L;
+                    }
+                    long foeBaseline = baseUpkeepCopper(srv, foe, ledger.getPendingState(hostileId));
+                    return ConflictBillingMath.outgoingWarCostCopper(foeBaseline);
+                })
+                .sum();
 
         return new WarCostBreakdown(baseline, inboundCopper, outboundCopper, inboundCount, hostileIds.size());
     }
@@ -244,18 +244,22 @@ public final class ConflictService {
 
     public static List<UUID> outgoingWarDismantleOrder(MinecraftServer srv, Team squad, LcClaimEconomySavedData ledger) {
         UUID squadId = squad.getTeamId();
-        List<UUID> opponents = new ArrayList<>(ledger.getWarTargets(squadId));
-        opponents.sort(Comparator.comparing(UUID::toString));
+        List<UUID> opponents = ledger.getWarTargets(squadId).stream()
+                .sorted(Comparator.comparing(UUID::toString))
+                .toList();
 
-        Map<UUID, Long> priceByOpponent = new HashMap<>();
-        for (UUID opponentId : opponents) {
-            Team foe = TeamRegistry.resolve(srv, opponentId);
-            long price = foe == null ? 0L : ConflictBillingMath.outgoingWarCostCopper(baseUpkeepCopper(srv, foe));
-            priceByOpponent.put(opponentId, price);
-        }
+        Map<UUID, Long> priceByOpponent = opponents.stream()
+                .collect(java.util.stream.Collectors.toMap(
+                        java.util.function.Function.identity(),
+                        opponentId -> {
+                            Team foe = TeamRegistry.resolve(srv, opponentId);
+                            return foe == null ? 0L : ConflictBillingMath.outgoingWarCostCopper(baseUpkeepCopper(srv, foe));
+                        }
+                ));
 
-        opponents.sort(Comparator.comparingLong((UUID id) -> priceByOpponent.getOrDefault(id, 0L)).reversed());
-        return opponents;
+        return opponents.stream()
+                .sorted(Comparator.comparingLong((UUID id) -> priceByOpponent.getOrDefault(id, 0L)).reversed())
+                .toList();
     }
 
     public static long costToDeclareWar(MinecraftServer srv, Team aggressor, Team foe) {
@@ -312,66 +316,48 @@ public final class ConflictService {
         LcClaimEconomySavedData ledger = LcClaimEconomySavedData.get(srv);
         UUID viewerId = viewer.getTeamId();
         long viewerBaseline = baseUpkeepCopper(srv, viewer);
-        List<WarTeamView> rows = new ArrayList<>();
-        Set<UUID> claimed = new HashSet<>();
 
-        for (LcClaimEconomySavedData.TeamLinkEntry link : ledger.getAllLinks()) {
-            if (!link.warTargets().contains(viewerId)) {
-                continue;
-            }
-            Team aggressor = resolveEligibleTarget(srv, link.ftbTeamId());
-            if (aggressor == null) {
-                continue;
-            }
-            claimed.add(aggressor.getTeamId());
-            rows.add(describeOpponent(
-                    aggressor,
-                    baseUpkeepCopper(srv, aggressor),
-                    viewerBaseline,
-                    ConflictEntryStatus.ENGAGED,
-                    false
-            ));
-        }
+        List<WarTeamView> active = ledger.getAllLinks().stream()
+                .filter(link -> link.warTargets().contains(viewerId))
+                .map(link -> resolveEligibleTarget(srv, link.ftbTeamId()))
+                .filter(Objects::nonNull)
+                .map(aggressor -> describeOpponent(aggressor, baseUpkeepCopper(srv, aggressor), viewerBaseline, ConflictEntryStatus.ENGAGED, false))
+                .toList();
+        Set<UUID> claimed = active.stream().map(WarTeamView::teamId).collect(java.util.stream.Collectors.toSet());
 
-        for (LcClaimEconomySavedData.TeamLinkEntry link : ledger.getAllLinks()) {
-            UUID candidateId = link.ftbTeamId();
-            boolean alreadyHandled = candidateId.equals(viewerId) || claimed.contains(candidateId);
-            boolean pendingAgainstViewer = link.pendingState().isPendingWarDeclare(viewerId);
-            if (alreadyHandled || !pendingAgainstViewer) {
-                continue;
-            }
-            Team aggressor = resolveEligibleTarget(srv, candidateId);
-            if (aggressor == null) {
-                continue;
-            }
-            claimed.add(candidateId);
-            rows.add(describeOpponent(
-                    aggressor,
-                    baseUpkeepCopper(srv, aggressor),
-                    viewerBaseline,
-                    ConflictEntryStatus.DECLARE_QUEUED,
-                    false
-            ));
-        }
+        List<WarTeamView> pendingAgainstViewer = ledger.getAllLinks().stream()
+                .filter(link -> !link.ftbTeamId().equals(viewerId) && !claimed.contains(link.ftbTeamId()))
+                .filter(link -> link.pendingState().isPendingWarDeclare(viewerId))
+                .map(link -> resolveEligibleTarget(srv, link.ftbTeamId()))
+                .filter(Objects::nonNull)
+                .map(aggressor -> describeOpponent(aggressor, baseUpkeepCopper(srv, aggressor), viewerBaseline, ConflictEntryStatus.DECLARE_QUEUED, false))
+                .toList();
 
+        List<WarTeamView> rows = new ArrayList<>(active.size() + pendingAgainstViewer.size());
+        rows.addAll(active);
+        rows.addAll(pendingAgainstViewer);
         sortByName(rows);
+
         double multiplier = warMultiplier();
-        for (int position = 0; position < rows.size(); position++) {
-            WarTeamView row = rows.get(position);
-            long ordinalCost = ConflictBillingMath.ordinalWarTermCopper(viewerBaseline, position, multiplier);
-            rows.set(position, new WarTeamView(
-                    row.teamId(),
-                    row.displayName(),
-                    row.targetBaseUpkeepCopper(),
-                    ordinalCost,
-                    row.status(),
-                    row.opponentPendingDeclareOnViewer(),
-                    row.blockEditProtected(),
-                    row.explosionProtected(),
-                    row.pvpProtected()
-            ));
-        }
-        return rows;
+        return java.util.stream.IntStream.range(0, rows.size())
+                .mapToObj(position -> withOrdinalWarCost(rows.get(position), viewerBaseline, position, multiplier))
+                .toList();
+    }
+
+    /** Rebuilds {@code row} with its {@code warCostCopper} replaced by the ordinal-position term - every other field is carried over unchanged. */
+    private static WarTeamView withOrdinalWarCost(WarTeamView row, long viewerBaseline, int position, double multiplier) {
+        long ordinalCost = ConflictBillingMath.ordinalWarTermCopper(viewerBaseline, position, multiplier);
+        return new WarTeamView(
+                row.teamId(),
+                row.displayName(),
+                row.targetBaseUpkeepCopper(),
+                ordinalCost,
+                row.status(),
+                row.opponentPendingDeclareOnViewer(),
+                row.blockEditProtected(),
+                row.explosionProtected(),
+                row.pvpProtected()
+        );
     }
 
     /** Lists only the wars presently counted in this team's incoming upkeep bill (no pending declares). */
@@ -384,17 +370,13 @@ public final class ConflictService {
         long viewerBaseline = baseUpkeepCopper(srv, viewer);
         double multiplier = warMultiplier();
 
-        List<UUID> aggressorIds = new ArrayList<>();
-        for (LcClaimEconomySavedData.TeamLinkEntry link : ledger.getAllLinks()) {
-            if (!link.warTargets().contains(viewerId)) {
-                continue;
-            }
-            Team aggressor = resolveEligibleTarget(srv, link.ftbTeamId());
-            if (aggressor != null) {
-                aggressorIds.add(aggressor.getTeamId());
-            }
-        }
-        aggressorIds.sort(Comparator.comparing(UUID::toString));
+        List<UUID> aggressorIds = ledger.getAllLinks().stream()
+                .filter(link -> link.warTargets().contains(viewerId))
+                .map(link -> resolveEligibleTarget(srv, link.ftbTeamId()))
+                .filter(Objects::nonNull)
+                .map(Team::getTeamId)
+                .sorted(Comparator.comparing(UUID::toString))
+                .toList();
 
         List<WarTeamView> rows = new ArrayList<>();
         int position = 0;
@@ -418,22 +400,24 @@ public final class ConflictService {
         UUID viewerId = viewer.getTeamId();
         TeamQueuedChanges queuedChanges = ledger.getPendingState(viewerId);
 
-        List<UUID> hostileIds = new ArrayList<>(ledger.getWarTargets(viewerId));
-        hostileIds.sort(Comparator.comparing(UUID::toString));
-
-        List<WarTeamView> rows = new ArrayList<>();
-        for (UUID hostileId : hostileIds) {
-            Team foe = resolveEligibleTarget(srv, hostileId);
-            if (foe == null) {
-                continue;
-            }
-            ConflictEntryStatus status = queuedChanges.isPendingWarEnd(hostileId)
-                    ? ConflictEntryStatus.END_QUEUED
-                    : ConflictEntryStatus.ENGAGED;
-            long foeBaseline = baseUpkeepCopper(srv, foe);
-            rows.add(describeOpponent(foe, foeBaseline, ConflictBillingMath.outgoingWarCostCopper(foeBaseline), status, false));
-        }
+        List<WarTeamView> rows = ledger.getWarTargets(viewerId).stream()
+                .sorted(Comparator.comparing(UUID::toString))
+                .flatMap(hostileId -> {
+                    Team foe = resolveEligibleTarget(srv, hostileId);
+                    return foe == null ? java.util.stream.Stream.<WarTeamView>empty()
+                            : java.util.stream.Stream.of(describeActiveOutgoing(srv, foe, queuedChanges, hostileId));
+                })
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         return sortByName(rows);
+    }
+
+    /** One row of an active outgoing war: {@code foe} is already known non-null and eligible. */
+    private static WarTeamView describeActiveOutgoing(MinecraftServer srv, Team foe, TeamQueuedChanges queuedChanges, UUID hostileId) {
+        ConflictEntryStatus status = queuedChanges.isPendingWarEnd(hostileId)
+                ? ConflictEntryStatus.END_QUEUED
+                : ConflictEntryStatus.ENGAGED;
+        long foeBaseline = baseUpkeepCopper(srv, foe);
+        return describeOpponent(foe, foeBaseline, ConflictBillingMath.outgoingWarCostCopper(foeBaseline), status, false);
     }
 
     public static List<WarTeamView> buildOutgoingViews(MinecraftServer srv, Team viewer) {
@@ -443,38 +427,34 @@ public final class ConflictService {
         LcClaimEconomySavedData ledger = LcClaimEconomySavedData.get(srv);
         UUID viewerId = viewer.getTeamId();
         TeamQueuedChanges queuedChanges = ledger.getPendingState(viewerId);
-        List<WarTeamView> rows = new ArrayList<>();
 
-        List<UUID> hostileIds = new ArrayList<>(ledger.getWarTargets(viewerId));
-        hostileIds.sort(Comparator.comparing(UUID::toString));
-        for (UUID hostileId : hostileIds) {
-            Team foe = resolveEligibleTarget(srv, hostileId);
-            if (foe == null) {
-                continue;
-            }
-            ConflictEntryStatus status = queuedChanges.isPendingWarEnd(hostileId)
-                    ? ConflictEntryStatus.END_QUEUED
-                    : ConflictEntryStatus.ENGAGED;
-            long foeBaseline = baseUpkeepCopper(srv, foe);
-            rows.add(describeOpponent(foe, foeBaseline, ConflictBillingMath.outgoingWarCostCopper(foeBaseline), status, false));
-        }
+        List<WarTeamView> activeRows = ledger.getWarTargets(viewerId).stream()
+                .sorted(Comparator.comparing(UUID::toString))
+                .flatMap(hostileId -> {
+                    Team foe = resolveEligibleTarget(srv, hostileId);
+                    return foe == null ? java.util.stream.Stream.empty()
+                            : java.util.stream.Stream.of(describeActiveOutgoing(srv, foe, queuedChanges, hostileId));
+                })
+                .toList();
 
-        for (UUID candidateId : queuedChanges.pendingWarDeclares()) {
-            if (ledger.isAtWarWith(viewerId, candidateId)) {
-                continue;
-            }
-            Team foe = resolveEligibleTarget(srv, candidateId);
-            if (foe == null) {
-                continue;
-            }
-            rows.add(describeOpponent(
-                    foe,
-                    baseUpkeepCopper(srv, foe),
-                    costToDeclareWar(srv, viewer, foe),
-                    ConflictEntryStatus.DECLARE_QUEUED,
-                    false
-            ));
-        }
+        List<WarTeamView> pendingRows = queuedChanges.pendingWarDeclares().stream()
+                .filter(candidateId -> !ledger.isAtWarWith(viewerId, candidateId))
+                .flatMap(candidateId -> {
+                    Team foe = resolveEligibleTarget(srv, candidateId);
+                    return foe == null ? java.util.stream.Stream.<WarTeamView>empty()
+                            : java.util.stream.Stream.of(describeOpponent(
+                                    foe,
+                                    baseUpkeepCopper(srv, foe),
+                                    costToDeclareWar(srv, viewer, foe),
+                                    ConflictEntryStatus.DECLARE_QUEUED,
+                                    false
+                            ));
+                })
+                .toList();
+
+        List<WarTeamView> rows = new ArrayList<>(activeRows.size() + pendingRows.size());
+        rows.addAll(activeRows);
+        rows.addAll(pendingRows);
         return sortByName(rows);
     }
 
@@ -487,27 +467,28 @@ public final class ConflictService {
         Set<UUID> hostileIds = ledger.getWarTargets(viewerId);
         TeamQueuedChanges viewerQueuedChanges = ledger.getPendingState(viewerId);
 
-        List<WarTeamView> rows = new ArrayList<>();
-        for (Team candidate : TeamRegistry.trackedTeams(srv)) {
-            UUID candidateId = candidate.getTeamId();
-            boolean unavailable = candidateId.equals(viewerId)
-                    || hostileIds.contains(candidateId)
-                    || viewerQueuedChanges.isPendingWarDeclare(candidateId);
-            if (unavailable) {
-                continue;
-            }
-            boolean candidatePendingOnViewer = ledger.getPendingState(candidateId).isPendingWarDeclare(viewerId);
-            ConflictEntryStatus status = viewerQueuedChanges.isPendingWarDeclare(candidateId)
-                    ? ConflictEntryStatus.DECLARE_QUEUED
-                    : ConflictEntryStatus.ENGAGED;
-            rows.add(describeOpponent(
-                    candidate,
-                    baseUpkeepCopper(srv, candidate),
-                    costToDeclareWar(srv, viewer, candidate),
-                    status,
-                    candidatePendingOnViewer
-            ));
-        }
+        List<WarTeamView> rows = TeamRegistry.trackedTeams(srv).stream()
+                .filter(candidate -> {
+                    UUID candidateId = candidate.getTeamId();
+                    return !candidateId.equals(viewerId)
+                            && !hostileIds.contains(candidateId)
+                            && !viewerQueuedChanges.isPendingWarDeclare(candidateId);
+                })
+                .map(candidate -> {
+                    UUID candidateId = candidate.getTeamId();
+                    boolean candidatePendingOnViewer = ledger.getPendingState(candidateId).isPendingWarDeclare(viewerId);
+                    ConflictEntryStatus status = viewerQueuedChanges.isPendingWarDeclare(candidateId)
+                            ? ConflictEntryStatus.DECLARE_QUEUED
+                            : ConflictEntryStatus.ENGAGED;
+                    return describeOpponent(
+                            candidate,
+                            baseUpkeepCopper(srv, candidate),
+                            costToDeclareWar(srv, viewer, candidate),
+                            status,
+                            candidatePendingOnViewer
+                    );
+                })
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
         return sortByName(rows);
     }
 
@@ -569,29 +550,49 @@ public final class ConflictService {
         UUID viewerId = viewer.getTeamId();
         UUID foeId = foe.getTeamId();
         TeamQueuedChanges queuedChanges = ledger.getPendingState(viewerId);
-
-        if (queuedChanges.isPendingWarDeclare(foeId)) {
-            ledger.setPendingState(viewerId, queuedChanges.withoutPendingWarDeclare(foeId));
-            return Component.translatable("message.lc_claim_economy.war_pending_cancelled", displayName(foe));
-        }
-
         boolean alreadyHostile = ledger.isAtWarWith(viewerId, foeId);
-        if (alreadyHostile) {
-            if (queuedChanges.isPendingWarEnd(foeId)) {
-                ledger.setPendingState(viewerId, queuedChanges.withoutPendingWarEnd(foeId));
-                return Component.translatable("message.lc_claim_economy.war_pending_cancelled", displayName(foe));
+
+        WarToggleAction action;
+        if (queuedChanges.isPendingWarDeclare(foeId)) {
+            action = WarToggleAction.CANCEL_PENDING_DECLARE;
+        } else if (alreadyHostile) {
+            action = queuedChanges.isPendingWarEnd(foeId) ? WarToggleAction.CANCEL_PENDING_END : WarToggleAction.QUEUE_END;
+        } else if (!WarDeclarationWindow.isOpenNow()) {
+            action = WarToggleAction.DECLARE_WINDOW_CLOSED;
+        } else {
+            action = WarToggleAction.QUEUE_DECLARE;
+        }
+
+        return switch (action) {
+            case CANCEL_PENDING_DECLARE -> {
+                ledger.setPendingState(viewerId, queuedChanges.withoutPendingWarDeclare(foeId));
+                yield Component.translatable("message.lc_claim_economy.war_pending_cancelled", displayName(foe));
             }
-            ledger.setPendingState(viewerId, queuedChanges.withPendingWarEnd(foeId));
-            return Component.translatable("message.lc_claim_economy.war_end_pending", displayName(foe));
-        }
+            case CANCEL_PENDING_END -> {
+                ledger.setPendingState(viewerId, queuedChanges.withoutPendingWarEnd(foeId));
+                yield Component.translatable("message.lc_claim_economy.war_pending_cancelled", displayName(foe));
+            }
+            case QUEUE_END -> {
+                ledger.setPendingState(viewerId, queuedChanges.withPendingWarEnd(foeId));
+                yield Component.translatable("message.lc_claim_economy.war_end_pending", displayName(foe));
+            }
+            case DECLARE_WINDOW_CLOSED ->
+                    Component.translatable("message.lc_claim_economy.war_declare_window_closed", WarDeclarationWindow.describeWindow());
+            case QUEUE_DECLARE -> {
+                ledger.setPendingState(viewerId, queuedChanges.withPendingWarDeclare(foeId));
+                QuestAdvancements.grant(actor, QuestAdvancements.warDeclared());
+                yield Component.translatable("message.lc_claim_economy.war_declare_pending", displayName(foe));
+            }
+        };
+    }
 
-        if (!WarDeclarationWindow.isOpenNow()) {
-            return Component.translatable("message.lc_claim_economy.war_declare_window_closed", WarDeclarationWindow.describeWindow());
-        }
-
-        ledger.setPendingState(viewerId, queuedChanges.withPendingWarDeclare(foeId));
-        QuestAdvancements.grant(actor, QuestAdvancements.warDeclared());
-        return Component.translatable("message.lc_claim_economy.war_declare_pending", displayName(foe));
+    /** The five outcomes {@link #toggleWar} can resolve to, classified from viewer/foe war state before any mutation happens. */
+    private enum WarToggleAction {
+        CANCEL_PENDING_DECLARE,
+        CANCEL_PENDING_END,
+        QUEUE_END,
+        DECLARE_WINDOW_CLOSED,
+        QUEUE_DECLARE
     }
 
     /** Builds the "why can't these two teams fight" message, or {@code null} if they can. */

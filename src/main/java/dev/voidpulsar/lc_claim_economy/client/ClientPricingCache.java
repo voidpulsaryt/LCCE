@@ -13,6 +13,7 @@ import javax.annotation.Nullable;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.LongSupplier;
 
 public final class ClientPricingCache {
     public static final Set<String> LC_CLAIM_RESULT_IDS = Set.of(
@@ -33,22 +34,35 @@ public final class ClientPricingCache {
     private static final Color4I VALUE_COLOR = Color4I.rgb(0x55FF55);
     private static final Color4I PERIOD_COLOR = Color4I.rgb(0xAAAAAA);
 
-    private static long claimPrice = -1L;
-    private static long forceLoadUpkeepPrice = -1L;
-    private static int upkeepPeriodMinutes = -1;
-    private static int freeChunks;
-    private static int claimedChunks;
-    private static long mobGriefProtectionPrice = -1L;
-    private static long explosionProtectionPrice = -1L;
-    private static long pvpDisablePrice = -1L;
-    private static long blockInteractProtectionPrice = -1L;
-    private static long blockEditProtectionPrice = -1L;
-    private static long entityInteractProtectionPrice = -1L;
-    private static int landChunkGroupSize = -1;
-    private static boolean balanceSynced;
-    private static boolean balanceEmpty = true;
-    @Nullable
-    private static String balanceText;
+    /**
+     * A single immutable snapshot of every value the last sync packet carried. {@link #update}
+     * builds one of these and swaps it in atomically, rather than mutating fifteen separate
+     * static fields one at a time - readers never observe a torn mix of an old and new sync.
+     */
+    private record Snapshot(
+            long claimPrice,
+            long forceLoadUpkeepPrice,
+            int upkeepPeriodMinutes,
+            int freeChunks,
+            int claimedChunks,
+            boolean balanceSynced,
+            boolean balanceEmpty,
+            @Nullable String balanceText,
+            long mobGriefProtectionPrice,
+            long explosionProtectionPrice,
+            long pvpDisablePrice,
+            long blockInteractProtectionPrice,
+            long blockEditProtectionPrice,
+            long entityInteractProtectionPrice,
+            int landChunkGroupSize
+    ) {
+        static final Snapshot UNSYNCED = new Snapshot(
+                -1L, -1L, -1, 0, 0, false, true, null,
+                -1L, -1L, -1L, -1L, -1L, -1L, -1
+        );
+    }
+
+    private static volatile Snapshot snapshot = Snapshot.UNSYNCED;
     private static int lastUpdateTotalChunks = 1;
     private static Map<String, Integer> lastProblems = Map.of();
 
@@ -72,45 +86,47 @@ public final class ClientPricingCache {
             long newEntityInteractProtectionPrice,
             int newLandChunkGroupSize
     ) {
-        claimPrice = newClaimPrice;
-        forceLoadUpkeepPrice = newForceLoadUpkeepPrice;
-        upkeepPeriodMinutes = newUpkeepPeriodMinutes;
-        freeChunks = newFreeChunks;
-        claimedChunks = newClaimedChunks;
-        balanceSynced = newBalanceSynced;
-        balanceEmpty = newBalanceEmpty;
-        balanceText = newBalanceText;
-        mobGriefProtectionPrice = newMobGriefProtectionPrice;
-        explosionProtectionPrice = newExplosionProtectionPrice;
-        pvpDisablePrice = newPvpDisablePrice;
-        blockInteractProtectionPrice = newBlockInteractProtectionPrice;
-        blockEditProtectionPrice = newBlockEditProtectionPrice;
-        entityInteractProtectionPrice = newEntityInteractProtectionPrice;
-        landChunkGroupSize = newLandChunkGroupSize;
+        snapshot = new Snapshot(
+                newClaimPrice,
+                newForceLoadUpkeepPrice,
+                newUpkeepPeriodMinutes,
+                newFreeChunks,
+                newClaimedChunks,
+                newBalanceSynced,
+                newBalanceEmpty,
+                newBalanceText,
+                newMobGriefProtectionPrice,
+                newExplosionProtectionPrice,
+                newPvpDisablePrice,
+                newBlockInteractProtectionPrice,
+                newBlockEditProtectionPrice,
+                newEntityInteractProtectionPrice,
+                newLandChunkGroupSize
+        );
     }
 
     public static long claimPrice() {
-        return claimPrice;
+        return snapshot.claimPrice();
     }
 
     public static long forceLoadUpkeepPrice() {
-        return forceLoadUpkeepPrice;
+        return snapshot.forceLoadUpkeepPrice();
     }
 
     public static int freeChunks() {
-        return freeChunks;
+        return snapshot.freeChunks();
     }
 
     public static int claimedChunks() {
-        return claimedChunks;
+        return snapshot.claimedChunks();
     }
 
     public static boolean balanceEmpty() {
-        return balanceEmpty;
+        return snapshot.balanceEmpty();
     }
 
     public static long remainingFreeChunks() {
-        return Math.max(0, freeChunks - claimedChunks);
+        return Math.max(0, snapshot.freeChunks() - snapshot.claimedChunks());
     }
 
     /** Public alias of {@link #balanceComponent()} for use outside this class. */
@@ -128,20 +144,22 @@ public final class ClientPricingCache {
      * accounting for any remaining free-chunk allowance.
      */
     public static long projectedBulkClaimCopper(int additionalChunks) {
-        if (additionalChunks <= 0 || claimPrice <= 0L) {
+        long currentClaimPrice = snapshot.claimPrice();
+        if (additionalChunks <= 0 || currentClaimPrice <= 0L) {
             return 0L;
         }
         long free = remainingFreeChunks();
         long billable = Math.max(0L, additionalChunks - free);
-        return billable * claimPrice;
+        return billable * currentClaimPrice;
     }
 
     public static int landChunkGroupSize() {
-        return landChunkGroupSize > 0 ? landChunkGroupSize : 5;
+        int size = snapshot.landChunkGroupSize();
+        return size > 0 ? size : 5;
     }
 
     public static int upkeepPeriodMinutes() {
-        return upkeepPeriodMinutes;
+        return snapshot.upkeepPeriodMinutes();
     }
 
     private static final Map<String, Long> DEFAULT_PROTECTION_PRICES = Map.of(
@@ -153,17 +171,23 @@ public final class ClientPricingCache {
             "entity_interact_mode", 15L
     );
 
+    /** Dispatch table mirroring {@link #DEFAULT_PROTECTION_PRICES}' keys, reading the live synced value instead of a fallback constant. */
+    private static final Map<String, LongSupplier> LIVE_PROTECTION_PRICES = Map.of(
+            "allow_mob_griefing", () -> snapshot.mobGriefProtectionPrice(),
+            "allow_explosions", () -> snapshot.explosionProtectionPrice(),
+            "allow_pvp", () -> snapshot.pvpDisablePrice(),
+            "block_interact_mode", () -> snapshot.blockInteractProtectionPrice(),
+            "block_edit_mode", () -> snapshot.blockEditProtectionPrice(),
+            "entity_interact_mode", () -> snapshot.entityInteractProtectionPrice()
+    );
+
     @Nullable
     public static Long protectionPrice(String propertyKey) {
-        long raw = switch (propertyKey) {
-            case "allow_mob_griefing" -> mobGriefProtectionPrice;
-            case "allow_explosions" -> explosionProtectionPrice;
-            case "allow_pvp" -> pvpDisablePrice;
-            case "block_interact_mode" -> blockInteractProtectionPrice;
-            case "block_edit_mode" -> blockEditProtectionPrice;
-            case "entity_interact_mode" -> entityInteractProtectionPrice;
-            default -> Long.MIN_VALUE;
-        };
+        LongSupplier liveValue = LIVE_PROTECTION_PRICES.get(propertyKey);
+        if (liveValue == null) {
+            return null;
+        }
+        long raw = liveValue.getAsLong();
         return raw >= 0L ? raw : null;
     }
 
@@ -173,27 +197,15 @@ public final class ClientPricingCache {
     }
 
     public static boolean protectionPricesSynced() {
-        long[] livePrices = {
-                mobGriefProtectionPrice,
-                explosionProtectionPrice,
-                pvpDisablePrice,
-                blockInteractProtectionPrice,
-                blockEditProtectionPrice,
-                entityInteractProtectionPrice
-        };
-        for (long price : livePrices) {
-            if (price < 0L) {
-                return false;
-            }
-        }
-        return true;
+        return LIVE_PROTECTION_PRICES.values().stream().allMatch(supplier -> supplier.getAsLong() >= 0L);
     }
 
     public static boolean isSynced() {
-        return claimPrice >= 0L
-                && forceLoadUpkeepPrice >= 0L
-                && upkeepPeriodMinutes > 0
-                && balanceSynced
+        Snapshot current = snapshot;
+        return current.claimPrice() >= 0L
+                && current.forceLoadUpkeepPrice() >= 0L
+                && current.upkeepPeriodMinutes() > 0
+                && current.balanceSynced()
                 && protectionPricesSynced();
     }
 
@@ -217,9 +229,9 @@ public final class ClientPricingCache {
                 new BarSegment(separatorText(), SEPARATOR_COLOR),
                 new BarSegment(labelText("upkeep"), LABEL_COLOR),
                 new BarSegment(spaceText(), LABEL_COLOR),
-                new BarSegment(priceComponent(forceLoadUpkeepPrice), VALUE_COLOR),
+                new BarSegment(priceComponent(snapshot.forceLoadUpkeepPrice()), VALUE_COLOR),
                 new BarSegment(spaceText(), PERIOD_COLOR),
-                new BarSegment(periodComponent(upkeepPeriodMinutes), PERIOD_COLOR)
+                new BarSegment(periodComponent(snapshot.upkeepPeriodMinutes()), PERIOD_COLOR)
         );
 
         int cursor = x;
@@ -274,7 +286,8 @@ public final class ClientPricingCache {
 
     /** 0 while the free-chunk allowance still covers the next claim, otherwise the full per-chunk price. */
     private static long nextClaimUnitPrice() {
-        return claimedChunks < freeChunks ? 0L : claimPrice;
+        Snapshot current = snapshot;
+        return current.claimedChunks() < current.freeChunks() ? 0L : current.claimPrice();
     }
 
     private static Component effectivePriceComponent() {
@@ -306,10 +319,11 @@ public final class ClientPricingCache {
     }
 
     private static Component balanceComponent() {
-        if (balanceEmpty) {
+        Snapshot current = snapshot;
+        if (current.balanceEmpty()) {
             return Component.translatable("message.lc_claim_economy.balance_empty");
         }
-        return Component.literal(balanceText == null ? "" : balanceText);
+        return Component.literal(current.balanceText() == null ? "" : current.balanceText());
     }
 
     private static Component priceComponent(long amount) {
