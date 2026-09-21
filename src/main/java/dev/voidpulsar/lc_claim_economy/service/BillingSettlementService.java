@@ -8,6 +8,7 @@ import net.minecraft.network.chat.Component;
 import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.data.TeamQueuedChanges;
+import dev.voidpulsar.lc_claim_economy.integration.quest.QuestAdvancements;
 import dev.voidpulsar.lc_claim_economy.network.QueuedStateBroadcast;
 import dev.voidpulsar.lc_claim_economy.teams.TeamRegistry;
 import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
@@ -23,9 +24,11 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Upkeep settlement: restore protections before wars; dismantle wars before
- * protections. Queued and paused protections share pendingProperties and follow
- * the configured dismantle order (land first off, land last on).
+ * Runs one team's upkeep cycle end to end: bring back whatever they can now afford (queued
+ * protections, then queued wars), and only once that's settled, start shedding whatever they
+ * still can't afford (outgoing wars first, then protections one at a time by
+ * {@link SafeguardDismantleSequence}) until the remaining bill fits their balance - dropping
+ * queued force-loads as a last resort before finally freezing the team if even that isn't enough.
  */
 public final class BillingSettlementService {
     public record SettlementResult(
@@ -53,233 +56,248 @@ public final class BillingSettlementService {
         }
     }
 
+    /** Mutable scratch space threaded through one settlement run - swapped for a plain record since every step here needs to both read and extend the prior step's tallies. */
+    private static final class Ledger {
+        TeamQueuedChanges queuedState;
+        final List<TeamProperty<?>> shedProtections = new ArrayList<>();
+        final List<TeamProperty<?>> reinstatedProtections = new ArrayList<>();
+        final List<String> reinstatedWarNames = new ArrayList<>();
+        final List<TeamProperty<?>> tooExpensiveToReinstate = new ArrayList<>();
+        boolean shedAnyWars;
+
+        Ledger(TeamQueuedChanges initial) {
+            queuedState = initial;
+        }
+    }
+
     private BillingSettlementService() {
     }
 
     public static SettlementResult settle(MinecraftServer server, Team team) {
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         UUID teamId = team.getTeamId();
-        TeamQueuedChanges pendingState = savedData.getPendingState(teamId);
         IBankAccount account = BankLedgerAccess.getAccountForTeam(server, team);
-
-        List<TeamProperty<?>> suspended = new ArrayList<>();
-        boolean[] warsSuspended = {false};
-        List<TeamProperty<?>> restored = new ArrayList<>();
-        List<String> restoredWarNames = new ArrayList<>();
-        List<TeamProperty<?>> unaffordable = new ArrayList<>();
+        Ledger ledger = new Ledger(savedData.getPendingState(teamId));
 
         SafeguardEnforcementService.setApplying(true);
         try {
-            pendingState = LandChunkService.applyPendingChunkTypes(server, team, pendingState);
-            pendingState = applyUserWarEnds(server, team, savedData, pendingState);
-            pendingState = restorePendingProtections(server, team, pendingState, account, restored, unaffordable);
-            pendingState = restorePendingWars(server, team, savedData, pendingState, account, restoredWarNames);
-            pendingState = dismantleOutgoingWarsUntilAffordable(server, team, savedData, pendingState, account, warsSuspended);
-            pendingState = dismantleProtectionsUntilAffordable(server, team, pendingState, account, suspended);
+            ledger.queuedState = LandChunkService.applyPendingChunkTypes(server, team, ledger.queuedState);
+            resolveUserRequestedWarEnds(server, team, savedData, ledger);
+            reinstateAffordableProtections(server, team, account, ledger);
+            reinstateAffordableWars(server, team, savedData, account, ledger);
+            shedOutgoingWarsUntilAffordable(server, team, savedData, account, ledger);
+            shedProtectionsUntilAffordable(server, team, account, ledger);
 
-            MoneyValue cost = ConflictService.calculateTotalUpkeepCost(server, team, pendingState);
-            if (cost.isEmpty()) {
-                savedData.setPendingState(teamId, pendingState);
-                savedData.setProtectionLocked(teamId, false);
-                syncState(server, team);
-                return new SettlementResult(true, MoneyValue.empty(), pendingState, forceLoadCount(team), List.copyOf(suspended), warsSuspended[0], List.copyOf(restored), List.copyOf(restoredWarNames), List.copyOf(unaffordable));
-            }
-
-            if (!account.getMoneyStorage().containsValue(cost)) {
-                QueuedChangeService.removeAllForceLoads(server, team);
-                pendingState = clearForceLoadPending(pendingState);
-                cost = ConflictService.calculateTotalUpkeepCost(server, team, pendingState);
-            }
-
-            if (!cost.isEmpty() && !account.getMoneyStorage().containsValue(cost)) {
-                savedData.setPendingState(teamId, pendingState);
-                savedData.setProtectionLocked(teamId, true);
-                SafeguardEnforcementService.notifyTeam(server, team, "message.lc_claim_economy.upkeep_unpaid_frozen");
-                syncState(server, team);
-                savedData.recordUpkeepMissed();
-                return new SettlementResult(false, MoneyValue.empty(), pendingState, forceLoadCount(team), List.copyOf(suspended), warsSuspended[0], List.copyOf(restored), List.copyOf(restoredWarNames), List.copyOf(unaffordable));
-            }
-
-            if (!cost.isEmpty()) {
-                account.withdrawMoney(cost);
-                long costCopper = cost.getCoreValue();
-                savedData.recordUpkeepCharged(costCopper);
-                BankLedgerAccess.logTransaction(account, false, cost, Component.translatable("message.lc_claim_economy.ledger.upkeep_charge"));
-            }
-            savedData.setPendingState(teamId, pendingState);
-            savedData.setProtectionLocked(teamId, false);
-            syncState(server, team);
-            return new SettlementResult(true, cost, pendingState, forceLoadCount(team), List.copyOf(suspended), warsSuspended[0], List.copyOf(restored), List.copyOf(restoredWarNames), List.copyOf(unaffordable));
+            return chargeOrFreeze(server, team, savedData, account, ledger);
         } finally {
             SafeguardEnforcementService.setApplying(false);
         }
     }
 
-    private static TeamQueuedChanges applyUserWarEnds(
+    /** The actual money-moving step, once every reinstate/shed decision above has already run. */
+    private static SettlementResult chargeOrFreeze(
             MinecraftServer server,
             Team team,
             LcClaimEconomySavedData savedData,
-            TeamQueuedChanges pendingState
+            IBankAccount account,
+            Ledger ledger
     ) {
         UUID teamId = team.getTeamId();
-        Set<UUID> partners = new HashSet<>();
-        TeamQueuedChanges updated = pendingState;
-        for (UUID targetId : new HashSet<>(pendingState.pendingWarEnds())) {
+        MoneyValue owed = ConflictService.calculateTotalUpkeepCost(server, team, ledger.queuedState);
+
+        if (owed.isEmpty()) {
+            savedData.setPendingState(teamId, ledger.queuedState);
+            savedData.setProtectionLocked(teamId, false);
+            broadcastTeamState(server, team);
+            return finish(team, ledger, true, MoneyValue.empty());
+        }
+
+        if (!account.getMoneyStorage().containsValue(owed)) {
+            // Force-loading a chunk has no protection benefit of its own - it's the cheapest
+            // thing to give up before resorting to a full freeze.
+            QueuedChangeService.removeAllForceLoads(server, team);
+            ledger.queuedState = dropQueuedForceLoadChanges(ledger.queuedState);
+            owed = ConflictService.calculateTotalUpkeepCost(server, team, ledger.queuedState);
+        }
+
+        if (!owed.isEmpty() && !account.getMoneyStorage().containsValue(owed)) {
+            savedData.setPendingState(teamId, ledger.queuedState);
+            savedData.setProtectionLocked(teamId, true);
+            SafeguardEnforcementService.notifyTeam(server, team, "message.lc_claim_economy.upkeep_unpaid_frozen");
+            broadcastTeamState(server, team);
+            savedData.recordUpkeepMissed();
+            return finish(team, ledger, false, MoneyValue.empty());
+        }
+
+        if (!owed.isEmpty()) {
+            account.withdrawMoney(owed);
+            savedData.recordUpkeepCharged(owed.getCoreValue());
+            BankLedgerAccess.logTransaction(account, false, owed, Component.translatable("message.lc_claim_economy.ledger.upkeep_charge"));
+        }
+        savedData.setPendingState(teamId, ledger.queuedState);
+        savedData.setProtectionLocked(teamId, false);
+        broadcastTeamState(server, team);
+        return finish(team, ledger, true, owed);
+    }
+
+    private static SettlementResult finish(Team team, Ledger ledger, boolean paid, MoneyValue charged) {
+        return new SettlementResult(
+                paid,
+                charged,
+                ledger.queuedState,
+                currentForceLoadCount(team),
+                List.copyOf(ledger.shedProtections),
+                ledger.shedAnyWars,
+                List.copyOf(ledger.reinstatedProtections),
+                List.copyOf(ledger.reinstatedWarNames),
+                List.copyOf(ledger.tooExpensiveToReinstate)
+        );
+    }
+
+    private static void resolveUserRequestedWarEnds(
+            MinecraftServer server,
+            Team team,
+            LcClaimEconomySavedData savedData,
+            Ledger ledger
+    ) {
+        UUID teamId = team.getTeamId();
+        Set<UUID> endedWith = new HashSet<>();
+        for (UUID targetId : new HashSet<>(ledger.queuedState.pendingWarEnds())) {
             if (savedData.setWarTarget(teamId, targetId, false)) {
-                partners.add(targetId);
+                endedWith.add(targetId);
                 for (ServerPlayer member : team.getOnlineMembers()) {
-                    dev.voidpulsar.lc_claim_economy.integration.quest.QuestAdvancements.grant(
-                            member, dev.voidpulsar.lc_claim_economy.integration.quest.QuestAdvancements.warEnded());
+                    QuestAdvancements.grant(member, QuestAdvancements.warEnded());
                 }
             }
-            updated = updated.withoutPendingWarEnd(targetId);
+            ledger.queuedState = ledger.queuedState.withoutPendingWarEnd(targetId);
         }
-        refreshWarPartners(server, team, teamId, partners);
-        return updated;
+        notifyWarPartnersChanged(server, team, teamId, endedWith);
     }
 
-    private static TeamQueuedChanges restorePendingProtections(
+    private static void reinstateAffordableProtections(
             MinecraftServer server,
             Team team,
-            TeamQueuedChanges pendingState,
             IBankAccount account,
-            List<TeamProperty<?>> restoredOut,
-            List<TeamProperty<?>> unaffordableOut
+            Ledger ledger
     ) {
-        TeamQueuedChanges updated = pendingState;
-
         for (TeamProperty<?> property : SafeguardDismantleSequence.restoreOrder()) {
-            if (!SafeguardRollbackService.hasPendingApply(team, property, updated)) {
+            if (!SafeguardRollbackService.hasPendingApply(team, property, ledger.queuedState)) {
                 continue;
             }
-            if (!ConflictService.canAffordUpkeepWithPendingProperty(server, team, updated, account, property)) {
-                // Wanted but can't afford — collect for notification.
-                unaffordableOut.add(property);
+            if (!ConflictService.canAffordUpkeepWithPendingProperty(server, team, ledger.queuedState, account, property)) {
+                ledger.tooExpensiveToReinstate.add(property);
                 continue;
             }
-            updated = SafeguardRollbackService.restoreProtection(server, team, property, updated);
-            restoredOut.add(property);
+            ledger.queuedState = SafeguardRollbackService.restoreProtection(server, team, property, ledger.queuedState);
+            ledger.reinstatedProtections.add(property);
         }
 
-        if (ConflictService.canAffordUpkeep(server, team, updated, account)) {
-            QueuedChangeService.applyPendingForceLoadsOnly(server, team, updated);
-            updated = clearForceLoadPending(updated);
+        if (ConflictService.canAffordUpkeep(server, team, ledger.queuedState, account)) {
+            QueuedChangeService.applyPendingForceLoadsOnly(server, team, ledger.queuedState);
+            ledger.queuedState = dropQueuedForceLoadChanges(ledger.queuedState);
         }
-
-        return updated;
     }
 
-    private static TeamQueuedChanges restorePendingWars(
+    private static void reinstateAffordableWars(
             MinecraftServer server,
             Team team,
             LcClaimEconomySavedData savedData,
-            TeamQueuedChanges pendingState,
             IBankAccount account,
-            List<String> restoredWarNamesOut
+            Ledger ledger
     ) {
         UUID teamId = team.getTeamId();
-        List<UUID> restoreOrder = ConflictService.pendingWarRestoreOrder(server, team, pendingState, savedData);
-        TeamQueuedChanges updated = pendingState;
-        Set<UUID> partners = new HashSet<>();
+        List<UUID> priorityOrder = ConflictService.pendingWarRestoreOrder(server, team, ledger.queuedState, savedData);
+        Set<UUID> reinstatedWith = new HashSet<>();
 
-        for (UUID targetId : restoreOrder) {
-            if (!ConflictService.canAffordUpkeepWithOutgoingWar(server, team, updated, account, savedData, targetId)) {
+        for (UUID targetId : priorityOrder) {
+            if (!ConflictService.canAffordUpkeepWithOutgoingWar(server, team, ledger.queuedState, account, savedData, targetId)) {
                 break;
             }
             savedData.setWarTarget(teamId, targetId, true);
-            updated = updated.withoutPendingWarDeclare(targetId);
-            partners.add(targetId);
+            ledger.queuedState = ledger.queuedState.withoutPendingWarDeclare(targetId);
+            reinstatedWith.add(targetId);
             Team target = TeamRegistry.resolve(server, targetId);
-            restoredWarNamesOut.add(target != null ? ConflictService.displayName(target) : targetId.toString());
+            ledger.reinstatedWarNames.add(target != null ? ConflictService.displayName(target) : targetId.toString());
         }
 
-        if (!partners.isEmpty()) {
-            refreshWarPartners(server, team, teamId, partners);
+        if (!reinstatedWith.isEmpty()) {
+            notifyWarPartnersChanged(server, team, teamId, reinstatedWith);
         }
-        return updated;
     }
 
-    private static TeamQueuedChanges dismantleOutgoingWarsUntilAffordable(
+    private static void shedOutgoingWarsUntilAffordable(
             MinecraftServer server,
             Team team,
             LcClaimEconomySavedData savedData,
-            TeamQueuedChanges pendingState,
             IBankAccount account,
-            boolean[] warsSuspendedOut
+            Ledger ledger
     ) {
         UUID teamId = team.getTeamId();
-        TeamQueuedChanges updated = pendingState;
-        List<UUID> dismantleOrder = ConflictService.outgoingWarDismantleOrder(server, team, savedData);
-        Set<UUID> partners = new HashSet<>();
-        boolean dismantledAny = false;
+        List<UUID> sheddingOrder = ConflictService.outgoingWarDismantleOrder(server, team, savedData);
+        Set<UUID> droppedWith = new HashSet<>();
 
-        for (UUID targetId : dismantleOrder) {
-            if (ConflictService.canAffordUpkeep(server, team, updated, account)) {
+        for (UUID targetId : sheddingOrder) {
+            if (ConflictService.canAffordUpkeep(server, team, ledger.queuedState, account)) {
                 break;
             }
-            if (updated.isPendingWarEnd(targetId) || !savedData.isAtWarWith(teamId, targetId)) {
+            if (ledger.queuedState.isPendingWarEnd(targetId) || !savedData.isAtWarWith(teamId, targetId)) {
                 continue;
             }
             savedData.setWarTarget(teamId, targetId, false);
-            updated = updated.withPendingWarDeclare(targetId);
-            partners.add(targetId);
-            dismantledAny = true;
+            ledger.queuedState = ledger.queuedState.withPendingWarDeclare(targetId);
+            droppedWith.add(targetId);
         }
 
-        if (dismantledAny) {
-            refreshWarPartners(server, team, teamId, partners);
-            warsSuspendedOut[0] = true;
+        if (!droppedWith.isEmpty()) {
+            notifyWarPartnersChanged(server, team, teamId, droppedWith);
+            ledger.shedAnyWars = true;
         }
-        return updated;
     }
 
-    private static TeamQueuedChanges dismantleProtectionsUntilAffordable(
+    private static void shedProtectionsUntilAffordable(
             MinecraftServer server,
             Team team,
-            TeamQueuedChanges pendingState,
             IBankAccount account,
-            List<TeamProperty<?>> suspendedOut
+            Ledger ledger
     ) {
-        TeamQueuedChanges updated = pendingState;
-
         for (TeamProperty<?> property : SafeguardDismantleSequence.fullDismantleOrder()) {
             if (!SafeguardRollbackService.isLiveProtectionBillable(team, property)) {
                 continue;
             }
-            long reducedCost = ConflictService.calculateProtectionAndIncomingUpkeepCopper(server, team, updated);
-            if (reducedCost <= 0L || account.getMoneyStorage().containsValue(CurrencyAmounts.fromCopper(reducedCost))) {
+            long remainingCopper = ConflictService.calculateProtectionAndIncomingUpkeepCopper(server, team, ledger.queuedState);
+            boolean nowAffordable = remainingCopper <= 0L
+                    || account.getMoneyStorage().containsValue(CurrencyAmounts.fromCopper(remainingCopper));
+            if (nowAffordable) {
                 break;
             }
-            updated = SafeguardRollbackService.suspendProtection(server, team, property, updated);
-            suspendedOut.add(property);
+            ledger.queuedState = SafeguardRollbackService.suspendProtection(server, team, property, ledger.queuedState);
+            ledger.shedProtections.add(property);
         }
-
-        return updated;
     }
 
-    private static TeamQueuedChanges clearForceLoadPending(TeamQueuedChanges pendingState) {
-        TeamQueuedChanges updated = pendingState;
-        for (String key : pendingState.pendingForceLoads()) {
-            updated = updated.withoutPendingForceLoad(key);
+    private static TeamQueuedChanges dropQueuedForceLoadChanges(TeamQueuedChanges queuedState) {
+        TeamQueuedChanges result = queuedState;
+        for (String key : queuedState.pendingForceLoads()) {
+            result = result.withoutPendingForceLoad(key);
         }
-        for (String key : pendingState.pendingForceUnloads()) {
-            updated = updated.withoutPendingForceUnload(key);
+        for (String key : queuedState.pendingForceUnloads()) {
+            result = result.withoutPendingForceUnload(key);
         }
-        return updated;
+        return result;
     }
 
-    private static int forceLoadCount(Team team) {
+    private static int currentForceLoadCount(Team team) {
         ChunkTeamData chunkData = FTBChunksAPI.api().getManager().getOrCreateData(team);
         return chunkData.getForceLoadedChunks().size();
     }
 
-    private static void refreshWarPartners(MinecraftServer server, Team team, UUID teamId, Set<UUID> partners) {
-        if (partners.isEmpty()) {
+    private static void notifyWarPartnersChanged(MinecraftServer server, Team team, UUID teamId, Set<UUID> partnerIds) {
+        if (partnerIds.isEmpty()) {
             return;
         }
         ConflictSyncCoordinator.syncToTeam(server, teamId);
         ConflictSyncCoordinator.onUpkeepFactorsChanged(server, team);
-        for (UUID partnerId : partners) {
+        for (UUID partnerId : partnerIds) {
             ConflictSyncCoordinator.syncToTeam(server, partnerId);
             Team partner = TeamRegistry.resolve(server, partnerId);
             if (partner != null) {
@@ -288,7 +306,7 @@ public final class BillingSettlementService {
         }
     }
 
-    private static void syncState(MinecraftServer server, Team team) {
+    private static void broadcastTeamState(MinecraftServer server, Team team) {
         QueuedStateBroadcast.syncTeam(server, team);
         ConflictSyncCoordinator.onUpkeepFactorsChanged(server, team);
     }
