@@ -19,10 +19,10 @@ public record PricingRequestPayload() implements CustomPacketPayload {
         return TYPE;
     }
 
-    public static void handleServer(PricingRequestPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            if (context.player() instanceof ServerPlayer player) {
-                ClaimPricingBroadcast.syncToPlayer(player);
+    public static void handleServer(PricingRequestPayload received, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> {
+            if (ctx.player() instanceof ServerPlayer requester) {
+                ClaimPricingBroadcast.syncToPlayer(requester);
             }
         });
     }

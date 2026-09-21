@@ -26,30 +26,30 @@ import java.util.Collection;
 public class PartyRankBroadcastMixin {
     @Inject(method = "promote", at = @At("RETURN"), remap = false)
     private void lcClaimEconomy$syncLcRolesAfterPromote(
-            ServerPlayer player,
-            Collection<GameProfile> profiles,
-            CallbackInfoReturnable<Integer> cir
+            ServerPlayer promoted,
+            Collection<GameProfile> affectedProfiles,
+            CallbackInfoReturnable<Integer> returnValue
     ) {
         syncLinkedLcTeam((Team) (Object) this);
     }
 
     @Inject(method = "demote", at = @At("RETURN"), remap = false)
     private void lcClaimEconomy$syncLcRolesAfterDemote(
-            ServerPlayer player,
-            Collection<GameProfile> profiles,
-            CallbackInfoReturnable<Integer> cir
+            ServerPlayer demoted,
+            Collection<GameProfile> affectedProfiles,
+            CallbackInfoReturnable<Integer> returnValue
     ) {
         syncLinkedLcTeam((Team) (Object) this);
     }
 
-    private static void syncLinkedLcTeam(Team team) {
-        if (!team.isPartyTeam() || !team.isValid()) {
+    private static void syncLinkedLcTeam(Team partyTeam) {
+        if (!partyTeam.isPartyTeam() || !partyTeam.isValid()) {
             return;
         }
 
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server != null) {
-            CurrencyTeamLinkService.ensureLinked(server, team);
+        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
+        if (activeServer != null) {
+            CurrencyTeamLinkService.ensureLinked(activeServer, partyTeam);
         }
     }
 }

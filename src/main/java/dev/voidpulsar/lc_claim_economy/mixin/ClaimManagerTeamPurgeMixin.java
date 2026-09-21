@@ -24,27 +24,27 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(value = ClaimedChunkManagerImpl.class, remap = false)
 public class ClaimManagerTeamPurgeMixin {
     @Inject(method = "deleteTeam", at = @At("HEAD"), remap = false)
-    private void lcClaimEconomy$settleBeforeDelete(Team team, CallbackInfo ci) {
-        if (team == null) {
+    private void lcClaimEconomy$settleBeforeDelete(Team departingTeam, CallbackInfo callback) {
+        if (departingTeam == null) {
             return;
         }
 
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server == null) {
+        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
+        if (activeServer == null) {
             return;
         }
 
         try {
-            if (TeamRegistry.isPartyTeam(team)) {
-                PartyDissolutionSettlement.settle(server, team);
+            if (TeamRegistry.isPartyTeam(departingTeam)) {
+                PartyDissolutionSettlement.settle(activeServer, departingTeam);
             } else {
-                TeamRegistry.dissolveWarLinks(server, team.getId());
+                TeamRegistry.dissolveWarLinks(activeServer, departingTeam.getId());
             }
-        } catch (Throwable error) {
+        } catch (Throwable settlementFailure) {
             LcClaimEconomy.LOGGER.error(
                     "Party disband settlement failed for {} - FTB party deletion will continue",
-                    team.getId(),
-                    error
+                    departingTeam.getId(),
+                    settlementFailure
             );
         }
     }

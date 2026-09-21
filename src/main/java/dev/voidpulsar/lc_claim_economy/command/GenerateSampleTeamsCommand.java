@@ -30,96 +30,96 @@ public final class GenerateSampleTeamsCommand {
     }
 
     public static void register(RegisterCommandsEvent event) {
-        CommandDispatcher<CommandSourceStack> dispatcher = event.getDispatcher();
-        dispatcher.register(Commands.literal(LcClaimEconomy.COMMAND_ROOT)
+        CommandDispatcher<CommandSourceStack> commandTree = event.getDispatcher();
+        commandTree.register(Commands.literal(LcClaimEconomy.COMMAND_ROOT)
                 .then(Commands.literal("seed_test_teams")
-                        .requires(source -> source.hasPermission(2))
-                        .executes(context -> seed(context, SampleTeamGenerationService.DEFAULT_COUNT))
+                        .requires(caller -> caller.hasPermission(2))
+                        .executes(invocation -> seed(invocation, SampleTeamGenerationService.DEFAULT_COUNT))
                         .then(Commands.argument("count", IntegerArgumentType.integer(1, 100))
-                                .executes(context -> seed(context, IntegerArgumentType.getInteger(context, "count")))))
+                                .executes(invocation -> seed(invocation, IntegerArgumentType.getInteger(invocation, "count")))))
                 .then(Commands.literal("clear_test_teams")
-                        .requires(source -> source.hasPermission(2))
-                        .executes(context -> clear(context, 0))
+                        .requires(caller -> caller.hasPermission(2))
+                        .executes(invocation -> clear(invocation, 0))
                         .then(Commands.argument("count", IntegerArgumentType.integer(1, 100))
-                                .executes(context -> clear(context, IntegerArgumentType.getInteger(context, "count")))))
+                                .executes(invocation -> clear(invocation, IntegerArgumentType.getInteger(invocation, "count")))))
                 .then(Commands.literal("count_test_teams")
-                        .requires(source -> source.hasPermission(2))
+                        .requires(caller -> caller.hasPermission(2))
                         .executes(GenerateSampleTeamsCommand::count)));
     }
 
-    private static int count(CommandContext<CommandSourceStack> context) {
-        CommandSourceStack source = context.getSource();
+    private static int count(CommandContext<CommandSourceStack> invocation) {
+        CommandSourceStack issuer = invocation.getSource();
         if (!testCommandsUnlocked()) {
-            source.sendFailure(Component.translatable("message.lc_claim_economy.test_teams.debug_disabled"));
+            issuer.sendFailure(Component.translatable("message.lc_claim_economy.test_teams.debug_disabled"));
             return 0;
         }
         if (!FTBTeamsAPI.api().isManagerLoaded()) {
-            source.sendFailure(Component.translatable("message.lc_claim_economy.count_test_teams.unavailable"));
+            issuer.sendFailure(Component.translatable("message.lc_claim_economy.count_test_teams.unavailable"));
             return 0;
         }
 
-        SampleTeamGenerationService.CountResult result = SampleTeamGenerationService.count(source.getServer());
-        source.sendSuccess(
+        SampleTeamGenerationService.CountResult tally = SampleTeamGenerationService.count(issuer.getServer());
+        issuer.sendSuccess(
                 () -> Component.translatable(
                         "message.lc_claim_economy.count_test_teams.done",
-                        result.total(),
-                        result.withClaims(),
+                        tally.total(),
+                        tally.withClaims(),
                         SampleTeamGenerationService.DEFAULT_COUNT,
-                        result.inDefaultRange()
+                        tally.inDefaultRange()
                 ),
                 false
         );
-        return result.total();
+        return tally.total();
     }
 
-    private static int seed(CommandContext<CommandSourceStack> context, int count) throws CommandSyntaxException {
-        CommandSourceStack source = context.getSource();
+    private static int seed(CommandContext<CommandSourceStack> invocation, int amount) throws CommandSyntaxException {
+        CommandSourceStack issuer = invocation.getSource();
         if (!testCommandsUnlocked()) {
-            source.sendFailure(Component.translatable("message.lc_claim_economy.test_teams.debug_disabled"));
+            issuer.sendFailure(Component.translatable("message.lc_claim_economy.test_teams.debug_disabled"));
             return 0;
         }
         if (!FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
-            source.sendFailure(Component.translatable("message.lc_claim_economy.seed_test_teams.unavailable"));
+            issuer.sendFailure(Component.translatable("message.lc_claim_economy.seed_test_teams.unavailable"));
             return 0;
         }
 
-        SampleTeamGenerationService.SeedResult result = SampleTeamGenerationService.seed(source.getServer(), source, count);
-        source.sendSuccess(
+        SampleTeamGenerationService.SeedResult outcome = SampleTeamGenerationService.seed(issuer.getServer(), issuer, amount);
+        issuer.sendSuccess(
                 () -> Component.translatable(
                         "message.lc_claim_economy.seed_test_teams.done",
-                        result.created(),
-                        result.skipped(),
-                        result.failed(),
-                        result.incomingWars(),
-                        result.outgoingWars(),
-                        result.availableTargets()
+                        outcome.created(),
+                        outcome.skipped(),
+                        outcome.failed(),
+                        outcome.incomingWars(),
+                        outcome.outgoingWars(),
+                        outcome.availableTargets()
                 ),
                 true
         );
-        return result.created() > 0 ? result.created() : (result.skipped() > 0 ? 1 : 0);
+        return outcome.created() > 0 ? outcome.created() : (outcome.skipped() > 0 ? 1 : 0);
     }
 
-    private static int clear(CommandContext<CommandSourceStack> context, int count) {
-        CommandSourceStack source = context.getSource();
+    private static int clear(CommandContext<CommandSourceStack> invocation, int amount) {
+        CommandSourceStack issuer = invocation.getSource();
         if (!testCommandsUnlocked()) {
-            source.sendFailure(Component.translatable("message.lc_claim_economy.test_teams.debug_disabled"));
+            issuer.sendFailure(Component.translatable("message.lc_claim_economy.test_teams.debug_disabled"));
             return 0;
         }
         if (!FTBTeamsAPI.api().isManagerLoaded()) {
-            source.sendFailure(Component.translatable("message.lc_claim_economy.clear_test_teams.unavailable"));
+            issuer.sendFailure(Component.translatable("message.lc_claim_economy.clear_test_teams.unavailable"));
             return 0;
         }
 
-        SampleTeamGenerationService.ClearResult result = SampleTeamGenerationService.clear(source.getServer(), source, count);
-        source.sendSuccess(
+        SampleTeamGenerationService.ClearResult outcome = SampleTeamGenerationService.clear(issuer.getServer(), issuer, amount);
+        issuer.sendSuccess(
                 () -> Component.translatable(
                         "message.lc_claim_economy.clear_test_teams.done",
-                        result.deleted(),
-                        result.skipped(),
-                        result.failed()
+                        outcome.deleted(),
+                        outcome.skipped(),
+                        outcome.failed()
                 ),
                 true
         );
-        return result.deleted() > 0 ? result.deleted() : (result.failed() == 0 && result.skipped() == 0 ? 0 : 1);
+        return outcome.deleted() > 0 ? outcome.deleted() : (outcome.failed() == 0 && outcome.skipped() == 0 ? 0 : 1);
     }
 }

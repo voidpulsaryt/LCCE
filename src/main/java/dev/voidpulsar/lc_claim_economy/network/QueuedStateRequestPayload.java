@@ -17,10 +17,10 @@ public record QueuedStateRequestPayload() implements CustomPacketPayload {
         return TYPE;
     }
 
-    public static void handleServer(QueuedStateRequestPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            if (context.player() instanceof net.minecraft.server.level.ServerPlayer player) {
-                QueuedStateBroadcast.syncToPlayer(player);
+    public static void handleServer(QueuedStateRequestPayload received, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> {
+            if (ctx.player() instanceof net.minecraft.server.level.ServerPlayer requester) {
+                QueuedStateBroadcast.syncToPlayer(requester);
             }
         });
     }

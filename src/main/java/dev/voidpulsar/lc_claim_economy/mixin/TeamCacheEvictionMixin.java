@@ -26,47 +26,47 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(value = TeamDataCache.class, remap = false)
 public class TeamCacheEvictionMixin {
     @Inject(method = "removeTeam", at = @At("HEAD"), cancellable = true, remap = false)
-    private void lcClaimEconomy$guardManagedTeamRemoval(long id, CallbackInfo ci) {
+    private void lcClaimEconomy$guardManagedTeamRemoval(long lcTeamId, CallbackInfo callback) {
         if (CurrencyTeamPurgeGuard.isAllowed()) {
             return;
         }
 
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server == null) {
+        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
+        if (activeServer == null) {
             return;
         }
 
-        if (!TeamBankLinkRegistry.shouldBlockLcTeamRemoval(server, id)) {
+        if (!TeamBankLinkRegistry.shouldBlockLcTeamRemoval(activeServer, lcTeamId)) {
             return;
         }
 
-        ITeam team = TeamAPI.getApi().GetTeam(false, id);
-        if (team != null) {
-            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                if (team.isOwner(player)) {
-                    player.displayClientMessage(Component.translatable("message.lc_claim_economy.team_disband_denied"), true);
+        ITeam blockedTeam = TeamAPI.getApi().GetTeam(false, lcTeamId);
+        if (blockedTeam != null) {
+            for (ServerPlayer onlinePlayer : activeServer.getPlayerList().getPlayers()) {
+                if (blockedTeam.isOwner(onlinePlayer)) {
+                    onlinePlayer.displayClientMessage(Component.translatable("message.lc_claim_economy.team_disband_denied"), true);
                     break;
                 }
             }
         }
 
-        LcClaimEconomy.LOGGER.debug("Blocked removal of LC team {} while FTB party link is active", id);
-        ci.cancel();
+        LcClaimEconomy.LOGGER.debug("Blocked removal of LC team {} while FTB party link is active", lcTeamId);
+        callback.cancel();
     }
 
     @Inject(method = "removeTeam", at = @At("TAIL"), remap = false)
-    private void lcClaimEconomy$cleanupLinkAfterRemoval(long id, CallbackInfo ci) {
+    private void lcClaimEconomy$cleanupLinkAfterRemoval(long lcTeamId, CallbackInfo callback) {
         if (CurrencyTeamPurgeGuard.isAllowed()) {
             return;
         }
 
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server == null) {
+        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
+        if (activeServer == null) {
             return;
         }
 
-        if (TeamBankLinkRegistry.findByLcTeamId(server, id) != null) {
-            TeamBankLinkRegistry.unlinkLcTeam(server, id);
+        if (TeamBankLinkRegistry.findByLcTeamId(activeServer, lcTeamId) != null) {
+            TeamBankLinkRegistry.unlinkLcTeam(activeServer, lcTeamId);
         }
     }
 }

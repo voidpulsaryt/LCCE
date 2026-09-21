@@ -25,14 +25,14 @@ public class ChunkChangeAckClientMixin {
             remap = false
     )
     private static void lcClaimEconomy$trackChunkUpdate(
-            ChunkChangeResponsePacket packet,
-            dev.architectury.networking.NetworkManager.PacketContext context,
-            CallbackInfo ci
+            ChunkChangeResponsePacket ackPacket,
+            dev.architectury.networking.NetworkManager.PacketContext senderContext,
+            CallbackInfo callback
     ) {
         ClientPricingCache.noteChunkUpdate(
-                packet.totalChunks(),
-                packet.changedChunks(),
-                packet.problems()
+                ackPacket.totalChunks(),
+                ackPacket.changedChunks(),
+                ackPacket.problems()
         );
     }
 }

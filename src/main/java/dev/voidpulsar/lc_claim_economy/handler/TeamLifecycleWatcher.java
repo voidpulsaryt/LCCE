@@ -59,9 +59,9 @@ public class TeamLifecycleWatcher {
     }
 
     private void onTeamDeleted(TeamEvent event) {
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server != null) {
-            TeamPurgeService.purge(server, event.getTeam());
+        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
+        if (activeServer != null) {
+            TeamPurgeService.purge(activeServer, event.getTeam());
         }
     }
 
@@ -70,16 +70,16 @@ public class TeamLifecycleWatcher {
     }
 
     private void onPlayerLeftParty(PlayerLeftPartyTeamEvent event) {
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        boolean teamDissolved = event.getTeamDeleted();
-        if (server != null && teamDissolved) {
-            PartyDissolutionSettlement.settle(server, event.getTeam());
+        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
+        boolean wasDissolved = event.getTeamDeleted();
+        if (activeServer != null && wasDissolved) {
+            PartyDissolutionSettlement.settle(activeServer, event.getTeam());
             if (event.getPlayer() != null) {
                 ConflictSyncCoordinator.syncToPlayer(event.getPlayer());
             }
         }
 
-        if (!teamDissolved) {
+        if (!wasDissolved) {
             guaranteeAccountExists(event.getTeam());
         }
         // The player's new solo/fallback team also needs an account regardless
@@ -97,31 +97,31 @@ public class TeamLifecycleWatcher {
     }
 
     private void onPlayerLoggedInAfterTeam(PlayerLoggedInAfterTeamEvent event) {
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server != null) {
-            TeamBankLinkRegistry.reconcile(server);
+        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
+        if (activeServer != null) {
+            TeamBankLinkRegistry.reconcile(activeServer);
         }
         guaranteeAccountExists(event.getTeam());
 
-        ServerPlayer loggedInPlayer = event.getPlayer();
-        if (loggedInPlayer == null) {
+        ServerPlayer arrivingPlayer = event.getPlayer();
+        if (arrivingPlayer == null) {
             return;
         }
-        ClaimPricingBroadcast.syncToPlayer(loggedInPlayer);
-        QueuedStateBroadcast.syncToPlayer(loggedInPlayer);
-        dev.voidpulsar.lc_claim_economy.service.LandChunkService.syncToPlayer(loggedInPlayer);
-        ConflictSyncCoordinator.syncToPlayer(loggedInPlayer);
+        ClaimPricingBroadcast.syncToPlayer(arrivingPlayer);
+        QueuedStateBroadcast.syncToPlayer(arrivingPlayer);
+        dev.voidpulsar.lc_claim_economy.service.LandChunkService.syncToPlayer(arrivingPlayer);
+        ConflictSyncCoordinator.syncToPlayer(arrivingPlayer);
         // Retry once on the next server tick: right after a full restart, the
         // client's play-phase packet handler isn't guaranteed to be registered
         // yet when this login event fires, so the first sync can be dropped.
-        server.execute(() -> dev.voidpulsar.lc_claim_economy.service.LandChunkService.syncToPlayer(loggedInPlayer));
+        activeServer.execute(() -> dev.voidpulsar.lc_claim_economy.service.LandChunkService.syncToPlayer(arrivingPlayer));
     }
 
-    private void guaranteeAccountExists(Team team) {
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server == null || team == null || !team.isValid()) {
+    private void guaranteeAccountExists(Team candidateTeam) {
+        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
+        if (activeServer == null || candidateTeam == null || !candidateTeam.isValid()) {
             return;
         }
-        BankLedgerAccess.ensurePartyAccountExists(server, team);
+        BankLedgerAccess.ensurePartyAccountExists(activeServer, candidateTeam);
     }
 }

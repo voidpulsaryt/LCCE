@@ -12,84 +12,84 @@ import java.util.List;
  * war button just render whatever the last broadcast said.
  */
 public final class ClientConflictState {
-    private static boolean warModuleEnabled = true;
-    private static boolean canManageWar;
-    private static boolean warDeclarationWindowOpen = true;
-    private static String warDeclarationWindowDescription = "";
-    private static long baseUpkeepCopper;
-    private static long incomingWarCopper;
-    private static long outgoingWarCopper;
-    private static double warCostMultiplier = 1.2D;
-    private static List<ConflictTeamEntry> incoming = List.of();
-    private static List<ConflictTeamEntry> outgoing = List.of();
-    private static List<ConflictTeamEntry> availableTargets = List.of();
+    private static boolean moduleEnabledFlag = true;
+    private static boolean manageWarFlag;
+    private static boolean declareWindowOpenFlag = true;
+    private static String declareWindowDescriptionText = "";
+    private static long baseUpkeepCopperAmount;
+    private static long incomingWarCopperAmount;
+    private static long outgoingWarCopperAmount;
+    private static double warCostMultiplierValue = 1.2D;
+    private static List<ConflictTeamEntry> incomingEntries = List.of();
+    private static List<ConflictTeamEntry> outgoingEntries = List.of();
+    private static List<ConflictTeamEntry> availableTargetEntries = List.of();
 
     private ClientConflictState() {
     }
 
     /** Set from the pricing broadcast rather than the conflict broadcast - the war feature toggle lives with the rest of the module's on/off switches. */
-    public static void setWarModuleEnabled(boolean enabled) {
-        warModuleEnabled = enabled;
+    public static void setWarModuleEnabled(boolean isEnabled) {
+        moduleEnabledFlag = isEnabled;
     }
 
     public static boolean warModuleEnabled() {
-        return warModuleEnabled;
+        return moduleEnabledFlag;
     }
 
-    public static void update(ConflictStateBroadcastPayload payload) {
-        canManageWar = payload.canManageWar();
-        warDeclarationWindowOpen = payload.warDeclarationWindowOpen();
-        warDeclarationWindowDescription = payload.warDeclarationWindowDescription();
-        baseUpkeepCopper = payload.baseUpkeepCopper();
-        incomingWarCopper = payload.incomingWarCopper();
-        outgoingWarCopper = payload.outgoingWarCopper();
-        warCostMultiplier = payload.warCostMultiplier();
-        incoming = List.copyOf(payload.incoming());
-        outgoing = List.copyOf(payload.outgoing());
-        availableTargets = List.copyOf(payload.availableTargets());
+    public static void update(ConflictStateBroadcastPayload snapshot) {
+        manageWarFlag = snapshot.canManageWar();
+        declareWindowOpenFlag = snapshot.warDeclarationWindowOpen();
+        declareWindowDescriptionText = snapshot.warDeclarationWindowDescription();
+        baseUpkeepCopperAmount = snapshot.baseUpkeepCopper();
+        incomingWarCopperAmount = snapshot.incomingWarCopper();
+        outgoingWarCopperAmount = snapshot.outgoingWarCopper();
+        warCostMultiplierValue = snapshot.warCostMultiplier();
+        incomingEntries = List.copyOf(snapshot.incoming());
+        outgoingEntries = List.copyOf(snapshot.outgoing());
+        availableTargetEntries = List.copyOf(snapshot.availableTargets());
     }
 
     public static boolean canManageWar() {
-        return canManageWar;
+        return manageWarFlag;
     }
 
     public static boolean warDeclarationWindowOpen() {
-        return warDeclarationWindowOpen;
+        return declareWindowOpenFlag;
     }
 
     public static String warDeclarationWindowDescription() {
-        return warDeclarationWindowDescription;
+        return declareWindowDescriptionText;
     }
 
     public static long baseUpkeepCopper() {
-        return baseUpkeepCopper;
+        return baseUpkeepCopperAmount;
     }
 
     public static long incomingWarCopper() {
-        return incomingWarCopper;
+        return incomingWarCopperAmount;
     }
 
     public static long outgoingWarCopper() {
-        return outgoingWarCopper;
+        return outgoingWarCopperAmount;
     }
 
     public static long totalWarCopper() {
-        return incomingWarCopper + outgoingWarCopper;
+        return incomingWarCopperAmount + outgoingWarCopperAmount;
     }
 
     public static double warCostMultiplier() {
-        return warCostMultiplier;
+        return warCostMultiplierValue;
     }
 
     public static List<ConflictTeamEntry> incoming() {
-        return incoming;
+        return incomingEntries;
     }
 
     public static List<ConflictTeamEntry> outgoing() {
-        return outgoing;
+        return outgoingEntries;
     }
 
     public static List<ConflictTeamEntry> availableTargets() {
-        return availableTargets;
+        return availableTargetEntries;
     }
 }

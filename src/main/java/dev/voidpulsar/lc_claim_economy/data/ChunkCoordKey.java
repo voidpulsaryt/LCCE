@@ -20,36 +20,36 @@ public final class ChunkCoordKey {
     private ChunkCoordKey() {
     }
 
-    public static String encode(ResourceKey<Level> dimension, XZ pos) {
-        return encode(dimension.location(), pos.x(), pos.z());
+    public static String encode(ResourceKey<Level> dimensionKey, XZ chunkPos) {
+        return encode(dimensionKey.location(), chunkPos.x(), chunkPos.z());
     }
 
-    public static String encode(ChunkDimPos pos) {
-        return encode(pos.dimension().location(), pos.x(), pos.z());
+    public static String encode(ChunkDimPos chunkDimPos) {
+        return encode(chunkDimPos.dimension().location(), chunkDimPos.x(), chunkDimPos.z());
     }
 
-    public static String encode(ResourceLocation dimension, int x, int z) {
-        return dimension + SEPARATOR + x + SEPARATOR + z;
+    public static String encode(ResourceLocation dimensionId, int chunkX, int chunkZ) {
+        return dimensionId + SEPARATOR + chunkX + SEPARATOR + chunkZ;
     }
 
-    public static ResourceLocation dimension(String key) {
-        return ResourceLocation.parse(key.substring(0, key.indexOf(SEPARATOR)));
+    public static ResourceLocation dimension(String encodedKey) {
+        return ResourceLocation.parse(encodedKey.substring(0, encodedKey.indexOf(SEPARATOR)));
     }
 
-    public static int x(String key) {
-        int dimEnd = key.indexOf(SEPARATOR);
-        int xEnd = key.indexOf(SEPARATOR, dimEnd + 1);
-        return Integer.parseInt(key.substring(dimEnd + 1, xEnd));
+    public static int x(String encodedKey) {
+        int dimEnd = encodedKey.indexOf(SEPARATOR);
+        int xEnd = encodedKey.indexOf(SEPARATOR, dimEnd + 1);
+        return Integer.parseInt(encodedKey.substring(dimEnd + 1, xEnd));
     }
 
-    public static int z(String key) {
-        int xEnd = key.indexOf(SEPARATOR, key.indexOf(SEPARATOR) + 1);
-        return Integer.parseInt(key.substring(xEnd + 1));
+    public static int z(String encodedKey) {
+        int xEnd = encodedKey.indexOf(SEPARATOR, encodedKey.indexOf(SEPARATOR) + 1);
+        return Integer.parseInt(encodedKey.substring(xEnd + 1));
     }
 
-    public static ChunkDimPos toChunkDimPos(String key) {
-        ResourceLocation dimensionId = dimension(key);
-        ResourceKey<Level> dimensionKey = ResourceKey.create(Registries.DIMENSION, dimensionId);
-        return new ChunkDimPos(dimensionKey, x(key), z(key));
+    public static ChunkDimPos toChunkDimPos(String encodedKey) {
+        ResourceLocation resolvedDimensionId = dimension(encodedKey);
+        ResourceKey<Level> resolvedDimensionKey = ResourceKey.create(Registries.DIMENSION, resolvedDimensionId);
+        return new ChunkDimPos(resolvedDimensionKey, x(encodedKey), z(encodedKey));
     }
 }

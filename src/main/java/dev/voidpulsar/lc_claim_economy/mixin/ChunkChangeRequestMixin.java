@@ -34,23 +34,23 @@ public class ChunkChangeRequestMixin {
             remap = false
     )
     private static void lcClaimEconomy$beginBulkOperation(
-            RequestChunkChangePacket message,
-            dev.architectury.networking.NetworkManager.PacketContext context,
-            CallbackInfo ci
+            RequestChunkChangePacket incomingRequest,
+            dev.architectury.networking.NetworkManager.PacketContext senderContext,
+            CallbackInfo callback
     ) {
-        ServerPlayer player = (ServerPlayer) context.getPlayer();
-        CommandSourceStack source = player.createCommandSourceStack();
-        ChunkTeamData chunkTeamData = MassClaimHandler.resolveTeamData(message, player);
-        if (chunkTeamData == null) {
+        ServerPlayer requester = (ServerPlayer) senderContext.getPlayer();
+        CommandSourceStack requesterSource = requester.createCommandSourceStack();
+        ChunkTeamData ownerTeam = MassClaimHandler.resolveTeamData(incomingRequest, requester);
+        if (ownerTeam == null) {
             return;
         }
 
-        if (MassClaimHandler.rejectIfInsufficientFunds(message, player, source, chunkTeamData)) {
-            ci.cancel();
+        if (MassClaimHandler.rejectIfInsufficientFunds(incomingRequest, requester, requesterSource, ownerTeam)) {
+            callback.cancel();
             return;
         }
 
-        ClaimTransferContext.beginExecution(message.action(), message.chunks().size(), player.getUUID());
+        ClaimTransferContext.beginExecution(incomingRequest.action(), incomingRequest.chunks().size(), requester.getUUID());
     }
 
     @Inject(
@@ -59,12 +59,12 @@ public class ChunkChangeRequestMixin {
             remap = false
     )
     private static void lcClaimEconomy$flushBulkMessages(
-            RequestChunkChangePacket message,
-            dev.architectury.networking.NetworkManager.PacketContext context,
-            CallbackInfo ci
+            RequestChunkChangePacket incomingRequest,
+            dev.architectury.networking.NetworkManager.PacketContext senderContext,
+            CallbackInfo callback
     ) {
-        if (context.getPlayer() instanceof ServerPlayer player) {
-            ClaimTransferContext.flush(player);
+        if (senderContext.getPlayer() instanceof ServerPlayer requester) {
+            ClaimTransferContext.flush(requester);
         }
     }
 }

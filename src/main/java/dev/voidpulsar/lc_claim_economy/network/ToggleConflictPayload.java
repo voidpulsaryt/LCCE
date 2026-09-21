@@ -17,8 +17,8 @@ public record ToggleConflictPayload(UUID targetTeamId) implements CustomPacketPa
     public static final Type<ToggleConflictPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "toggle_war"));
     public static final StreamCodec<FriendlyByteBuf, ToggleConflictPayload> STREAM_CODEC = StreamCodec.of(
-            (buffer, payload) -> buffer.writeUUID(payload.targetTeamId),
-            buffer -> new ToggleConflictPayload(buffer.readUUID())
+            (sink, request) -> sink.writeUUID(request.targetTeamId),
+            source -> new ToggleConflictPayload(source.readUUID())
     );
 
     @Override
@@ -26,17 +26,17 @@ public record ToggleConflictPayload(UUID targetTeamId) implements CustomPacketPa
         return TYPE;
     }
 
-    public static void handleServer(ToggleConflictPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            if (!(context.player() instanceof ServerPlayer player)) {
+    public static void handleServer(ToggleConflictPayload request, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> {
+            if (!(ctx.player() instanceof ServerPlayer requester)) {
                 return;
             }
-            var message = ConflictService.toggleWar(player.server, player, payload.targetTeamId());
-            if (message != null) {
-                player.displayClientMessage(message, false);
+            var resultMessage = ConflictService.toggleWar(requester.server, requester, request.targetTeamId());
+            if (resultMessage != null) {
+                requester.displayClientMessage(resultMessage, false);
             }
-            ConflictSyncCoordinator.syncToPlayer(player);
-            ConflictSyncCoordinator.syncToTeam(player.server, payload.targetTeamId());
+            ConflictSyncCoordinator.syncToPlayer(requester);
+            ConflictSyncCoordinator.syncToTeam(requester.server, request.targetTeamId());
         });
     }
 }

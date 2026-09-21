@@ -12,30 +12,30 @@ public final class ComplimentaryChunkAllotment {
     public static int allowance() {
         try {
             return LcClaimEconomyConfig.SERVER.freeChunks.get();
-        } catch (Throwable error) {
-            LcClaimEconomy.LOGGER.debug("freeChunks config unavailable, defaulting to 0", error);
+        } catch (Throwable configFailure) {
+            LcClaimEconomy.LOGGER.debug("freeChunks config unavailable, defaulting to 0", configFailure);
             return 0;
         }
     }
 
-    public static int billableChunkCount(int claimedChunks) {
-        return Math.max(0, claimedChunks - allowance());
+    public static int billableChunkCount(int heldChunkCount) {
+        return Math.max(0, heldChunkCount - allowance());
     }
 
-    public static boolean isClaimFree(int currentClaimedChunks) {
-        return currentClaimedChunks < allowance();
+    public static boolean isClaimFree(int heldChunkCount) {
+        return heldChunkCount < allowance();
     }
 
-    public static boolean shouldRefundOnUnclaim(int claimedChunksBeforeUnclaim) {
-        return claimedChunksBeforeUnclaim > allowance();
+    public static boolean shouldRefundOnUnclaim(int heldChunkCountBeforeUnclaim) {
+        return heldChunkCountBeforeUnclaim > allowance();
     }
 
-    /** Of {@code newClaims} chunks being claimed at once, how many fall outside whatever's left of the free allowance. */
-    public static int countPaidClaimsInBatch(int currentClaimedChunks, int newClaims) {
-        if (newClaims <= 0) {
+    /** Of {@code batchSize} chunks being claimed at once, how many fall outside whatever's left of the free allowance. */
+    public static int countPaidClaimsInBatch(int heldChunkCount, int batchSize) {
+        if (batchSize <= 0) {
             return 0;
         }
-        int stillFree = Math.max(0, allowance() - currentClaimedChunks);
-        return Math.max(0, newClaims - stillFree);
+        int remainingFreeSlots = Math.max(0, allowance() - heldChunkCount);
+        return Math.max(0, batchSize - remainingFreeSlots);
     }
 }

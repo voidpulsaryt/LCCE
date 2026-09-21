@@ -39,41 +39,41 @@ public record PricingBroadcastPayload(
 ) implements CustomPacketPayload {
     public static final Type<PricingBroadcastPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "sync_claim_prices"));
     public static final StreamCodec<FriendlyByteBuf, PricingBroadcastPayload> STREAM_CODEC = StreamCodec.of(
-            (buffer, payload) -> {
-                buffer.writeLong(payload.claimPrice);
-                buffer.writeLong(payload.forceLoadUpkeepPrice);
-                buffer.writeVarInt(payload.upkeepPeriodMinutes);
-                buffer.writeVarInt(payload.freeChunks);
-                buffer.writeVarInt(payload.claimedChunks);
-                buffer.writeBoolean(payload.balanceSynced);
-                buffer.writeBoolean(payload.balanceEmpty);
-                buffer.writeUtf(payload.balanceText);
-                buffer.writeLong(payload.mobGriefProtectionPrice);
-                buffer.writeLong(payload.explosionProtectionPrice);
-                buffer.writeLong(payload.pvpDisablePrice);
-                buffer.writeLong(payload.blockInteractProtectionPrice);
-                buffer.writeLong(payload.blockEditProtectionPrice);
-                buffer.writeLong(payload.entityInteractProtectionPrice);
-                buffer.writeVarInt(payload.landChunkGroupSize());
-                buffer.writeBoolean(payload.warEnabled());
+            (sink, snapshot) -> {
+                sink.writeLong(snapshot.claimPrice);
+                sink.writeLong(snapshot.forceLoadUpkeepPrice);
+                sink.writeVarInt(snapshot.upkeepPeriodMinutes);
+                sink.writeVarInt(snapshot.freeChunks);
+                sink.writeVarInt(snapshot.claimedChunks);
+                sink.writeBoolean(snapshot.balanceSynced);
+                sink.writeBoolean(snapshot.balanceEmpty);
+                sink.writeUtf(snapshot.balanceText);
+                sink.writeLong(snapshot.mobGriefProtectionPrice);
+                sink.writeLong(snapshot.explosionProtectionPrice);
+                sink.writeLong(snapshot.pvpDisablePrice);
+                sink.writeLong(snapshot.blockInteractProtectionPrice);
+                sink.writeLong(snapshot.blockEditProtectionPrice);
+                sink.writeLong(snapshot.entityInteractProtectionPrice);
+                sink.writeVarInt(snapshot.landChunkGroupSize());
+                sink.writeBoolean(snapshot.warEnabled());
             },
-            buffer -> new PricingBroadcastPayload(
-                    buffer.readLong(),
-                    buffer.readLong(),
-                    buffer.readVarInt(),
-                    buffer.readVarInt(),
-                    buffer.readVarInt(),
-                    buffer.readBoolean(),
-                    buffer.readBoolean(),
-                    buffer.readUtf(),
-                    buffer.readLong(),
-                    buffer.readLong(),
-                    buffer.readLong(),
-                    buffer.readLong(),
-                    buffer.readLong(),
-                    buffer.readLong(),
-                    buffer.readVarInt(),
-                    buffer.readBoolean()
+            source -> new PricingBroadcastPayload(
+                    source.readLong(),
+                    source.readLong(),
+                    source.readVarInt(),
+                    source.readVarInt(),
+                    source.readVarInt(),
+                    source.readBoolean(),
+                    source.readBoolean(),
+                    source.readUtf(),
+                    source.readLong(),
+                    source.readLong(),
+                    source.readLong(),
+                    source.readLong(),
+                    source.readLong(),
+                    source.readLong(),
+                    source.readVarInt(),
+                    source.readBoolean()
             )
     );
 
@@ -82,30 +82,29 @@ public record PricingBroadcastPayload(
         return TYPE;
     }
 
-    public static void handleClient(PricingBroadcastPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> {
+    public static void handleClient(PricingBroadcastPayload snapshot, IPayloadContext ctx) {
+        ctx.enqueueWork(() -> {
             ClientPricingCache.update(
-                    payload.claimPrice(),
-                    payload.forceLoadUpkeepPrice(),
-                    payload.upkeepPeriodMinutes(),
-                    payload.freeChunks(),
-                    payload.claimedChunks(),
-                    payload.balanceSynced(),
-                    payload.balanceEmpty(),
-                    payload.balanceText(),
-                    payload.mobGriefProtectionPrice(),
-                    payload.explosionProtectionPrice(),
-                    payload.pvpDisablePrice(),
-                    payload.blockInteractProtectionPrice(),
-                    payload.blockEditProtectionPrice(),
-                    payload.entityInteractProtectionPrice(),
-                    payload.landChunkGroupSize()
+                    snapshot.claimPrice(),
+                    snapshot.forceLoadUpkeepPrice(),
+                    snapshot.upkeepPeriodMinutes(),
+                    snapshot.freeChunks(),
+                    snapshot.claimedChunks(),
+                    snapshot.balanceSynced(),
+                    snapshot.balanceEmpty(),
+                    snapshot.balanceText(),
+                    snapshot.mobGriefProtectionPrice(),
+                    snapshot.explosionProtectionPrice(),
+                    snapshot.pvpDisablePrice(),
+                    snapshot.blockInteractProtectionPrice(),
+                    snapshot.blockEditProtectionPrice(),
+                    snapshot.entityInteractProtectionPrice(),
+                    snapshot.landChunkGroupSize()
             );
-            ClientConflictState.setWarModuleEnabled(payload.warEnabled());
-            // ftblibrary/ftbteams client screens - only touch these classes when
-            // that backend is actually installed (ftblibrary is optional; an
-            // OP&C-only client may not have it, and merely referencing these
-            // types would throw NoClassDefFoundError).
+            ClientConflictState.setWarModuleEnabled(snapshot.warEnabled());
+            // Screens from ftblibrary/ftbteams are only touched when that optional
+            // backend is present - an OP&C-only client may not ship it, and even
+            // referencing the types otherwise would throw NoClassDefFoundError.
             if (ModCompat.isFtbAvailable()) {
                 QueuedStateUiRefresh.refreshOpenScreens();
                 TeamPanelUiRefresh.refreshMyTeamScreenIfOpen();

@@ -36,44 +36,44 @@ public class LevyCollectorPlacementHandler {
         if (!FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
             return;
         }
-        if (!(event.getLevel() instanceof ServerLevel serverLevel)) {
+        if (!(event.getLevel() instanceof ServerLevel worldLevel)) {
             return;
         }
 
-        ClaimedChunk targetChunk = FTBChunksAPI.api().getManager().getChunk(
-                new ChunkDimPos(serverLevel.dimension(), new ChunkPos(event.getPos()))
+        ClaimedChunk claimedChunk = FTBChunksAPI.api().getManager().getChunk(
+                new ChunkDimPos(worldLevel.dimension(), new ChunkPos(event.getPos()))
         );
-        if (targetChunk == null) {
+        if (claimedChunk == null) {
             // Unclaimed ground - nothing here for the claim economy to gate.
             return;
         }
 
-        Team owningTeam = targetChunk.getTeamData().getTeam();
-        if (owningTeam == null || !owningTeam.isValid()) {
+        Team holdingTeam = claimedChunk.getTeamData().getTeam();
+        if (holdingTeam == null || !holdingTeam.isValid()) {
             event.setCanceled(true);
             return;
         }
-        if (!(event.getEntity() instanceof ServerPlayer placer)) {
+        if (!(event.getEntity() instanceof ServerPlayer placingPlayer)) {
             // Placed by something other than a player (dispenser, mod automation, etc.) -
             // there's no one to bill or notify, so block it outright.
             event.setCanceled(true);
             return;
         }
 
-        Team placerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(placer).orElse(null);
-        if (placerTeam == null || !placerTeam.getTeamId().equals(owningTeam.getTeamId())) {
+        Team placingTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(placingPlayer).orElse(null);
+        if (placingTeam == null || !placingTeam.getTeamId().equals(holdingTeam.getTeamId())) {
             event.setCanceled(true);
-            placer.displayClientMessage(Component.translatable("message.lc_claim_economy.tax_collector_wrong_team"), true);
+            placingPlayer.displayClientMessage(Component.translatable("message.lc_claim_economy.tax_collector_wrong_team"), true);
             return;
         }
 
-        if (!BankLedgerAccess.canPurchaseForTeam(owningTeam, placer.getUUID())) {
+        if (!BankLedgerAccess.canPurchaseForTeam(holdingTeam, placingPlayer.getUUID())) {
             event.setCanceled(true);
-            placer.displayClientMessage(Component.translatable("message.lc_claim_economy.tax_collector_denied"), true);
+            placingPlayer.displayClientMessage(Component.translatable("message.lc_claim_economy.tax_collector_denied"), true);
         }
     }
 
-    private static boolean isLevyCollector(BlockState state) {
-        return state.getBlock() instanceof TaxCollectorBlock;
+    private static boolean isLevyCollector(BlockState blockState) {
+        return blockState.getBlock() instanceof TaxCollectorBlock;
     }
 }

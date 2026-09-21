@@ -20,17 +20,17 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(value = FTBChunks.class, remap = false)
 public class PartyMembershipJoinMixin {
     @Inject(method = "playerJoinedParty", at = @At("HEAD"), remap = false)
-    private void lcClaimEconomy$dissolvePersonalClaims(PlayerJoinedPartyTeamEvent event, CallbackInfo ci) {
-        ServerPlayer player = event.getPlayer();
-        if (player == null) {
+    private void lcClaimEconomy$dissolvePersonalClaims(PlayerJoinedPartyTeamEvent joinEvent, CallbackInfo callback) {
+        ServerPlayer joiningPlayer = joinEvent.getPlayer();
+        if (joiningPlayer == null) {
             return;
         }
 
-        Team previousTeam = event.getPreviousTeam();
-        if (previousTeam == null || previousTeam.isPartyTeam()) {
+        Team formerTeam = joinEvent.getPreviousTeam();
+        if (formerTeam == null || formerTeam.isPartyTeam()) {
             return;
         }
 
-        PartyEnrollmentSettlement.settle(player.server, player, previousTeam);
+        PartyEnrollmentSettlement.settle(joiningPlayer.server, joiningPlayer, formerTeam);
     }
 }

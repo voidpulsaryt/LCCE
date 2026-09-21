@@ -9,26 +9,27 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Land chunks can only be protected against block editing/interaction, so
- * explosions and mob griefing are always allowed (unprotected) on them,
- * regardless of the team's build protection settings. Explosion protection
- * is also bypassed on any chunk while its team is at war, if the
- * {@code siegeModeEnabled} config option is on - see {@link SiegeModeService}.
+ * "Land" style claims opt out of block-edit protection entirely, so it would be
+ * inconsistent to still let explosions or griefing wreck them - both checks short
+ * circuit to "allowed" the moment {@link LandChunkService} recognizes the chunk.
+ * Separately, a chunk whose owning team is actively sieged may also waive explosion
+ * protection when the {@code siegeModeEnabled} toggle is set - see
+ * {@link SiegeModeService} for the war-state lookup behind that.
  */
 @Mixin(targets = "dev.ftb.mods.ftbchunks.data.ClaimedChunkImpl", remap = false)
 public abstract class ClaimedChunkProtectionMixin {
     @Inject(method = "allowExplosions", at = @At("HEAD"), cancellable = true, remap = false)
-    private void lcClaimEconomy$landExplosions(CallbackInfoReturnable<Boolean> cir) {
-        ClaimedChunk chunk = (ClaimedChunk) this;
-        if (LandChunkService.isLandChunk(chunk) || SiegeModeService.explosionsBypassed(chunk)) {
-            cir.setReturnValue(true);
+    private void lcClaimEconomy$landExplosions(CallbackInfoReturnable<Boolean> returnValue) {
+        ClaimedChunk claim = (ClaimedChunk) this;
+        if (LandChunkService.isLandChunk(claim) || SiegeModeService.explosionsBypassed(claim)) {
+            returnValue.setReturnValue(true);
         }
     }
 
     @Inject(method = "allowMobGriefing", at = @At("HEAD"), cancellable = true, remap = false)
-    private void lcClaimEconomy$landMobGriefing(CallbackInfoReturnable<Boolean> cir) {
+    private void lcClaimEconomy$landMobGriefing(CallbackInfoReturnable<Boolean> returnValue) {
         if (LandChunkService.isLandChunk((ClaimedChunk) this)) {
-            cir.setReturnValue(true);
+            returnValue.setReturnValue(true);
         }
     }
 }

@@ -11,12 +11,12 @@ public enum ConflictEntryStatus {
     PENDING_DECLARE,
     PENDING_END;
 
-    public static ConflictEntryStatus fromId(int id) {
-        ConflictEntryStatus[] values = values();
-        if (id < 0 || id >= values.length) {
+    public static ConflictEntryStatus fromId(int encoded) {
+        ConflictEntryStatus[] known = values();
+        if (encoded < 0 || encoded >= known.length) {
             return ACTIVE;
         }
-        return values[id];
+        return known[encoded];
     }
 
     public int id() {
