@@ -25,6 +25,15 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * Everything this mod adds to a single claim-map tile: alt-click starts/extends a
+ * multi-select for the land/build bulk-toggle in {@link ClaimMapPanelMixin},
+ * shift-middle-click opens {@link ChunkUserPermissionsScreen} directly from the map,
+ * the tooltip gains a land/build indicator plus a line for whichever queued change (if
+ * any) is pending on this chunk, and a checkered overlay in that same change's color
+ * repeats the queued-state signal visually so it reads at a glance across a whole
+ * claim without hovering every tile.
+ */
 @Mixin(targets = "dev.ftb.mods.ftbchunks.client.gui.ChunkScreenPanel$ChunkButton", remap = false)
 public class ClaimMapPanelTileButtonMixin {
     private static final ImageIcon CHECKERED = new ImageIcon(

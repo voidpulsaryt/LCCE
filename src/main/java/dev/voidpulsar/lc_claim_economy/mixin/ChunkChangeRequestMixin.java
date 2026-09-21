@@ -11,6 +11,16 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * FTB Chunks handles a whole bulk claim/unclaim drag as one packet carrying a set of
+ * chunks, iterating it internally with no per-chunk hook of its own to charge or
+ * refund through. These two injections bracket that iteration: one right before it
+ * starts (to pre-check affordability and open a {@link ClaimTransferContext} batch so
+ * per-chunk billing coalesces into a single message instead of spamming chat once per
+ * chunk), one right after the handler returns (to flush that batch). Bracketing the
+ * vanilla iterator call itself, rather than the packet's public API, is what lets this
+ * work without FTB Chunks needing to expose a batch-aware entry point.
+ */
 @Mixin(value = RequestChunkChangePacket.class, remap = false)
 public class ChunkChangeRequestMixin {
     @Inject(

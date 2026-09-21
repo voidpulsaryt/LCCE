@@ -9,6 +9,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Map;
 
+/**
+ * FTB Chunks' own bulk-claim response packet already carries per-chunk problem ids
+ * (from our {@code ChunkAcquisitionHandler} rejecting individual chunks server-side),
+ * but has no client-side hook of its own for a mod to react to it. This mixin taps the
+ * packet's own {@code handle} to feed those counts into {@link ClientPricingCache},
+ * which {@code claimProblemLine} later reads to build a bulk-vs-single "insufficient
+ * funds" chat message instead of a generic one.
+ */
 @Mixin(value = ChunkChangeResponsePacket.class, remap = false)
 public class ChunkChangeAckClientMixin {
     @Inject(

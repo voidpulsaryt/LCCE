@@ -8,6 +8,12 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * FTB Chunks' claim-map bottom panel has no extension point for a mod to add its own
+ * row, so this paints directly onto it after FTB finishes its own draw. The extra
+ * {@code lineHeight} offset drops the price line below whatever FTB itself already
+ * drew in that panel on this frame, rather than overlapping it.
+ */
 @Mixin(targets = "dev.ftb.mods.ftbchunks.client.gui.ChunkScreen$CustomBottomPanel")
 public class ChunkScreenCustomBottomPanelMixin {
     @Inject(method = "drawBackground", at = @At("RETURN"))

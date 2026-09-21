@@ -10,6 +10,14 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * Repositions the title label to make room for the price/pending note
+ * {@link EditConfigScreenUiHelper} draws underneath it - {@link EditConfigScreenMixin}
+ * grows the panel's total height to fit that note, and this shrinks/moves the title
+ * row within that taller panel so the two don't overlap. Only applies on the
+ * properties screen this mod actually extends; every other use of this generic FTB
+ * panel is left at its normal layout.
+ */
 @Mixin(targets = "dev.ftb.mods.ftblibrary.config.ui.EditConfigScreen$CustomTopPanel", remap = false)
 public class EditConfigScreenTopPanelMixin {
     @Shadow(remap = false)

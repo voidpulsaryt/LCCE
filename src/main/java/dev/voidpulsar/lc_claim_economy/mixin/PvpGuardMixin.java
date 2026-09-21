@@ -20,9 +20,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class PvpGuardMixin {
     @Inject(method = "isPvPProtectedChunk", at = @At("HEAD"), cancellable = true, remap = false)
     private void lcClaimEconomy$landPvp(PvPMode mode, Player player, CallbackInfoReturnable<Boolean> cir) {
-        ClaimedChunk cc = ClaimedChunkManagerImpl.getInstance()
+        ClaimedChunk chunk = ClaimedChunkManagerImpl.getInstance()
                 .getChunk(new ChunkDimPos(player.level(), player.blockPosition()));
-        if (cc == null || !LandChunkService.isLandChunk(cc)) {
+        if (chunk == null || !LandChunkService.isLandChunk(chunk)) {
             return;
         }
         cir.setReturnValue(mode == PvPMode.NEVER);

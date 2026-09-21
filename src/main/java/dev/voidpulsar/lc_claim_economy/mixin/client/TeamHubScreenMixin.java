@@ -17,6 +17,15 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * Adds this mod's claim-breakdown and (if wars are enabled) conflict buttons to the
+ * right-side toolbar of FTB's team hub screen, to the left of FTB's own settings
+ * button. Since the war button only exists when {@code warModuleEnabled}, the slot
+ * count in {@code alignWidgets} is computed dynamically rather than assuming a fixed
+ * one or two extra buttons - and everything already left of our buttons (invite/ally/
+ * chat-toggle) gets shifted over by however much room we actually claimed, so FTB's
+ * own buttons never end up overlapping ours regardless of which of ours are present.
+ */
 @Mixin(value = MyTeamScreen.class, remap = false)
 public class TeamHubScreenMixin {
     private static final int TOOLBAR_BUTTON_SIZE = 16;

@@ -10,6 +10,13 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * FTB fires {@code playerJoinedParty} for both "joined a real party" and "returned to
+ * their own solo team," and only the previous-team's type tells them apart -
+ * {@code previousTeam.isPartyTeam()} being true means this is a party-to-party move
+ * (nothing solo-claim-related to settle), so only a solo-team departure triggers
+ * {@link PartyEnrollmentSettlement}.
+ */
 @Mixin(value = FTBChunks.class, remap = false)
 public class PartyMembershipJoinMixin {
     @Inject(method = "playerJoinedParty", at = @At("HEAD"), remap = false)

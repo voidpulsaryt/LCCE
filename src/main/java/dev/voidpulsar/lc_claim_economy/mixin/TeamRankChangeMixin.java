@@ -12,6 +12,13 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * When an LC team is linked to an FTB party, that party's own rank structure is the
+ * source of truth (mirrored in by {@code CurrencyTeamLinkService}/rank-sync mixins
+ * elsewhere) - editing LC ranks directly from the LC side would silently drift out of
+ * sync with FTB the next time a sync runs, so promote/demote/owner-change are blocked
+ * outright on a linked team rather than allowed to fight the sync.
+ */
 @Mixin(value = Team.class, remap = false)
 public class TeamRankChangeMixin {
     @Inject(method = "changePromoteMember", at = @At("HEAD"), cancellable = true, remap = false)

@@ -15,6 +15,14 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+/**
+ * LC lets a player disband their own LC-side team independently of the FTB party it's
+ * linked to, which would leave {@link TeamBankLinkRegistry}'s link pointing at a
+ * deleted account. This mixin blocks that removal while the link is still active
+ * (unless it's this mod's own cleanup code doing the removing, signaled by
+ * {@link CurrencyTeamPurgeGuard}) and unregisters the link once a removal is allowed
+ * to go through, so the two team systems can't drift out of sync with each other.
+ */
 @Mixin(value = TeamDataCache.class, remap = false)
 public class TeamCacheEvictionMixin {
     @Inject(method = "removeTeam", at = @At("HEAD"), cancellable = true, remap = false)

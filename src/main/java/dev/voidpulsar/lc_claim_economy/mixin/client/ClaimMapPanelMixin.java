@@ -24,6 +24,22 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.Set;
 
+/**
+ * Two unrelated pieces of behavior share this target because both need to reach into
+ * the claim map panel's private selection/drag state:
+ * <ul>
+ *   <li>The three {@code @Redirect}s intercept FTB's own drag-claim result summary
+ *   line as it's built (translate key → append count suffix) so a claim rejected by
+ *   this mod's own economy (insufficient funds) shows this mod's message instead of
+ *   FTB's generic "N chunks failed" text. The thread-local flag threads a decision
+ *   made in the middle redirect (was this an LC rejection?) through to the third one,
+ *   since they're three separate injected calls with no other way to share state.</li>
+ *   <li>{@code mouseReleased}/the {@link ClaimMapPanelAltToggleAccess} methods add
+ *   alt-click-drag as a way to toggle a whole selection between land/build at once,
+ *   reusing the panel's existing left-drag chunk-selection machinery rather than
+ *   adding a separate selection mode.</li>
+ * </ul>
+ */
 @Mixin(targets = "dev.ftb.mods.ftbchunks.client.gui.ChunkScreenPanel", remap = false)
 public class ClaimMapPanelMixin implements ClaimMapPanelAltToggleAccess {
     @Shadow(remap = false)

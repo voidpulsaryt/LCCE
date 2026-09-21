@@ -18,6 +18,18 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+/**
+ * FTB's generic config-property editor doubles as this mod's protection-toggle screen
+ * (team properties like block-edit/PvP live in the same {@code ftbteamsconfig} group
+ * FTB already renders), so this mixin adapts its generic behavior for that specific
+ * use: keep it open after Accept instead of FTB's default jump back to the team
+ * screen, refresh this mod's own pending-state caches around Accept, skip FTB's
+ * unsaved-changes confirmation on Cancel (our own price/pending display already makes
+ * the effect of a change clear before it's committed), and make room in the header for
+ * {@link EditConfigScreenUiHelper}'s note line. Every behavior is gated on
+ * {@code isFtbChunksPropertiesTitle} so a player editing an unrelated FTB config group
+ * through this same screen class sees FTB's untouched default behavior.
+ */
 @Mixin(targets = "dev.ftb.mods.ftblibrary.config.ui.EditConfigScreen", remap = false)
 public class EditConfigScreenMixin {
     @Shadow(remap = false)
