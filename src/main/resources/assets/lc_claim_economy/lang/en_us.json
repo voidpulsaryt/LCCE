@@ -123,7 +123,7 @@
   "gui.lc_claim_economy.protection_price_per_n_chunks_suffix": "/%s chunks",
   "gui.lc_claim_economy.protection_prices_note_line1": "Build protection prices are per chunk.",
   "gui.lc_claim_economy.protection_prices_note_line2": "Land protection prices are per %2$s chunks / %1$s.",
-  "gui.lc_claim_economy.protection_price_war_incoming": "Incoming war (%1$s team(s)): upkeep x %2$s (sum l^i) — base %3$s, effective %4$s",
+  "gui.lc_claim_economy.protection_price_war_incoming": "Incoming war (%1$s team(s)): upkeep x %2$s (1 + k*s) — base %3$s, effective %4$s",
   "gui.lc_claim_economy.label.claim": "Claim",
   "gui.lc_claim_economy.label.balance": "Balance",
   "gui.lc_claim_economy.label.upkeep": "Force-load upkeep",

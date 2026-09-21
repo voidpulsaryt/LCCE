@@ -235,7 +235,8 @@ public final class SafeguardPriceDisplay {
     }
 
     /**
-     * Incoming wars scale displayed base upkeep by {@code 1 + sum(i=0..k-1) l^i} for {@code k} declarers.
+     * Incoming wars scale displayed base upkeep by {@code 1 + k * s} for {@code k} declarers
+     * and step {@code s} — see {@link ConflictBillingMath}.
      */
     public static long effectiveProtectionPrice(long baseCopper) {
         if (baseCopper <= 0) {
