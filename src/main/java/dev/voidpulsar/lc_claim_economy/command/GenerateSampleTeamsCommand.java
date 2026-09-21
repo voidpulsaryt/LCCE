@@ -14,11 +14,18 @@ import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
+/**
+ * {@code /lcce seed_test_teams|clear_test_teams|count_test_teams} - generates
+ * throwaway FTB Teams (with claims and war relationships) for exercising the
+ * economy at scale without hand-creating dozens of teams. Gated behind
+ * {@code debugTestTeamCommands} on top of the permission-2 requirement so it
+ * can't be run by accident on a live world once testing is done.
+ */
 public final class GenerateSampleTeamsCommand {
     private GenerateSampleTeamsCommand() {
     }
 
-    private static boolean debugCommandsEnabled() {
+    private static boolean testCommandsUnlocked() {
         return LcClaimEconomyConfig.SERVER.debugTestTeamCommands.get();
     }
 
@@ -42,7 +49,7 @@ public final class GenerateSampleTeamsCommand {
 
     private static int count(CommandContext<CommandSourceStack> context) {
         CommandSourceStack source = context.getSource();
-        if (!debugCommandsEnabled()) {
+        if (!testCommandsUnlocked()) {
             source.sendFailure(Component.translatable("message.lc_claim_economy.test_teams.debug_disabled"));
             return 0;
         }
@@ -67,7 +74,7 @@ public final class GenerateSampleTeamsCommand {
 
     private static int seed(CommandContext<CommandSourceStack> context, int count) throws CommandSyntaxException {
         CommandSourceStack source = context.getSource();
-        if (!debugCommandsEnabled()) {
+        if (!testCommandsUnlocked()) {
             source.sendFailure(Component.translatable("message.lc_claim_economy.test_teams.debug_disabled"));
             return 0;
         }
@@ -94,7 +101,7 @@ public final class GenerateSampleTeamsCommand {
 
     private static int clear(CommandContext<CommandSourceStack> context, int count) {
         CommandSourceStack source = context.getSource();
-        if (!debugCommandsEnabled()) {
+        if (!testCommandsUnlocked()) {
             source.sendFailure(Component.translatable("message.lc_claim_economy.test_teams.debug_disabled"));
             return 0;
         }

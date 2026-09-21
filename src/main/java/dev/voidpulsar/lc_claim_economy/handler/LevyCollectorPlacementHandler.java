@@ -15,55 +15,65 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.level.BlockEvent;
 
+/**
+ * A Levy Collector (Lightman's Currency's tax-collector block) is a claim's
+ * own upkeep-withdrawal point, so placing one is gated the same way any
+ * other claim-economy spend is: it has to land inside land the placer's
+ * team actually holds, and the placer needs purchase rights on that team.
+ * Both checks require a resolved {@link ClaimedChunk}, which is why the
+ * cheap block-type check runs first and the FTB API lookups only happen
+ * once we know there's actually a Levy Collector involved.
+ */
 public class LevyCollectorPlacementHandler {
     @SubscribeEvent
     public void onTaxCollectorPlaced(BlockEvent.EntityPlaceEvent event) {
         if (event.getLevel().isClientSide()) {
             return;
         }
-        if (!isTaxCollector(event.getPlacedBlock())) {
+        if (!isLevyCollector(event.getPlacedBlock())) {
             return;
         }
         if (!FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
             return;
         }
-
-        if (!(event.getLevel() instanceof ServerLevel level)) {
+        if (!(event.getLevel() instanceof ServerLevel serverLevel)) {
             return;
         }
 
-        ClaimedChunk claimed = FTBChunksAPI.api().getManager().getChunk(
-                new ChunkDimPos(level.dimension(), new ChunkPos(event.getPos()))
+        ClaimedChunk targetChunk = FTBChunksAPI.api().getManager().getChunk(
+                new ChunkDimPos(serverLevel.dimension(), new ChunkPos(event.getPos()))
         );
-        if (claimed == null) {
+        if (targetChunk == null) {
+            // Unclaimed ground - nothing here for the claim economy to gate.
             return;
         }
 
-        Team chunkTeam = claimed.getTeamData().getTeam();
-        if (chunkTeam == null || !chunkTeam.isValid()) {
+        Team owningTeam = targetChunk.getTeamData().getTeam();
+        if (owningTeam == null || !owningTeam.isValid()) {
+            event.setCanceled(true);
+            return;
+        }
+        if (!(event.getEntity() instanceof ServerPlayer placer)) {
+            // Placed by something other than a player (dispenser, mod automation, etc.) -
+            // there's no one to bill or notify, so block it outright.
             event.setCanceled(true);
             return;
         }
 
-        if (!(event.getEntity() instanceof ServerPlayer player)) {
+        Team placerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(placer).orElse(null);
+        if (placerTeam == null || !placerTeam.getTeamId().equals(owningTeam.getTeamId())) {
             event.setCanceled(true);
+            placer.displayClientMessage(Component.translatable("message.lc_claim_economy.tax_collector_wrong_team"), true);
             return;
         }
 
-        Team playerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
-        if (playerTeam == null || !playerTeam.getTeamId().equals(chunkTeam.getTeamId())) {
+        if (!BankLedgerAccess.canPurchaseForTeam(owningTeam, placer.getUUID())) {
             event.setCanceled(true);
-            player.displayClientMessage(Component.translatable("message.lc_claim_economy.tax_collector_wrong_team"), true);
-            return;
-        }
-
-        if (!BankLedgerAccess.canPurchaseForTeam(chunkTeam, player.getUUID())) {
-            event.setCanceled(true);
-            player.displayClientMessage(Component.translatable("message.lc_claim_economy.tax_collector_denied"), true);
+            placer.displayClientMessage(Component.translatable("message.lc_claim_economy.tax_collector_denied"), true);
         }
     }
 
-    private static boolean isTaxCollector(BlockState state) {
+    private static boolean isLevyCollector(BlockState state) {
         return state.getBlock() instanceof TaxCollectorBlock;
     }
 }

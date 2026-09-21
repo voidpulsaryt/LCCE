@@ -25,8 +25,8 @@ public class ChunkLoadPinHandler {
     }
 
     private CompoundEventResult<ClaimResult> beforeLoad(CommandSourceStack source, ClaimedChunk chunk) {
-        ServerPlayer player = source.getPlayer();
-        if (player == null || !FTBTeamsAPI.api().isManagerLoaded()) {
+        ServerPlayer requester = source.getPlayer();
+        if (requester == null || !FTBTeamsAPI.api().isManagerLoaded()) {
             return CompoundEventResult.pass();
         }
 
@@ -34,8 +34,7 @@ public class ChunkLoadPinHandler {
         if (team == null) {
             return CompoundEventResult.pass();
         }
-
-        if (!BankLedgerAccess.canPurchaseForTeam(team, player.getUUID())) {
+        if (!BankLedgerAccess.canPurchaseForTeam(team, requester.getUUID())) {
             return CompoundEventResult.interruptFalse(ClaimResult.customProblem("message.lc_claim_economy.claim_rank_denied"));
         }
 
@@ -44,49 +43,42 @@ public class ChunkLoadPinHandler {
             return CompoundEventResult.pass();
         }
 
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        if (savedData.isProtectionLocked(team.getTeamId())) {
+        LcClaimEconomySavedData economyData = LcClaimEconomySavedData.get(server);
+        if (economyData.isProtectionLocked(team.getTeamId())) {
             return CompoundEventResult.interruptFalse(ClaimResult.customProblem("message.lc_claim_economy.protection_locked_change"));
         }
 
-        TeamQueuedChanges pendingState = savedData.getPendingState(team.getTeamId());
-        String chunkKey = ChunkCoordKey.encode(chunk.getPos());
+        TeamQueuedChanges queuedState = economyData.getPendingState(team.getTeamId());
+        String positionKey = ChunkCoordKey.encode(chunk.getPos());
 
-        // Toggle off a queued load, or undo a queued unload (same idea as cycling
-        // a protection setting back while a change is pending).
-        if (pendingState.isPendingForceLoad(chunkKey)) {
-            savedData.setPendingState(team.getTeamId(), pendingState.withoutPendingForceLoad(chunkKey));
-            QueuedStateBroadcast.syncTeam(server, team);
-            notifyForceLoadPendingCancelled(team);
-            return CompoundEventResult.interruptFalse(ClaimResult.success());
+        // A second load click while one's already queued reads as "never mind" -
+        // same idea as cycling a protection setting back to cancel it.
+        if (queuedState.isPendingForceLoad(positionKey)) {
+            return cancelQueuedChange(server, team, economyData, queuedState.withoutPendingForceLoad(positionKey));
         }
-        if (pendingState.isPendingForceUnload(chunkKey)) {
-            savedData.setPendingState(team.getTeamId(), pendingState.withoutPendingForceUnload(chunkKey));
-            QueuedStateBroadcast.syncTeam(server, team);
-            notifyForceLoadPendingCancelled(team);
-            return CompoundEventResult.interruptFalse(ClaimResult.success());
+        if (queuedState.isPendingForceUnload(positionKey)) {
+            return cancelQueuedChange(server, team, economyData, queuedState.withoutPendingForceUnload(positionKey));
         }
-
         if (chunk.isForceLoaded()) {
             return CompoundEventResult.pass();
         }
 
-        TeamQueuedChanges updated = pendingState.withPendingForceLoad(chunkKey);
-        if (!SafeguardEnforcementService.canAffordNextPeriod(server, team, updated)) {
+        TeamQueuedChanges withNewLoad = queuedState.withPendingForceLoad(positionKey);
+        if (!SafeguardEnforcementService.canAffordNextPeriod(server, team, withNewLoad)) {
             return CompoundEventResult.interruptFalse(ClaimResult.customProblem("message.lc_claim_economy.insufficient_funds_protection"));
         }
 
-        savedData.setPendingState(team.getTeamId(), updated);
+        economyData.setPendingState(team.getTeamId(), withNewLoad);
         dev.voidpulsar.lc_claim_economy.LcClaimEconomy.LOGGER.debug("Team {}: force-load queued for chunk {}",
-                team.getShortName(), chunkKey);
+                team.getShortName(), positionKey);
         QueuedStateBroadcast.syncTeam(server, team);
         notifyForceLoadPending(team);
         return CompoundEventResult.interruptFalse(ClaimResult.success());
     }
 
     private CompoundEventResult<ClaimResult> beforeUnload(CommandSourceStack source, ClaimedChunk chunk) {
-        ServerPlayer player = source.getPlayer();
-        if (player == null || !FTBTeamsAPI.api().isManagerLoaded()) {
+        ServerPlayer requester = source.getPlayer();
+        if (requester == null || !FTBTeamsAPI.api().isManagerLoaded()) {
             return CompoundEventResult.pass();
         }
 
@@ -94,8 +86,7 @@ public class ChunkLoadPinHandler {
         if (team == null) {
             return CompoundEventResult.pass();
         }
-
-        if (!BankLedgerAccess.canPurchaseForTeam(team, player.getUUID())) {
+        if (!BankLedgerAccess.canPurchaseForTeam(team, requester.getUUID())) {
             return CompoundEventResult.interruptFalse(ClaimResult.customProblem("message.lc_claim_economy.claim_rank_denied"));
         }
 
@@ -104,32 +95,38 @@ public class ChunkLoadPinHandler {
             return CompoundEventResult.pass();
         }
 
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        TeamQueuedChanges pendingState = savedData.getPendingState(team.getTeamId());
-        String chunkKey = ChunkCoordKey.encode(chunk.getPos());
+        LcClaimEconomySavedData economyData = LcClaimEconomySavedData.get(server);
+        TeamQueuedChanges queuedState = economyData.getPendingState(team.getTeamId());
+        String positionKey = ChunkCoordKey.encode(chunk.getPos());
 
-        if (pendingState.isPendingForceUnload(chunkKey)) {
-            savedData.setPendingState(team.getTeamId(), pendingState.withoutPendingForceUnload(chunkKey));
-            QueuedStateBroadcast.syncTeam(server, team);
-            notifyForceLoadPendingCancelled(team);
-            return CompoundEventResult.interruptFalse(ClaimResult.success());
+        if (queuedState.isPendingForceUnload(positionKey)) {
+            return cancelQueuedChange(server, team, economyData, queuedState.withoutPendingForceUnload(positionKey));
         }
-
-        if (pendingState.isPendingForceLoad(chunkKey)) {
-            savedData.setPendingState(team.getTeamId(), pendingState.withoutPendingForceLoad(chunkKey));
-            QueuedStateBroadcast.syncTeam(server, team);
-            notifyForceLoadPendingCancelled(team);
-            return CompoundEventResult.interruptFalse(ClaimResult.success());
+        if (queuedState.isPendingForceLoad(positionKey)) {
+            return cancelQueuedChange(server, team, economyData, queuedState.withoutPendingForceLoad(positionKey));
         }
-
         if (!chunk.isForceLoaded()) {
             return CompoundEventResult.pass();
         }
 
-        TeamQueuedChanges updated = pendingState.withPendingForceUnload(chunkKey);
-        savedData.setPendingState(team.getTeamId(), updated);
+        TeamQueuedChanges withNewUnload = queuedState.withPendingForceUnload(positionKey);
+        economyData.setPendingState(team.getTeamId(), withNewUnload);
         QueuedStateBroadcast.syncTeam(server, team);
         notifyForceLoadPending(team);
+        return CompoundEventResult.interruptFalse(ClaimResult.success());
+    }
+
+    /**
+     * Shared tail end of the "undo a queued load/unload" branches above: persist
+     * the state with that one entry removed, push it to the team's clients, tell
+     * them it's cancelled, and let the underlying FTB Chunks action proceed as a
+     * no-cost success (there's nothing left queued to charge for).
+     */
+    private CompoundEventResult<ClaimResult> cancelQueuedChange(
+            MinecraftServer server, Team team, LcClaimEconomySavedData economyData, TeamQueuedChanges withoutEntry) {
+        economyData.setPendingState(team.getTeamId(), withoutEntry);
+        QueuedStateBroadcast.syncTeam(server, team);
+        notifyForceLoadPendingCancelled(team);
         return CompoundEventResult.interruptFalse(ClaimResult.success());
     }
 

@@ -31,17 +31,30 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * FTB Chunks' drag-select claim tool submits an entire batch of chunks in a
+ * single {@link RequestChunkChangePacket} rather than one packet per chunk,
+ * so the usual per-claim affordability check in {@link ChunkAcquisitionHandler}
+ * never gets a chance to run before FTB Chunks has already committed the
+ * whole batch. This class is the pre-flight check that runs first: it dry-runs
+ * the claim (see {@link #tallyClaimableChunks}) to find out how many chunks
+ * would actually succeed, prices only the ones past the free allotment, and
+ * rejects the whole batch up front if the team can't cover it - rather than
+ * letting some chunks get claimed and others silently fail mid-batch.
+ */
 public final class MassClaimHandler {
     private MassClaimHandler() {
     }
 
     public static boolean rejectIfInsufficientFunds(
             RequestChunkChangePacket message,
-            ServerPlayer player,
+            ServerPlayer requester,
             CommandSourceStack source,
             ChunkTeamData chunkTeamData
     ) {
         if (message.action() != RequestChunkChangePacket.ChunkChangeOp.CLAIM || message.chunks().size() <= 1) {
+            // Single-chunk (or non-claim) requests go through the normal
+            // per-chunk path in ChunkAcquisitionHandler instead.
             return false;
         }
 
@@ -49,34 +62,28 @@ public final class MassClaimHandler {
         if (unitPrice <= 0L) {
             return false;
         }
-
         if (!FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
             return false;
         }
 
-        Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
-        if (team == null) {
+        Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(requester).orElse(null);
+        if (team == null || !BankLedgerAccess.canPurchaseForTeam(team, requester.getUUID())) {
             return false;
         }
 
-        if (!BankLedgerAccess.canPurchaseForTeam(team, player.getUUID())) {
-            return false;
-        }
-
-        ServerLevel level = player.serverLevel();
-        int claimableCount = countClaimableChunks(source, chunkTeamData, message.chunks(), level);
+        int claimableCount = tallyClaimableChunks(source, chunkTeamData, message.chunks(), requester.serverLevel());
         if (claimableCount <= 1) {
             return false;
         }
 
-        int paidClaims = ComplimentaryChunkAllotment.countPaidClaimsInBatch(chunkTeamData.getClaimedChunks().size(), claimableCount);
-        if (paidClaims <= 0) {
+        int billableClaims = ComplimentaryChunkAllotment.countPaidClaimsInBatch(chunkTeamData.getClaimedChunks().size(), claimableCount);
+        if (billableClaims <= 0) {
             return false;
         }
 
-        BankLedgerAccess.ensurePartyAccountExists(player.server, team);
-        IBankAccount account = BankLedgerAccess.getAccountForPlayer(player.server, player);
-        MoneyValue totalCost = CurrencyAmounts.fromCopper(unitPrice * paidClaims);
+        BankLedgerAccess.ensurePartyAccountExists(requester.server, team);
+        IBankAccount account = BankLedgerAccess.getAccountForPlayer(requester.server, requester);
+        MoneyValue totalCost = CurrencyAmounts.fromCopper(unitPrice * billableClaims);
         if (account.getMoneyStorage().containsValue(totalCost)) {
             return false;
         }
@@ -86,42 +93,45 @@ public final class MassClaimHandler {
         Component chatMessage = Component.translatable(
                 MassClaimShortfallResult.RESULT_ID,
                 priceText,
-                paidClaims,
+                billableClaims,
                 balance
         );
-        player.displayClientMessage(chatMessage, false);
-        ClaimPricingBroadcast.syncToPlayer(player);
+        requester.displayClientMessage(chatMessage, false);
+        ClaimPricingBroadcast.syncToPlayer(requester);
 
         Map<String, Integer> problems = new HashMap<>();
-        problems.put(MassClaimShortfallResult.RESULT_ID, paidClaims);
+        problems.put(MassClaimShortfallResult.RESULT_ID, billableClaims);
         // ChunkChangeResponsePacket is registered through Architectury's networking layer by
         // FTBChunks, not NeoForge's native one. Sending it via NeoForge's PacketDistributor
         // skips Architectury's payload wrapping and crashes the encoder with a ClassCastException
         // (ChunkChangeResponsePacket -> NetworkAggregator$BufCustomPacketPayload). It must be sent
         // through Architectury's NetworkManager instead, matching how FTBChunks itself sends it.
         NetworkManager.sendToPlayer(
-                player,
+                requester,
                 new ChunkChangeResponsePacket(message.chunks().size(), 0, problems)
         );
         return true;
     }
 
-    public static ChunkTeamData resolveTeamData(RequestChunkChangePacket message, ServerPlayer player) {
-        ChunkTeamData chunkTeamData = null;
+    public static ChunkTeamData resolveTeamData(RequestChunkChangePacket message, ServerPlayer requester) {
         if (message.teamId().isPresent()) {
-            Optional<Team> team = FTBTeamsAPI.api().getManager().getTeamByID(message.teamId().get());
-            if (team.isEmpty()) {
+            Optional<Team> targetTeam = FTBTeamsAPI.api().getManager().getTeamByID(message.teamId().get());
+            if (targetTeam.isEmpty()) {
                 return null;
             }
-            chunkTeamData = ClaimedChunkManagerImpl.getInstance().getOrCreateData(team.get());
+            return ClaimedChunkManagerImpl.getInstance().getOrCreateData(targetTeam.get());
         }
-        if (chunkTeamData == null) {
-            chunkTeamData = ClaimedChunkManagerImpl.getInstance().getOrCreateData(player);
-        }
-        return chunkTeamData;
+        return ClaimedChunkManagerImpl.getInstance().getOrCreateData(requester);
     }
 
-    private static int countClaimableChunks(
+    /**
+     * Runs FTB Chunks' own claim validation against every chunk in the batch
+     * inside a validation window (see {@link ClaimTransferContext#beginValidation}),
+     * which stops {@link ChunkAcquisitionHandler}'s per-chunk purchase logic
+     * from firing during the dry run - this only needs to know how many
+     * chunks *would* succeed, not actually charge for them yet.
+     */
+    private static int tallyClaimableChunks(
             CommandSourceStack source,
             ChunkTeamData chunkTeamData,
             Set<XZ> chunks,
@@ -131,8 +141,7 @@ public final class MassClaimHandler {
         try {
             int claimableCount = 0;
             for (XZ pos : chunks) {
-                ClaimResult result = chunkTeamData.claim(source, pos.dim(level), true);
-                if (result.isSuccess()) {
+                if (chunkTeamData.claim(source, pos.dim(level), true).isSuccess()) {
                     claimableCount++;
                 }
             }

@@ -42,13 +42,15 @@ public class ChunkAcquisitionHandler {
         grantPioneerBonusIfFirstEverClaim(source);
 
         if (ClaimTransferContext.isExecuting()) {
-            int countBeforeClaim = totalClaimed - 1;
-            if (ComplimentaryChunkAllotment.isClaimFree(countBeforeClaim)) {
+            // Part of a batch (mass-claim or team transfer) - the batch's own
+            // free-allotment bookkeeping owns this chunk's cost, not us.
+            int countBeforeThisClaim = totalClaimed - 1;
+            if (ComplimentaryChunkAllotment.isClaimFree(countBeforeThisClaim)) {
                 ClaimTransferContext.recordClaimFree();
             }
             return;
         }
-        syncClaimUi(source);
+        broadcastPricingRefresh(source);
     }
 
     /**
@@ -104,7 +106,7 @@ public class ChunkAcquisitionHandler {
         if (ComplimentaryChunkAllotment.isClaimFree(currentCount)) {
             return CompoundEventResult.pass();
         }
-        return handlePurchase(source, LcClaimEconomyConfig.SERVER.claimPrice.get());
+        return chargeForClaim(source, LcClaimEconomyConfig.SERVER.claimPrice.get());
     }
 
     private void afterUnclaim(CommandSourceStack source, ClaimedChunk chunk) {
@@ -118,7 +120,7 @@ public class ChunkAcquisitionHandler {
             if (ClaimTransferContext.isExecuting()) {
                 ClaimTransferContext.recordUnclaim(0);
             } else if (!ClaimTransferContext.suppressNotifications()) {
-                syncClaimUi(source);
+                broadcastPricingRefresh(source);
             }
             return;
         }
@@ -129,7 +131,7 @@ public class ChunkAcquisitionHandler {
             if (ClaimTransferContext.isExecuting()) {
                 ClaimTransferContext.recordUnclaim(0);
             } else if (!ClaimTransferContext.suppressNotifications()) {
-                syncClaimUi(source);
+                broadcastPricingRefresh(source);
             }
             return;
         }
@@ -171,11 +173,11 @@ public class ChunkAcquisitionHandler {
                         ),
                         false
                 );
-                syncClaimUi(source);
+                broadcastPricingRefresh(source);
             }
             return;
         }
-        syncClaimUi(source);
+        broadcastPricingRefresh(source);
     }
 
     private long calculateUnclaimRefund(ClaimedChunk chunk) {
@@ -227,14 +229,14 @@ public class ChunkAcquisitionHandler {
         return count;
     }
 
-    private void syncClaimUi(CommandSourceStack source) {
+    private void broadcastPricingRefresh(CommandSourceStack source) {
         ServerPlayer player = source.getPlayer();
         if (player != null) {
             ClaimPricingBroadcast.syncToPlayer(player);
         }
     }
 
-    private CompoundEventResult<ClaimResult> handlePurchase(CommandSourceStack source, long priceAmount) {
+    private CompoundEventResult<ClaimResult> chargeForClaim(CommandSourceStack source, long priceAmount) {
         if (ClaimTransferContext.isValidating()) {
             return CompoundEventResult.pass();
         }

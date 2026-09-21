@@ -24,6 +24,13 @@ import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.event.server.ServerStartedEvent;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
+/**
+ * Every FTB Teams lifecycle event a team's bank account or claim-visibility
+ * setting could depend on funnels through here, so the party bank account is
+ * self-healing: whatever order teams load, players log in, or membership
+ * changes happen in, {@link #guaranteeAccountExists} gets a chance to create
+ * the missing account rather than leaving a team with claims but no ledger.
+ */
 public class TeamLifecycleWatcher {
     public TeamLifecycleWatcher() {
         TeamEvent.CREATED.register(this::onTeamCreated);
@@ -38,17 +45,17 @@ public class TeamLifecycleWatcher {
 
     @SubscribeEvent
     public void onServerStarted(ServerStartedEvent event) {
-        reconcileTeams(event.getServer());
+        TeamBankLinkRegistry.reconcile(event.getServer());
     }
 
     private void onTeamCreated(TeamCreatedEvent event) {
         ClaimVisibilityRules.ensurePublic(event.getTeam());
-        ensureAccount(event.getTeam());
+        guaranteeAccountExists(event.getTeam());
     }
 
     private void onTeamLoaded(TeamEvent event) {
         ClaimVisibilityRules.ensurePublic(event.getTeam());
-        ensureAccount(event.getTeam());
+        guaranteeAccountExists(event.getTeam());
     }
 
     private void onTeamDeleted(TeamEvent event) {
@@ -59,31 +66,34 @@ public class TeamLifecycleWatcher {
     }
 
     private void onPlayerJoinedParty(PlayerJoinedPartyTeamEvent event) {
-        ensureAccount(event.getTeam());
+        guaranteeAccountExists(event.getTeam());
     }
 
     private void onPlayerLeftParty(PlayerLeftPartyTeamEvent event) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server != null && event.getTeamDeleted()) {
+        boolean teamDissolved = event.getTeamDeleted();
+        if (server != null && teamDissolved) {
             PartyDissolutionSettlement.settle(server, event.getTeam());
             if (event.getPlayer() != null) {
                 ConflictSyncCoordinator.syncToPlayer(event.getPlayer());
             }
         }
 
-        if (!event.getTeamDeleted()) {
-            ensureAccount(event.getTeam());
+        if (!teamDissolved) {
+            guaranteeAccountExists(event.getTeam());
         }
-        ensureAccount(event.getPlayerTeam());
+        // The player's new solo/fallback team also needs an account regardless
+        // of whether the party they left still exists.
+        guaranteeAccountExists(event.getPlayerTeam());
     }
 
     private void onOwnershipTransferred(PlayerTransferredTeamOwnershipEvent event) {
-        ensureAccount(event.getTeam());
+        guaranteeAccountExists(event.getTeam());
     }
 
     private void onPlayerChanged(PlayerChangedTeamEvent event) {
-        ensureAccount(event.getTeam());
-        event.getPreviousTeam().ifPresent(this::ensureAccount);
+        guaranteeAccountExists(event.getTeam());
+        event.getPreviousTeam().ifPresent(this::guaranteeAccountExists);
     }
 
     private void onPlayerLoggedInAfterTeam(PlayerLoggedInAfterTeamEvent event) {
@@ -91,24 +101,23 @@ public class TeamLifecycleWatcher {
         if (server != null) {
             TeamBankLinkRegistry.reconcile(server);
         }
-        ensureAccount(event.getTeam());
-        if (event.getPlayer() != null) {
-            ServerPlayer player = event.getPlayer();
-            ClaimPricingBroadcast.syncToPlayer(player);
-            QueuedStateBroadcast.syncToPlayer(player);
-            dev.voidpulsar.lc_claim_economy.service.LandChunkService.syncToPlayer(player);
-            ConflictSyncCoordinator.syncToPlayer(player);
-            // Defer once: login sync can race the client's play handler registration
-            // after a full server restart + reconnect.
-            server.execute(() -> dev.voidpulsar.lc_claim_economy.service.LandChunkService.syncToPlayer(player));
+        guaranteeAccountExists(event.getTeam());
+
+        ServerPlayer loggedInPlayer = event.getPlayer();
+        if (loggedInPlayer == null) {
+            return;
         }
+        ClaimPricingBroadcast.syncToPlayer(loggedInPlayer);
+        QueuedStateBroadcast.syncToPlayer(loggedInPlayer);
+        dev.voidpulsar.lc_claim_economy.service.LandChunkService.syncToPlayer(loggedInPlayer);
+        ConflictSyncCoordinator.syncToPlayer(loggedInPlayer);
+        // Retry once on the next server tick: right after a full restart, the
+        // client's play-phase packet handler isn't guaranteed to be registered
+        // yet when this login event fires, so the first sync can be dropped.
+        server.execute(() -> dev.voidpulsar.lc_claim_economy.service.LandChunkService.syncToPlayer(loggedInPlayer));
     }
 
-    private void reconcileTeams(MinecraftServer server) {
-        TeamBankLinkRegistry.reconcile(server);
-    }
-
-    private void ensureAccount(Team team) {
+    private void guaranteeAccountExists(Team team) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null || team == null || !team.isValid()) {
             return;

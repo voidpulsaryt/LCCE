@@ -18,6 +18,13 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 
+/**
+ * {@code /lcce upkeep_priority} - shows the order {@link BillingPriorityService}
+ * will actually charge a team's line items in when there isn't enough in the
+ * bank to cover everything at once. Matters because partial payment isn't
+ * spread evenly across protections and wars; it drains top to bottom, so
+ * this listing is what tells a team which safeguard would lapse first.
+ */
 public final class BillingPriorityCommand {
     private BillingPriorityCommand() {
     }
@@ -31,42 +38,47 @@ public final class BillingPriorityCommand {
 
     private static int showPriority(CommandContext<CommandSourceStack> context) {
         CommandSourceStack source = context.getSource();
-        ServerPlayer player = source.getPlayer();
-        if (player == null || !FTBTeamsAPI.api().isManagerLoaded()) {
+        ServerPlayer viewer = source.getPlayer();
+        if (viewer == null || !FTBTeamsAPI.api().isManagerLoaded()) {
             return 0;
         }
 
-        Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
+        Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(viewer).orElse(null);
         if (team == null) {
             return 0;
         }
 
-        if (team.isPartyTeam() && !BankLedgerAccess.canPurchaseForTeam(team, player.getUUID())) {
-            player.displayClientMessage(
+        if (team.isPartyTeam() && !BankLedgerAccess.canPurchaseForTeam(team, viewer.getUUID())) {
+            viewer.displayClientMessage(
                     Component.translatable("message.lc_claim_economy.upkeep_priority.denied"),
                     false
             );
             return 0;
         }
 
-        var entries = BillingPriorityService.buildOrder(source.getServer(), team);
-        if (entries.isEmpty()) {
-            player.displayClientMessage(
+        var orderedEntries = BillingPriorityService.buildOrder(source.getServer(), team);
+        if (orderedEntries.isEmpty()) {
+            viewer.displayClientMessage(
                     Component.translatable("message.lc_claim_economy.upkeep_priority.empty"),
                     false
             );
             return 1;
         }
 
+        viewer.displayClientMessage(buildPriorityListing(orderedEntries), false);
+        return 1;
+    }
+
+    private static MutableComponent buildPriorityListing(java.util.List<BillingPriorityService.PriorityEntry> orderedEntries) {
         Component period = SafeguardPriceDisplay.upkeepPeriodLabel();
         MutableComponent message = Component.translatable("message.lc_claim_economy.upkeep_priority.header")
-                .withStyle(ChatFormatting.YELLOW);
-        message.append("\n");
-        message.append(Component.translatable("message.lc_claim_economy.upkeep_priority.legend")
-                .withStyle(ChatFormatting.GRAY));
-        message.append("\n");
+                .withStyle(ChatFormatting.YELLOW)
+                .append("\n")
+                .append(Component.translatable("message.lc_claim_economy.upkeep_priority.legend")
+                        .withStyle(ChatFormatting.GRAY))
+                .append("\n");
 
-        for (BillingPriorityService.PriorityEntry entry : entries) {
+        for (BillingPriorityService.PriorityEntry entry : orderedEntries) {
             Component cost = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(entry.costCopper()));
             String kindKey = entry.kind() == BillingPriorityService.EntryKind.PROTECTION
                     ? "message.lc_claim_economy.upkeep_priority.kind.protection"
@@ -81,8 +93,6 @@ public final class BillingPriorityCommand {
             ));
             message.append("\n");
         }
-
-        player.displayClientMessage(message, false);
-        return 1;
+        return message;
     }
 }

@@ -16,6 +16,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * {@code /lcce clear_wars} - an admin escape hatch for wiping every team's war
+ * state server-wide in one shot. Exists mainly for recovering from a bad
+ * config change or a data migration: both the settled war links and any
+ * still-queued declare/end requests need clearing, since a queued declare
+ * left behind would otherwise start a war on its own at the next upkeep tick.
+ */
 public final class ResetConflictsCommand {
     private ResetConflictsCommand() {
     }
@@ -30,46 +37,54 @@ public final class ResetConflictsCommand {
 
     private static int execute(CommandContext<CommandSourceStack> context) {
         MinecraftServer server = context.getSource().getServer();
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
+        LcClaimEconomySavedData economyData = LcClaimEconomySavedData.get(server);
 
-        List<UUID> affected = new ArrayList<>();
-        for (LcClaimEconomySavedData.TeamLinkEntry entry : savedData.getAllLinks()) {
-            UUID teamId = entry.ftbTeamId();
-            boolean changed = false;
+        List<UUID> touchedTeams = new ArrayList<>();
+        for (LcClaimEconomySavedData.TeamLinkEntry link : economyData.getAllLinks()) {
+            UUID teamId = link.ftbTeamId();
+            boolean clearedSomething = clearSettledWars(economyData, link, teamId);
+            clearedSomething |= clearQueuedWarChanges(economyData, teamId);
 
-            if (!entry.warTargets().isEmpty()) {
-                savedData.clearWarReferences(teamId);
-                changed = true;
-            }
-
-            TeamQueuedChanges pending = savedData.getPendingState(teamId);
-            if (!pending.pendingWarDeclares().isEmpty() || !pending.pendingWarEnds().isEmpty()) {
-                TeamQueuedChanges cleared = pending.copy().withoutWarReferences(teamId);
-                for (UUID targetId : new java.util.HashSet<>(pending.pendingWarDeclares())) {
-                    cleared = cleared.withoutPendingWarDeclare(targetId);
-                }
-                for (UUID targetId : new java.util.HashSet<>(pending.pendingWarEnds())) {
-                    cleared = cleared.withoutPendingWarEnd(targetId);
-                }
-                savedData.setPendingState(teamId, cleared);
-                changed = true;
-            }
-
-            if (changed) {
-                affected.add(teamId);
+            if (clearedSomething) {
+                touchedTeams.add(teamId);
             }
         }
 
-        int count = affected.size();
-        for (UUID teamId : affected) {
+        for (UUID teamId : touchedTeams) {
             ConflictSyncCoordinator.syncToTeam(server, teamId);
         }
 
-        LcClaimEconomy.LOGGER.info("clear_wars: cleared war state for {} team(s)", count);
+        int clearedCount = touchedTeams.size();
+        LcClaimEconomy.LOGGER.info("clear_wars: cleared war state for {} team(s)", clearedCount);
         context.getSource().sendSuccess(
-                () -> Component.literal("Cleared all wars for " + count + " team(s)."),
+                () -> Component.literal("Cleared all wars for " + clearedCount + " team(s)."),
                 true
         );
-        return count;
+        return clearedCount;
+    }
+
+    private static boolean clearSettledWars(LcClaimEconomySavedData economyData, LcClaimEconomySavedData.TeamLinkEntry link, UUID teamId) {
+        if (link.warTargets().isEmpty()) {
+            return false;
+        }
+        economyData.clearWarReferences(teamId);
+        return true;
+    }
+
+    private static boolean clearQueuedWarChanges(LcClaimEconomySavedData economyData, UUID teamId) {
+        TeamQueuedChanges queued = economyData.getPendingState(teamId);
+        if (queued.pendingWarDeclares().isEmpty() && queued.pendingWarEnds().isEmpty()) {
+            return false;
+        }
+
+        TeamQueuedChanges cleared = queued.copy().withoutWarReferences(teamId);
+        for (UUID declareTargetId : new java.util.HashSet<>(queued.pendingWarDeclares())) {
+            cleared = cleared.withoutPendingWarDeclare(declareTargetId);
+        }
+        for (UUID endTargetId : new java.util.HashSet<>(queued.pendingWarEnds())) {
+            cleared = cleared.withoutPendingWarEnd(endTargetId);
+        }
+        economyData.setPendingState(teamId, cleared);
+        return true;
     }
 }
