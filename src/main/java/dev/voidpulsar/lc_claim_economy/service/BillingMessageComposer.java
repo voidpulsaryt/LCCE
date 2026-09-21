@@ -15,78 +15,88 @@ import net.minecraft.network.chat.Style;
 
 import java.util.List;
 
+/**
+ * Turns already-computed billing figures into the chat {@link Component} trees the
+ * mod sends players. Nothing in here derives a price or a quantity - every number
+ * shown was decided elsewhere (mostly {@link BillingBreakdown} and
+ * {@link ConflictBillingMath}); this class only decides how it reads.
+ */
 public final class BillingMessageComposer {
     private static final String DETAILS_COMMAND = "/" + LcClaimEconomy.MOD_ID + " upkeep_details";
+    private static final String BULLET = "  • ";
 
     private BillingMessageComposer() {
     }
 
     public static Component buildUnaffordableRestorationMessage(List<TeamProperty<?>> unaffordable) {
-        MutableComponent msg = Component.literal("⌛ ")
+        MutableComponent out = Component.literal("⌛ ")
                 .withStyle(ChatFormatting.YELLOW)
                 .append(Component.translatable("message.lc_claim_economy.unaffordable_restoration_header", unaffordable.size())
                         .withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD));
-        appendProtectionList(msg, unaffordable, ChatFormatting.YELLOW);
-        msg.append("\n");
-        msg.append(Component.translatable("message.lc_claim_economy.unaffordable_restoration_hint").withStyle(ChatFormatting.GRAY));
-        return msg;
+        appendBulletedProtections(out, unaffordable, ChatFormatting.YELLOW);
+        out.append("\n");
+        out.append(Component.translatable("message.lc_claim_economy.unaffordable_restoration_hint").withStyle(ChatFormatting.GRAY));
+        return out;
     }
 
     public static Component buildRestorationSummary(List<TeamProperty<?>> restored, List<String> restoredWarNames) {
-        MutableComponent msg = Component.empty();
-        boolean wroteAnything = false;
+        MutableComponent out = Component.empty();
+        boolean hasContent = false;
 
         if (!restored.isEmpty()) {
-            msg.append(Component.translatable("message.lc_claim_economy.restoration_header", restored.size())
+            out.append(Component.translatable("message.lc_claim_economy.restoration_header", restored.size())
                     .withStyle(ChatFormatting.GREEN));
-            appendProtectionList(msg, restored, ChatFormatting.WHITE);
-            wroteAnything = true;
+            appendBulletedProtections(out, restored, ChatFormatting.WHITE);
+            hasContent = true;
         }
 
         for (String warName : restoredWarNames) {
-            if (wroteAnything) msg.append("\n");
-            msg.append(Component.translatable("message.lc_claim_economy.war_active", warName)
+            if (hasContent) {
+                out.append("\n");
+            }
+            out.append(Component.translatable("message.lc_claim_economy.war_active", warName)
                     .withStyle(ChatFormatting.GRAY));
-            wroteAnything = true;
+            hasContent = true;
         }
 
-        return msg;
+        return out;
     }
 
     public static Component buildSuspensionSummary(List<TeamProperty<?>> suspended, boolean warsSuspended) {
-        MutableComponent msg = Component.empty();
-        boolean wroteAnything = false;
+        MutableComponent out = Component.empty();
+        boolean hasContent = false;
 
         if (!suspended.isEmpty()) {
-            msg.append(Component.translatable("message.lc_claim_economy.suspension_header", suspended.size())
+            out.append(Component.translatable("message.lc_claim_economy.suspension_header", suspended.size())
                     .withStyle(ChatFormatting.YELLOW));
-            appendProtectionList(msg, suspended, ChatFormatting.WHITE);
-            wroteAnything = true;
+            appendBulletedProtections(out, suspended, ChatFormatting.WHITE);
+            hasContent = true;
         }
 
         if (warsSuspended) {
-            if (wroteAnything) msg.append("\n");
-            msg.append(Component.translatable(
-                    wroteAnything ? "message.lc_claim_economy.suspension_wars" : "message.lc_claim_economy.suspension_wars_header"
+            if (hasContent) {
+                out.append("\n");
+            }
+            out.append(Component.translatable(
+                    hasContent ? "message.lc_claim_economy.suspension_wars" : "message.lc_claim_economy.suspension_wars_header"
             ).withStyle(ChatFormatting.YELLOW));
-            wroteAnything = true;
+            hasContent = true;
         }
 
-        if (wroteAnything) {
-            msg.append("\n");
-            msg.append(Component.translatable("message.lc_claim_economy.suspension_hint").withStyle(ChatFormatting.GRAY));
+        if (hasContent) {
+            out.append("\n");
+            out.append(Component.translatable("message.lc_claim_economy.suspension_hint").withStyle(ChatFormatting.GRAY));
         }
 
-        return msg;
+        return out;
     }
 
-    private static void appendProtectionList(MutableComponent msg, List<TeamProperty<?>> properties, ChatFormatting color) {
+    private static void appendBulletedProtections(MutableComponent out, List<TeamProperty<?>> properties, ChatFormatting color) {
         for (TeamProperty<?> property : properties) {
-            msg.append("\n");
-            msg.append(Component.literal("  • ").withStyle(ChatFormatting.DARK_GRAY));
-            String labelKey = "message.lc_claim_economy.upkeep_priority.protection."
-                    + SafeguardPricing.propertyKey(property);
-            msg.append(Component.translatable(labelKey).withStyle(color));
+            String labelKey = "message.lc_claim_economy.upkeep_priority.protection." + SafeguardPricing.propertyKey(property);
+            out.append("\n");
+            out.append(Component.literal(BULLET).withStyle(ChatFormatting.DARK_GRAY));
+            out.append(Component.translatable(labelKey).withStyle(color));
         }
     }
 
@@ -94,49 +104,48 @@ public final class BillingMessageComposer {
         Component amount = CurrencyTextFormat.formatValue(breakdown.totalCost());
         Component period = BillingCycleFormat.format(breakdown.periodMinutes());
 
-        MutableComponent message = Component.translatable("message.lc_claim_economy.upkeep_paid", amount, period)
-                .withStyle(ChatFormatting.WHITE);
-        message.append(Component.literal(" "));
-        message.append(buildSeeMoreButton());
-        return message;
+        return Component.translatable("message.lc_claim_economy.upkeep_paid", amount, period)
+                .withStyle(ChatFormatting.WHITE)
+                .append(Component.literal(" "))
+                .append(seeMoreLink());
     }
 
-    /** Countdown line for {@code /lcce upkeep_details} and its OP&C equivalent - reports when the next charge fires. */
+    /** Countdown line shared by {@code /lcce upkeep_details} and its OP&C equivalent - reports when the next charge fires. */
     public static Component buildNextChargeLine(long nextUpkeepTick, long gameTime) {
         if (nextUpkeepTick < 0L) {
             return Component.translatable("message.lc_claim_economy.upkeep_detail.next_charge_unknown")
                     .withStyle(ChatFormatting.GRAY);
         }
-        long ticksRemaining = Math.max(0L, nextUpkeepTick - gameTime);
-        Component eta = ticksRemaining <= 0L
+        long ticksLeft = Math.max(0L, nextUpkeepTick - gameTime);
+        Component eta = ticksLeft <= 0L
                 ? Component.translatable("message.lc_claim_economy.upkeep_detail.next_charge_imminent").withStyle(ChatFormatting.GOLD)
-                : Component.literal(DurationFormat.ticksToShortString(ticksRemaining)).withStyle(ChatFormatting.AQUA);
+                : Component.literal(DurationFormat.ticksToShortString(ticksLeft)).withStyle(ChatFormatting.AQUA);
         return Component.translatable("message.lc_claim_economy.upkeep_detail.next_charge_in", eta)
                 .withStyle(ChatFormatting.GRAY);
     }
 
     public static Component buildDetails(BillingBreakdown breakdown) {
-        MutableComponent message = Component.empty();
+        MutableComponent out = Component.empty();
 
-        message.append(Component.translatable("message.lc_claim_economy.upkeep_detail.header")
+        out.append(Component.translatable("message.lc_claim_economy.upkeep_detail.header")
                 .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
-        message.append("\n");
+        out.append("\n");
 
-        appendLine(message, "message.lc_claim_economy.upkeep_detail.period",
-                styled(BillingCycleFormat.format(breakdown.periodMinutes()), ChatFormatting.AQUA));
-        message.append("\n");
+        appendLabeledLine(out, "message.lc_claim_economy.upkeep_detail.period",
+                withColors(BillingCycleFormat.format(breakdown.periodMinutes()), ChatFormatting.AQUA));
+        out.append("\n");
 
         if (breakdown.chunkCount() > 0) {
-            appendLine(message, "message.lc_claim_economy.upkeep_detail.chunks",
+            appendLabeledLine(out, "message.lc_claim_economy.upkeep_detail.chunks",
                     Component.literal(String.valueOf(breakdown.chunkCount())).withStyle(ChatFormatting.GREEN));
         }
 
         if (breakdown.forceLoadCount() > 0) {
-            appendLine(message, "message.lc_claim_economy.upkeep_detail.forceloads",
+            appendLabeledLine(out, "message.lc_claim_economy.upkeep_detail.forceloads",
                     Component.literal(String.valueOf(breakdown.forceLoadCount())).withStyle(ChatFormatting.GREEN));
         }
 
-        appendProtectionSection(message,
+        appendPricedSection(out, new PricedSectionSpec(
                 "message.lc_claim_economy.upkeep_detail.build_heading",
                 breakdown.buildProtectionLines(),
                 breakdown.buildBasePrice(),
@@ -144,9 +153,10 @@ public final class BillingMessageComposer {
                 breakdown.buildProtectionCopper(),
                 "message.lc_claim_economy.upkeep_detail.build_formula",
                 false,
-                1);
+                1
+        ));
 
-        appendProtectionSection(message,
+        appendPricedSection(out, new PricedSectionSpec(
                 "message.lc_claim_economy.upkeep_detail.land_heading",
                 breakdown.landProtectionLines(),
                 breakdown.landBasePrice(),
@@ -154,228 +164,203 @@ public final class BillingMessageComposer {
                 breakdown.landProtectionCopper(),
                 "message.lc_claim_economy.upkeep_detail.land_formula",
                 true,
-                SafeguardPricing.landChunkGroupSize());
+                SafeguardPricing.landChunkGroupSize()
+        ));
 
         if (breakdown.forceLoadCount() > 0 && breakdown.forceLoadCopper() > 0) {
-            message.append("\n");
-            message.append(formatFormula(
+            out.append("\n");
+            out.append(formulaText(
                     "message.lc_claim_economy.upkeep_detail.forceload_formula",
                     CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(breakdown.forceLoadUnitPrice())),
                     breakdown.forceLoadCount(),
                     CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(breakdown.forceLoadCopper()))
             ));
-            message.append("\n");
+            out.append("\n");
         }
 
-        appendWarSection(message, breakdown);
+        appendConflictSection(out, breakdown);
+        appendQueuedChangesSection(out, breakdown);
 
-        appendPendingSection(message, breakdown);
-
-        message.append("\n");
-        appendLine(message, "message.lc_claim_economy.upkeep_detail.total",
+        out.append("\n");
+        appendLabeledLine(out, "message.lc_claim_economy.upkeep_detail.total",
                 CurrencyTextFormat.formatValue(breakdown.totalCost()).copy().withStyle(ChatFormatting.GREEN));
 
-        return message;
+        return out;
     }
 
-    private static void appendProtectionSection(
-            MutableComponent message,
+    /** Grouping for the two near-identical "heading + bulleted lines + formula" blocks (build protections, land protections). */
+    private record PricedSectionSpec(
             String headingKey,
-            java.util.List<BillingBreakdown.ProtectionLine> lines,
+            List<BillingBreakdown.ProtectionLine> lines,
             long basePrice,
             int units,
             long protectionCopper,
             String formulaKey,
             boolean landPricing,
-            int chunkGroupSize
+            int groupSize
     ) {
-        if (lines.isEmpty() || protectionCopper <= 0 || units <= 0) {
+    }
+
+    private static void appendPricedSection(MutableComponent out, PricedSectionSpec spec) {
+        if (spec.lines().isEmpty() || spec.protectionCopper() <= 0 || spec.units() <= 0) {
             return;
         }
 
-        message.append("\n");
-        if (landPricing) {
-            message.append(Component.translatable(headingKey, chunkGroupSize).withStyle(ChatFormatting.YELLOW));
-        } else {
-            message.append(Component.translatable(headingKey).withStyle(ChatFormatting.YELLOW));
-        }
-        message.append("\n");
+        out.append("\n");
+        out.append(spec.landPricing()
+                ? Component.translatable(spec.headingKey(), spec.groupSize()).withStyle(ChatFormatting.YELLOW)
+                : Component.translatable(spec.headingKey()).withStyle(ChatFormatting.YELLOW));
+        out.append("\n");
 
-        for (BillingBreakdown.ProtectionLine line : lines) {
-            Component label = line.extraArg() == null
-                    ? Component.translatable(line.labelKey())
-                    : Component.translatable(line.labelKey(), line.extraArg());
-            message.append(Component.literal("  • ").withStyle(ChatFormatting.DARK_GRAY));
-            message.append(styled(label, ChatFormatting.YELLOW));
-            message.append(Component.literal(" +").withStyle(ChatFormatting.GRAY));
-            message.append(CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(line.pricePerChunk()))
-                    .copy().withStyle(ChatFormatting.GOLD));
-            if (landPricing) {
-                message.append(Component.translatable(
-                        "gui.lc_claim_economy.protection_price_per_n_chunks_suffix",
-                        chunkGroupSize
-                ).withStyle(ChatFormatting.GOLD));
-            } else {
-                message.append(Component.translatable("gui.lc_claim_economy.protection_price_per_chunk_suffix")
-                        .withStyle(ChatFormatting.GOLD));
-            }
-            message.append("\n");
+        for (BillingBreakdown.ProtectionLine line : spec.lines()) {
+            appendPricedLine(out, line, spec.landPricing(), spec.groupSize());
         }
 
-        if (landPricing) {
-            message.append(formatLandFormula(
-                    formulaKey,
-                    CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(basePrice)),
-                    units,
-                    CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(protectionCopper)),
-                    chunkGroupSize
-            ));
-        } else {
-            message.append(formatFormula(
-                    formulaKey,
-                    CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(basePrice)),
-                    units,
-                    CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(protectionCopper))
-            ));
-        }
-        message.append("\n");
+        out.append(spec.landPricing()
+                ? landFormulaText(
+                        spec.formulaKey(),
+                        CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(spec.basePrice())),
+                        spec.units(),
+                        CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(spec.protectionCopper())),
+                        spec.groupSize())
+                : formulaText(
+                        spec.formulaKey(),
+                        CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(spec.basePrice())),
+                        spec.units(),
+                        CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(spec.protectionCopper()))));
+        out.append("\n");
     }
 
-    private static void appendWarSection(MutableComponent message, BillingBreakdown breakdown) {
+    private static void appendPricedLine(MutableComponent out, BillingBreakdown.ProtectionLine line, boolean landPricing, int groupSize) {
+        Component label = line.extraArg() == null
+                ? Component.translatable(line.labelKey())
+                : Component.translatable(line.labelKey(), line.extraArg());
+
+        out.append(Component.literal(BULLET).withStyle(ChatFormatting.DARK_GRAY));
+        out.append(withColors(label, ChatFormatting.YELLOW));
+        out.append(Component.literal(" +").withStyle(ChatFormatting.GRAY));
+        out.append(CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(line.pricePerChunk())).copy().withStyle(ChatFormatting.GOLD));
+        out.append(landPricing
+                ? Component.translatable("gui.lc_claim_economy.protection_price_per_n_chunks_suffix", groupSize).withStyle(ChatFormatting.GOLD)
+                : Component.translatable("gui.lc_claim_economy.protection_price_per_chunk_suffix").withStyle(ChatFormatting.GOLD));
+        out.append("\n");
+    }
+
+    private static void appendConflictSection(MutableComponent out, BillingBreakdown breakdown) {
         if (breakdown.totalWarCopper() <= 0) {
             return;
         }
 
-        message.append("\n");
-        message.append(Component.translatable("message.lc_claim_economy.upkeep_detail.war_heading").withStyle(ChatFormatting.YELLOW));
-        message.append("\n");
+        out.append("\n");
+        out.append(Component.translatable("message.lc_claim_economy.upkeep_detail.war_heading").withStyle(ChatFormatting.YELLOW));
+        out.append("\n");
 
         for (BillingBreakdown.WarLine line : breakdown.warLines()) {
-            message.append(Component.literal("  • ").withStyle(ChatFormatting.DARK_GRAY));
-            message.append(Component.literal(line.displayName()).withStyle(ChatFormatting.YELLOW));
-            message.append(Component.literal(" — ").withStyle(ChatFormatting.GRAY));
-            message.append(Component.translatable(
-                    line.incoming()
-                            ? "message.lc_claim_economy.upkeep_detail.war_incoming_line"
-                            : "message.lc_claim_economy.upkeep_detail.war_outgoing_line",
-                    CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(line.warCostCopper()))
-            ).withStyle(ChatFormatting.GOLD));
-            message.append("\n");
+            String lineKey = line.incoming()
+                    ? "message.lc_claim_economy.upkeep_detail.war_incoming_line"
+                    : "message.lc_claim_economy.upkeep_detail.war_outgoing_line";
+            out.append(Component.literal(BULLET).withStyle(ChatFormatting.DARK_GRAY));
+            out.append(Component.literal(line.displayName()).withStyle(ChatFormatting.YELLOW));
+            out.append(Component.literal(" — ").withStyle(ChatFormatting.GRAY));
+            out.append(Component.translatable(lineKey, CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(line.warCostCopper())))
+                    .withStyle(ChatFormatting.GOLD));
+            out.append("\n");
         }
 
         if (breakdown.incomingWarCopper() > 0) {
-            int k = breakdown.incomingWarCount();
-            double step = ConflictBillingMath.warExponent();
-            message.append(Component.translatable(
+            int incomingCount = breakdown.incomingWarCount();
+            double exponent = ConflictBillingMath.warExponent();
+            out.append(Component.translatable(
                     "message.lc_claim_economy.upkeep_detail.war_incoming_formula",
-                    k,
-                    trimStep(step),
+                    incomingCount,
+                    formatExponent(exponent),
                     CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(breakdown.baseUpkeepCopper())),
-                    ConflictBillingMath.formatExtraTermSum(k, step),
+                    ConflictBillingMath.formatExtraTermSum(incomingCount, exponent),
                     CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(breakdown.incomingWarCopper()))
             ).withStyle(ChatFormatting.GRAY));
-            message.append("\n");
+            out.append("\n");
         }
         if (breakdown.outgoingWarCopper() > 0) {
-            message.append(Component.translatable(
+            out.append(Component.translatable(
                     "message.lc_claim_economy.upkeep_detail.war_outgoing_total",
                     CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(breakdown.outgoingWarCopper()))
             ).withStyle(ChatFormatting.GRAY));
-            message.append("\n");
+            out.append("\n");
         }
 
-        long expectedTotal = breakdown.baseUpkeepCopper() + breakdown.totalWarCopper();
         if (breakdown.baseUpkeepCopper() > 0 || breakdown.totalWarCopper() > 0) {
-            message.append(Component.translatable(
+            long expectedTotal = breakdown.baseUpkeepCopper() + breakdown.totalWarCopper();
+            out.append(Component.translatable(
                     "message.lc_claim_economy.upkeep_detail.war_total_formula",
                     CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(breakdown.baseUpkeepCopper())),
                     CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(breakdown.incomingWarCopper())),
                     CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(breakdown.outgoingWarCopper())),
                     CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(expectedTotal))
             ).withStyle(ChatFormatting.DARK_GRAY));
-            message.append("\n");
+            out.append("\n");
         }
     }
 
-    private static String trimStep(double step) {
-        if (Math.rint(step) == step) {
-            return String.valueOf((long) step);
+    private static String formatExponent(double exponent) {
+        if (Math.rint(exponent) == exponent) {
+            return String.valueOf((long) exponent);
         }
-        return String.format("%.2f", step);
+        return String.format("%.2f", exponent);
     }
 
-    private static void appendPendingSection(MutableComponent message, BillingBreakdown breakdown) {
+    private record PendingCountLine(int count, String translationKey) {
+    }
+
+    private static void appendQueuedChangesSection(MutableComponent out, BillingBreakdown breakdown) {
         if (!breakdown.hasPendingItems()) {
             return;
         }
 
-        message.append("\n");
-        message.append(Component.translatable("message.lc_claim_economy.upkeep_detail.pending_heading")
+        out.append("\n");
+        out.append(Component.translatable("message.lc_claim_economy.upkeep_detail.pending_heading")
                 .withStyle(ChatFormatting.YELLOW, ChatFormatting.BOLD));
-        message.append("\n");
-        message.append(Component.translatable("message.lc_claim_economy.upkeep_detail.pending_hint")
+        out.append("\n");
+        out.append(Component.translatable("message.lc_claim_economy.upkeep_detail.pending_hint")
                 .withStyle(ChatFormatting.GRAY));
-        message.append("\n");
+        out.append("\n");
 
         for (BillingBreakdown.PendingProtectionLine line : breakdown.pendingProtections()) {
-            message.append(Component.literal("  • ").withStyle(ChatFormatting.DARK_GRAY));
-            Component label = Component.translatable(line.labelKey());
             String messageKey = line.dismantled()
                     ? "message.lc_claim_economy.upkeep_detail.pending_protection_dismantled"
                     : "message.lc_claim_economy.upkeep_detail.pending_protection_queued";
-            message.append(Component.translatable(messageKey, label, line.desiredValue())
+            Component label = Component.translatable(line.labelKey());
+            out.append(Component.literal(BULLET).withStyle(ChatFormatting.DARK_GRAY));
+            out.append(Component.translatable(messageKey, label, line.desiredValue())
                     .withStyle(line.dismantled() ? ChatFormatting.RED : ChatFormatting.GOLD));
-            message.append("\n");
+            out.append("\n");
         }
 
         for (BillingBreakdown.PendingWarLine line : breakdown.pendingWars()) {
-            message.append(Component.literal("  • ").withStyle(ChatFormatting.DARK_GRAY));
             String messageKey = line.endWar()
                     ? "message.lc_claim_economy.upkeep_detail.pending_war_end"
                     : "message.lc_claim_economy.upkeep_detail.pending_war_declare";
-            message.append(Component.translatable(messageKey, line.displayName())
-                    .withStyle(ChatFormatting.GOLD));
-            message.append("\n");
+            out.append(Component.literal(BULLET).withStyle(ChatFormatting.DARK_GRAY));
+            out.append(Component.translatable(messageKey, line.displayName()).withStyle(ChatFormatting.GOLD));
+            out.append("\n");
         }
 
-        if (breakdown.pendingForceLoadCount() > 0) {
-            message.append(Component.literal("  • ").withStyle(ChatFormatting.DARK_GRAY));
-            message.append(Component.translatable(
-                    "message.lc_claim_economy.upkeep_detail.pending_forceload",
-                    breakdown.pendingForceLoadCount()
-            ).withStyle(ChatFormatting.GOLD));
-            message.append("\n");
-        }
-
-        if (breakdown.pendingForceUnloadCount() > 0) {
-            message.append(Component.literal("  • ").withStyle(ChatFormatting.DARK_GRAY));
-            message.append(Component.translatable(
-                    "message.lc_claim_economy.upkeep_detail.pending_forceunload",
-                    breakdown.pendingForceUnloadCount()
-            ).withStyle(ChatFormatting.GOLD));
-            message.append("\n");
-        }
-
-        if (breakdown.pendingLandChunkCount() > 0) {
-            message.append(Component.literal("  • ").withStyle(ChatFormatting.DARK_GRAY));
-            message.append(Component.translatable(
-                    "message.lc_claim_economy.upkeep_detail.pending_land_chunks",
-                    breakdown.pendingLandChunkCount()
-            ).withStyle(ChatFormatting.GOLD));
-            message.append("\n");
-        }
-
-        if (breakdown.pendingBuildChunkCount() > 0) {
-            message.append(Component.literal("  • ").withStyle(ChatFormatting.DARK_GRAY));
-            message.append(Component.translatable(
-                    "message.lc_claim_economy.upkeep_detail.pending_build_chunks",
-                    breakdown.pendingBuildChunkCount()
-            ).withStyle(ChatFormatting.GOLD));
-            message.append("\n");
+        List<PendingCountLine> countLines = List.of(
+                new PendingCountLine(breakdown.pendingForceLoadCount(), "message.lc_claim_economy.upkeep_detail.pending_forceload"),
+                new PendingCountLine(breakdown.pendingForceUnloadCount(), "message.lc_claim_economy.upkeep_detail.pending_forceunload"),
+                new PendingCountLine(breakdown.pendingLandChunkCount(), "message.lc_claim_economy.upkeep_detail.pending_land_chunks"),
+                new PendingCountLine(breakdown.pendingBuildChunkCount(), "message.lc_claim_economy.upkeep_detail.pending_build_chunks")
+        );
+        for (PendingCountLine countLine : countLines) {
+            if (countLine.count() <= 0) {
+                continue;
+            }
+            out.append(Component.literal(BULLET).withStyle(ChatFormatting.DARK_GRAY));
+            out.append(Component.translatable(countLine.translationKey(), countLine.count()).withStyle(ChatFormatting.GOLD));
+            out.append("\n");
         }
     }
 
-    private static Component buildSeeMoreButton() {
+    private static Component seeMoreLink() {
         return Component.translatable("message.lc_claim_economy.upkeep_see_more")
                 .withStyle(Style.EMPTY
                         .withColor(ChatFormatting.AQUA)
@@ -388,30 +373,24 @@ public final class BillingMessageComposer {
                         )));
     }
 
-    private static void appendLine(MutableComponent message, String labelKey, Component value) {
-        message.append(Component.translatable(labelKey).withStyle(ChatFormatting.GRAY));
-        message.append(Component.literal(": ").withStyle(ChatFormatting.DARK_GRAY));
-        message.append(value);
-        message.append("\n");
+    private static void appendLabeledLine(MutableComponent out, String labelKey, Component value) {
+        out.append(Component.translatable(labelKey).withStyle(ChatFormatting.GRAY));
+        out.append(Component.literal(": ").withStyle(ChatFormatting.DARK_GRAY));
+        out.append(value);
+        out.append("\n");
     }
 
-    private static Component formatFormula(String key, Component unitPrice, int count, Component subtotal) {
+    private static Component formulaText(String key, Component unitPrice, int count, Component subtotal) {
         return Component.translatable(key, unitPrice, count, subtotal)
                 .withStyle(ChatFormatting.GRAY);
     }
 
-    private static Component formatLandFormula(
-            String key,
-            Component unitPrice,
-            int groups,
-            Component subtotal,
-            int chunkGroupSize
-    ) {
-        return Component.translatable(key, unitPrice, groups, subtotal, chunkGroupSize)
+    private static Component landFormulaText(String key, Component unitPrice, int groups, Component subtotal, int groupSize) {
+        return Component.translatable(key, unitPrice, groups, subtotal, groupSize)
                 .withStyle(ChatFormatting.GRAY);
     }
 
-    private static Component styled(Component component, ChatFormatting... formats) {
+    private static Component withColors(Component component, ChatFormatting... formats) {
         return component.copy().withStyle(formats);
     }
 }

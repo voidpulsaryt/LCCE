@@ -36,48 +36,49 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
- * Standing-conflict management panel reachable from the team hub: three
- * stacked lists (wars against us, wars we started, and teams we could still
- * declare on) each with their own name filter. Every accept/decline/declare
- * click just fires {@link ToggleConflictPayload} at the server and waits for
- * the next {@link dev.voidpulsar.lc_claim_economy.network.ConflictStateBroadcastPayload}
- * to redraw the lists - there's no optimistic local state here.
+ * The team-hub sub-panel for managing standing conflicts: three stacked,
+ * independently-searchable lists (conflicts opened against us, conflicts we
+ * opened, and teams still eligible for a declaration), each rendered by a
+ * {@link StandingList}. Buttons never touch local state directly - every
+ * accept/decline/declare click fires a {@link ToggleConflictPayload} and the
+ * lists simply wait for the resulting
+ * {@link dev.voidpulsar.lc_claim_economy.network.ConflictStateBroadcastPayload}
+ * to trigger {@link #refreshIfOpen()}.
  */
 public class ConflictScreen extends BaseScreen {
-    private static final int HEADER_HEIGHT = LcScreenChrome.HEADER_HEIGHT;
-    private static final int HEADER_BUTTON_SIZE = LcScreenChrome.HEADER_BUTTON_SIZE;
-    private static final int CONTENT_PAD = LcScreenChrome.CONTENT_PAD;
-    private static final int SCROLLBAR_WIDTH = LcScreenChrome.SCROLLBAR_WIDTH;
-    private static final int SECTION_GAP = 6;
-    private static final int SECTION_HEADER_HEIGHT = 20;
-    private static final int SECTION_HEADER_GAP = 2;
-    private static final int MIN_SECTION_LIST_HEIGHT = 28;
-    private static final int ROW_HEIGHT = 22;
-    private static final int ROW_GAP = 2;
-    private static final int ROW_PAD = 6;
-    private static final int ROW_BUTTON_GAP = 4;
-    private static final int EMPTY_ROW_HEIGHT = 14;
-    private static final int FILTER_BOX_HEIGHT = 16;
-    private static final int FILTER_BOX_MIN_WIDTH = 96;
-    private static final int FILTER_BOX_MAX_WIDTH = 160;
+    private static final int TOPBAR_H = LcScreenChrome.HEADER_HEIGHT;
+    private static final int TOPBAR_BTN = LcScreenChrome.HEADER_BUTTON_SIZE;
+    private static final int OUTER_PAD = LcScreenChrome.CONTENT_PAD;
+    private static final int SB_WIDTH = LcScreenChrome.SCROLLBAR_WIDTH;
+    private static final int GROUP_GAP = 6;
+    private static final int LIST_HEADER_H = 20;
+    private static final int LIST_HEADER_GAP = 2;
+    private static final int LIST_MIN_H = 28;
+    private static final int ENTRY_H = 22;
+    private static final int ENTRY_GAP = 2;
+    private static final int ENTRY_PAD = 6;
+    private static final int ENTRY_BTN_GAP = 4;
+    private static final int EMPTY_LABEL_H = 14;
+    private static final int SEARCH_H = 16;
+    private static final int SEARCH_MIN_W = 96;
+    private static final int SEARCH_MAX_W = 160;
 
-    private final MyTeamScreen parentScreen;
-    private SimpleButton returnButton;
-    private SimpleButton costInfoButton;
-    private ConflictSection incomingPanel;
-    private ConflictSection outgoingPanel;
-    private ConflictSection declarablePanel;
+    private final MyTeamScreen hubScreen;
+    private SimpleButton backNavButton;
+    private SimpleButton upkeepInfoButton;
+    private final List<StandingList> standingLists = new ArrayList<>(3);
 
     public ConflictScreen(MyTeamScreen parentScreen) {
-        this.parentScreen = parentScreen;
+        this.hubScreen = parentScreen;
     }
 
     public static void refreshIfOpen() {
-        ConflictScreen open = ClientUtils.getCurrentGuiAs(ConflictScreen.class);
-        if (open != null) {
-            open.refreshSections();
+        ConflictScreen active = ClientUtils.getCurrentGuiAs(ConflictScreen.class);
+        if (active != null) {
+            active.reloadStandingLists();
         }
     }
 
@@ -91,61 +92,62 @@ public class ConflictScreen extends BaseScreen {
 
     @Override
     public void addWidgets() {
-        returnButton = new SimpleButton(this, Component.translatable("gui.back"), Icons.BACK, (button, mouseButton) -> parentScreen.openGui());
-        add(returnButton);
+        backNavButton = new SimpleButton(this, Component.translatable("gui.back"), Icons.BACK, (button, mouseButton) -> hubScreen.openGui());
+        add(backNavButton);
 
-        costInfoButton = new SimpleButton(this, Component.empty(), Icons.INFO, (button, mouseButton) -> {}) {
+        upkeepInfoButton = new SimpleButton(this, Component.empty(), Icons.INFO, (button, mouseButton) -> {}) {
             @Override
             public void addMouseOverText(TooltipList list) {
-                populateCostTooltip(list);
+                writeUpkeepCostTooltip(list);
             }
 
             @Override
             public void playClickSound() {
             }
         };
-        add(costInfoButton);
+        add(upkeepInfoButton);
 
-        incomingPanel = new ConflictSection(
+        standingLists.add(new StandingList(
                 () -> Component.translatable("gui.lc_claim_economy.war.incoming_heading"),
                 ClientConflictState::incoming,
-                PanelRole.INCOMING,
+                RelationKind.INCOMING,
                 Component.translatable("gui.lc_claim_economy.war.empty_incoming").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)
-        );
-        outgoingPanel = new ConflictSection(
+        ));
+        standingLists.add(new StandingList(
                 () -> Component.translatable("gui.lc_claim_economy.war.outgoing_heading"),
                 ClientConflictState::outgoing,
-                PanelRole.OUTGOING,
+                RelationKind.OUTGOING,
                 Component.translatable("gui.lc_claim_economy.war.empty_outgoing").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)
-        );
-        declarablePanel = new ConflictSection(
-                ConflictScreen::buildDeclareHeading,
+        ));
+        standingLists.add(new StandingList(
+                ConflictScreen::declareHeadingText,
                 ClientConflictState::availableTargets,
-                PanelRole.DECLARE,
+                RelationKind.DECLARE,
                 Component.translatable("gui.lc_claim_economy.war.empty_targets").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)
-        );
+        ));
 
-        incomingPanel.addWidgets();
-        outgoingPanel.addWidgets();
-        declarablePanel.addWidgets();
+        for (StandingList list : standingLists) {
+            list.addWidgets();
+        }
     }
 
     @Override
     public void alignWidgets() {
-        returnButton.setPosAndSize(5, 5, HEADER_BUTTON_SIZE, HEADER_BUTTON_SIZE);
-        costInfoButton.setPosAndSize(5 + HEADER_BUTTON_SIZE + 4, 5, HEADER_BUTTON_SIZE, HEADER_BUTTON_SIZE);
+        backNavButton.setPosAndSize(5, 5, TOPBAR_BTN, TOPBAR_BTN);
+        upkeepInfoButton.setPosAndSize(5 + TOPBAR_BTN + 4, 5, TOPBAR_BTN, TOPBAR_BTN);
 
-        int top = HEADER_HEIGHT + 6;
-        int innerHeight = height - top - CONTENT_PAD;
-        int panelWidth = width - CONTENT_PAD * 2;
-        int panelHeight = (innerHeight - SECTION_GAP * 2) / 3;
+        int contentTop = TOPBAR_H + 6;
+        int contentHeight = height - contentTop - OUTER_PAD;
+        int columnWidth = width - OUTER_PAD * 2;
+        int evenRowHeight = (contentHeight - GROUP_GAP * 2) / 3;
 
-        int cursorY = top;
-        incomingPanel.setBounds(CONTENT_PAD, cursorY, panelWidth, panelHeight);
-        cursorY += panelHeight + SECTION_GAP;
-        outgoingPanel.setBounds(CONTENT_PAD, cursorY, panelWidth, panelHeight);
-        cursorY += panelHeight + SECTION_GAP;
-        declarablePanel.setBounds(CONTENT_PAD, cursorY, panelWidth, innerHeight - (cursorY - top));
+        int cursor = contentTop;
+        for (int i = 0; i < standingLists.size(); i++) {
+            boolean isLast = i == standingLists.size() - 1;
+            int rowHeight = isLast ? contentHeight - (cursor - contentTop) : evenRowHeight;
+            standingLists.get(i).setBounds(OUTER_PAD, cursor, columnWidth, rowHeight);
+            cursor += rowHeight + GROUP_GAP;
+        }
     }
 
     @Override
@@ -157,37 +159,25 @@ public class ConflictScreen extends BaseScreen {
     @Override
     public void drawForeground(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
         super.drawForeground(graphics, theme, x, y, w, h);
-        theme.drawString(
-                graphics,
-                Component.translatable("gui.lc_claim_economy.war.title"),
-                x + w / 2,
-                y + 7,
-                NordColors.SNOW_STORM_0,
-                Theme.CENTERED
-        );
+        Component title = Component.translatable("gui.lc_claim_economy.war.title");
+        theme.drawString(graphics, title, x + w / 2, y + 7, NordColors.SNOW_STORM_0, Theme.CENTERED);
     }
 
-    /** Re-pulls each section's rows from the client cache and re-lays-out the screen; called after a fresh broadcast lands. */
-    private void refreshSections() {
-        if (incomingPanel != null) {
-            incomingPanel.refreshList();
-        }
-        if (outgoingPanel != null) {
-            outgoingPanel.refreshList();
-        }
-        if (declarablePanel != null) {
-            declarablePanel.refreshList();
+    /** Pulls fresh rows into every list from the client-side cache and re-runs layout; invoked after a broadcast lands. */
+    private void reloadStandingLists() {
+        for (StandingList list : standingLists) {
+            list.refreshList();
         }
         alignWidgets();
     }
 
-    private enum PanelRole {
+    private enum RelationKind {
         INCOMING,
         OUTGOING,
         DECLARE
     }
 
-    private static Component buildDeclareHeading() {
+    private static Component declareHeadingText() {
         Component base = Component.translatable("gui.lc_claim_economy.war.declare_heading");
         if (ClientConflictState.warDeclarationWindowOpen()) {
             return base;
@@ -201,49 +191,51 @@ public class ConflictScreen extends BaseScreen {
                 ).withStyle(ChatFormatting.RED));
     }
 
-    private static void populateCostTooltip(TooltipList list) {
+    private static void writeUpkeepCostTooltip(TooltipList list) {
+        long baseCopper = ClientConflictState.baseUpkeepCopper();
+        long incomingCopper = ClientConflictState.incomingWarCopper();
+        long outgoingCopper = ClientConflictState.outgoingWarCopper();
+
         list.add(Component.translatable("gui.lc_claim_economy.war.cost_tooltip.title").withStyle(ChatFormatting.GOLD));
         list.blankLine();
         list.add(Component.translatable(
                 "gui.lc_claim_economy.war.cost_tooltip.base",
-                CurrencyTextFormat.formatPrice(ClientConflictState.baseUpkeepCopper())
+                CurrencyTextFormat.formatPrice(baseCopper)
         ));
-        if (ClientConflictState.incomingWarCopper() > 0) {
+        if (incomingCopper > 0) {
             list.add(Component.translatable(
                     "gui.lc_claim_economy.war.cost_tooltip.incoming",
-                    CurrencyTextFormat.formatPrice(ClientConflictState.incomingWarCopper())
+                    CurrencyTextFormat.formatPrice(incomingCopper)
             ));
         }
-        if (ClientConflictState.outgoingWarCopper() > 0) {
+        if (outgoingCopper > 0) {
             list.add(Component.translatable(
                     "gui.lc_claim_economy.war.cost_tooltip.outgoing",
-                    CurrencyTextFormat.formatPrice(ClientConflictState.outgoingWarCopper())
+                    CurrencyTextFormat.formatPrice(outgoingCopper)
             ));
         }
         list.blankLine();
         list.add(Component.translatable(
                 "gui.lc_claim_economy.war.cost_tooltip.total",
-                CurrencyTextFormat.formatPrice(
-                        ClientConflictState.baseUpkeepCopper() + ClientConflictState.totalWarCopper()
-                ),
+                CurrencyTextFormat.formatPrice(baseCopper + ClientConflictState.totalWarCopper()),
                 SafeguardPriceDisplay.upkeepPeriodLabel()
         ).withStyle(ChatFormatting.AQUA));
         list.blankLine();
         list.add(Component.translatable(
                 "gui.lc_claim_economy.war.cost_tooltip.multiplier",
-                renderMultiplier(ClientConflictState.warCostMultiplier())
+                describeMultiplier(ClientConflictState.warCostMultiplier())
         ).withStyle(ChatFormatting.GRAY));
     }
 
-    /** Whole numbers print without a trailing ".0"; the multiplier is a display value only, never re-parsed. */
-    private static String renderMultiplier(double multiplier) {
+    /** A whole-number multiplier prints without a trailing ".0"; this is display-only text, never parsed back. */
+    private static String describeMultiplier(double multiplier) {
         if (Math.rint(multiplier) == multiplier) {
             return String.valueOf((long) multiplier);
         }
         return String.valueOf(multiplier);
     }
 
-    private static Component formatUpkeepCost(long copper) {
+    private static Component formatEntryCostLabel(long copper) {
         if (copper <= 0) {
             return CurrencyTextFormat.formatPrice(copper);
         }
@@ -254,15 +246,14 @@ public class ConflictScreen extends BaseScreen {
         ).withStyle(ChatFormatting.GOLD);
     }
 
-    private static void populateEntryTooltip(TooltipList list, ConflictTeamEntry entry, PanelRole role) {
-        Component period = SafeguardPriceDisplay.upkeepPeriodLabel();
-        boolean pendingDeclare = entry.status() == ConflictEntryStatus.PENDING_DECLARE;
-        boolean pendingEnd = entry.status() == ConflictEntryStatus.PENDING_END;
+    private static void writeEntryTooltip(TooltipList list, ConflictTeamEntry entry, RelationKind kind) {
+        Component periodLabel = SafeguardPriceDisplay.upkeepPeriodLabel();
+        ConflictEntryStatus status = entry.status();
 
-        if (pendingDeclare && role == PanelRole.DECLARE) {
+        if (status == ConflictEntryStatus.PENDING_DECLARE && kind == RelationKind.DECLARE) {
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.pending_declare")
                     .withStyle(ChatFormatting.GOLD));
-            appendCostBreakdown(list, entry, period);
+            writeCostLines(list, entry, periodLabel);
             if (entry.opponentPendingDeclareOnViewer()) {
                 list.blankLine();
                 list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.opponent_pending_declare")
@@ -276,18 +267,18 @@ public class ConflictScreen extends BaseScreen {
             return;
         }
 
-        if (pendingDeclare && role == PanelRole.INCOMING) {
+        if (status == ConflictEntryStatus.PENDING_DECLARE && kind == RelationKind.INCOMING) {
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.pending_incoming")
                     .withStyle(ChatFormatting.GOLD));
-            appendCostBreakdown(list, entry, period);
+            writeCostLines(list, entry, periodLabel);
             return;
         }
 
-        if (pendingEnd && role == PanelRole.OUTGOING) {
+        if (status == ConflictEntryStatus.PENDING_END && kind == RelationKind.OUTGOING) {
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.pending_end")
                     .withStyle(ChatFormatting.GOLD));
-            appendCostBreakdown(list, entry, period);
-            appendVulnerabilityLines(list, entry);
+            writeCostLines(list, entry, periodLabel);
+            writeVulnerabilityLines(list, entry);
             if (ClientConflictState.canManageWar()) {
                 list.blankLine();
                 list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.click_to_cancel")
@@ -296,25 +287,25 @@ public class ConflictScreen extends BaseScreen {
             return;
         }
 
-        appendCostBreakdown(list, entry, period);
-        if (role == PanelRole.DECLARE && entry.opponentPendingDeclareOnViewer()) {
+        writeCostLines(list, entry, periodLabel);
+        if (kind == RelationKind.DECLARE && entry.opponentPendingDeclareOnViewer()) {
             list.blankLine();
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.opponent_pending_declare")
                     .withStyle(ChatFormatting.YELLOW));
         }
-        if (role == PanelRole.DECLARE && !ClientConflictState.warDeclarationWindowOpen()) {
+        if (kind == RelationKind.DECLARE && !ClientConflictState.warDeclarationWindowOpen()) {
             list.blankLine();
             list.add(Component.translatable(
                     "gui.lc_claim_economy.war.entry_tooltip.declare_window_closed",
                     ClientConflictState.warDeclarationWindowDescription()
             ).withStyle(ChatFormatting.RED));
         }
-        if (role == PanelRole.OUTGOING) {
-            appendVulnerabilityLines(list, entry);
+        if (kind == RelationKind.OUTGOING) {
+            writeVulnerabilityLines(list, entry);
         }
     }
 
-    private static void appendVulnerabilityLines(TooltipList list, ConflictTeamEntry entry) {
+    private static void writeVulnerabilityLines(TooltipList list, ConflictTeamEntry entry) {
         if (!entry.hasWarVulnerability()) {
             return;
         }
@@ -335,7 +326,7 @@ public class ConflictScreen extends BaseScreen {
         }
     }
 
-    private static void appendCostBreakdown(TooltipList list, ConflictTeamEntry entry, Component period) {
+    private static void writeCostLines(TooltipList list, ConflictTeamEntry entry, Component period) {
         list.add(Component.translatable(
                 "gui.lc_claim_economy.war.entry_tooltip.base",
                 CurrencyTextFormat.formatPrice(entry.targetBaseUpkeepCopper()),
@@ -353,27 +344,24 @@ public class ConflictScreen extends BaseScreen {
         ).withStyle(ChatFormatting.GOLD));
     }
 
-    /** Case-insensitive substring filter; exact and prefix matches float to the top of the surviving set via {@link #matchScore}. */
-    private static List<ConflictTeamEntry> matchingEntries(List<ConflictTeamEntry> entries, String query) {
+    /** Case-insensitive substring filter; exact and prefix matches sort ahead of plain substring hits via {@link #rankMatch}. */
+    private static List<ConflictTeamEntry> applyNameFilter(List<ConflictTeamEntry> entries, String query) {
         if (entries.isEmpty()) {
             return List.of();
         }
 
-        String normalized = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
-        List<ConflictTeamEntry> matches = new ArrayList<>();
-        for (ConflictTeamEntry candidate : entries) {
-            if (normalized.isEmpty() || candidate.displayName().toLowerCase(Locale.ROOT).contains(normalized)) {
-                matches.add(candidate);
-            }
-        }
+        String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        List<ConflictTeamEntry> filtered = entries.stream()
+                .filter(candidate -> needle.isEmpty() || candidate.displayName().toLowerCase(Locale.ROOT).contains(needle))
+                .collect(Collectors.toCollection(ArrayList::new));
 
-        matches.sort(Comparator
-                .comparingInt((ConflictTeamEntry candidate) -> matchScore(candidate.displayName(), normalized))
+        filtered.sort(Comparator
+                .comparingInt((ConflictTeamEntry candidate) -> rankMatch(candidate.displayName(), needle))
                 .thenComparing(ConflictTeamEntry::displayName, String.CASE_INSENSITIVE_ORDER));
-        return matches;
+        return filtered;
     }
 
-    private static int matchScore(String name, String query) {
+    private static int rankMatch(String name, String query) {
         if (query.isEmpty()) {
             return 0;
         }
@@ -387,70 +375,70 @@ public class ConflictScreen extends BaseScreen {
         return 2;
     }
 
-    /** Bundles one of the three stacked lists (header + filterable rows + its own scrollbar) as a single layout unit. */
-    private final class ConflictSection {
+    /** One of the three stacked lists - a header/filter bar, its filtered rows, and its own scrollbar - laid out as a unit. */
+    private final class StandingList {
         private final Supplier<Component> headingSupplier;
         private final Supplier<List<ConflictTeamEntry>> entriesSource;
-        private final PanelRole role;
-        private final Component placeholderText;
+        private final RelationKind kind;
+        private final Component emptyText;
 
-        private SectionHeader header;
-        private EntryListPanel entryList;
+        private ListHeaderBar headerBar;
+        private EntryRowsPanel rowsPanel;
         private PanelScrollBar scrollBar;
 
-        private ConflictSection(
+        private StandingList(
                 Supplier<Component> headingSupplier,
                 Supplier<List<ConflictTeamEntry>> entriesSource,
-                PanelRole role,
-                Component placeholderText
+                RelationKind kind,
+                Component emptyText
         ) {
             this.headingSupplier = headingSupplier;
             this.entriesSource = entriesSource;
-            this.role = role;
-            this.placeholderText = placeholderText;
+            this.kind = kind;
+            this.emptyText = emptyText;
         }
 
         void addWidgets() {
-            header = new SectionHeader(ConflictScreen.this, headingSupplier, this::refreshList);
-            entryList = new EntryListPanel(ConflictScreen.this, this::visibleEntries, role, placeholderText);
-            scrollBar = new CollapsingScrollBar(ConflictScreen.this, entryList);
+            headerBar = new ListHeaderBar(ConflictScreen.this, headingSupplier, this::refreshList);
+            rowsPanel = new EntryRowsPanel(ConflictScreen.this, this::filteredEntries, kind, emptyText);
+            scrollBar = new AutoHideScrollBar(ConflictScreen.this, rowsPanel);
 
-            ConflictScreen.this.add(header);
-            ConflictScreen.this.add(entryList);
+            ConflictScreen.this.add(headerBar);
+            ConflictScreen.this.add(rowsPanel);
             ConflictScreen.this.add(scrollBar);
         }
 
-        void setBounds(int x, int y, int sectionWidth, int sectionHeight) {
-            header.setPosAndSize(x, y, sectionWidth, SECTION_HEADER_HEIGHT);
-            header.alignWidgets();
-            int listTop = y + SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP;
-            int listHeight = Math.max(MIN_SECTION_LIST_HEIGHT, sectionHeight - SECTION_HEADER_HEIGHT - SECTION_HEADER_GAP);
-            int listWidth = Math.max(0, sectionWidth - SCROLLBAR_WIDTH - 2);
-            entryList.setPosAndSize(x, listTop, listWidth, listHeight);
-            entryList.alignWidgets();
-            scrollBar.setPosAndSize(x + sectionWidth - SCROLLBAR_WIDTH, listTop, SCROLLBAR_WIDTH, listHeight);
+        void setBounds(int x, int y, int listWidth, int listHeight) {
+            headerBar.setPosAndSize(x, y, listWidth, LIST_HEADER_H);
+            headerBar.alignWidgets();
+            int rowsTop = y + LIST_HEADER_H + LIST_HEADER_GAP;
+            int rowsHeight = Math.max(LIST_MIN_H, listHeight - LIST_HEADER_H - LIST_HEADER_GAP);
+            int rowsWidth = Math.max(0, listWidth - SB_WIDTH - 2);
+            rowsPanel.setPosAndSize(x, rowsTop, rowsWidth, rowsHeight);
+            rowsPanel.alignWidgets();
+            scrollBar.setPosAndSize(x + listWidth - SB_WIDTH, rowsTop, SB_WIDTH, rowsHeight);
         }
 
         void refreshList() {
-            if (entryList != null) {
-                entryList.setScrollY(0);
-                entryList.refreshWidgets();
-                entryList.alignWidgets();
+            if (rowsPanel != null) {
+                rowsPanel.setScrollY(0);
+                rowsPanel.refreshWidgets();
+                rowsPanel.alignWidgets();
             }
         }
 
         private String currentQuery() {
-            return header == null ? "" : header.currentQuery();
+            return headerBar == null ? "" : headerBar.currentQuery();
         }
 
-        private List<ConflictTeamEntry> visibleEntries() {
-            return matchingEntries(entriesSource.get(), currentQuery());
+        private List<ConflictTeamEntry> filteredEntries() {
+            return applyNameFilter(entriesSource.get(), currentQuery());
         }
     }
 
-    /** Same as a stock {@link PanelScrollBar}, but disappears entirely instead of drawing a full-length track when nothing scrolls. */
-    private static class CollapsingScrollBar extends PanelScrollBar {
-        CollapsingScrollBar(BaseScreen screen, Panel panel) {
+    /** A {@link PanelScrollBar} that disappears entirely rather than drawing a full-length track once there's nothing to scroll. */
+    private static class AutoHideScrollBar extends PanelScrollBar {
+        AutoHideScrollBar(BaseScreen screen, Panel panel) {
             super(screen, panel);
         }
 
@@ -476,60 +464,60 @@ public class ConflictScreen extends BaseScreen {
         }
     }
 
-    private static class SectionHeader extends Panel {
+    private static class ListHeaderBar extends Panel {
         private final Supplier<Component> headingSupplier;
-        private final Runnable onQueryChanged;
-        private TextBox queryBox;
+        private final Runnable onFilterChanged;
+        private TextBox searchBox;
 
-        SectionHeader(BaseScreen screen, Supplier<Component> headingSupplier, Runnable onQueryChanged) {
+        ListHeaderBar(BaseScreen screen, Supplier<Component> headingSupplier, Runnable onFilterChanged) {
             super(screen);
             this.headingSupplier = headingSupplier;
-            this.onQueryChanged = onQueryChanged;
+            this.onFilterChanged = onFilterChanged;
             setOnlyRenderWidgetsInside(true);
             setOnlyInteractWithWidgetsInside(true);
         }
 
         String currentQuery() {
-            return queryBox == null ? "" : queryBox.getText();
+            return searchBox == null ? "" : searchBox.getText();
         }
 
         @Override
         public void addWidgets() {
-            queryBox = new TextBox(this) {
+            searchBox = new TextBox(this) {
                 @Override
                 public void onTextChanged() {
-                    onQueryChanged.run();
+                    onFilterChanged.run();
                 }
             };
-            queryBox.ghostText = Component.translatable("gui.lc_claim_economy.war.filter_ghost").getString();
-            queryBox.charLimit = 48;
-            add(queryBox);
+            searchBox.ghostText = Component.translatable("gui.lc_claim_economy.war.filter_ghost").getString();
+            searchBox.charLimit = 48;
+            add(searchBox);
         }
 
         @Override
         public void alignWidgets() {
-            if (queryBox == null) {
+            if (searchBox == null) {
                 return;
             }
-            int filterWidth = Math.min(FILTER_BOX_MAX_WIDTH, Math.max(FILTER_BOX_MIN_WIDTH, width / 3));
-            int filterX = Math.max(width - filterWidth - 2, 0);
-            queryBox.setPosAndSize(filterX, (height - FILTER_BOX_HEIGHT) / 2, filterWidth, FILTER_BOX_HEIGHT);
+            int boxWidth = Math.min(SEARCH_MAX_W, Math.max(SEARCH_MIN_W, width / 3));
+            int boxX = Math.max(width - boxWidth - 2, 0);
+            searchBox.setPosAndSize(boxX, (height - SEARCH_H) / 2, boxWidth, SEARCH_H);
         }
 
         @Override
         public void draw(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
             NordColors.POLAR_NIGHT_1.draw(graphics, x, y + h - 1, w, 1);
 
-            if (queryBox != null && queryBox.width > 0) {
-                int boxX = x + queryBox.getX();
-                int boxY = y + queryBox.getY();
-                NordColors.POLAR_NIGHT_0.draw(graphics, boxX, boxY, queryBox.width, queryBox.height);
-                NordColors.POLAR_NIGHT_3.draw(graphics, boxX, boxY + queryBox.height - 1, queryBox.width, 1);
+            if (searchBox != null && searchBox.width > 0) {
+                int boxX = x + searchBox.getX();
+                int boxY = y + searchBox.getY();
+                NordColors.POLAR_NIGHT_0.draw(graphics, boxX, boxY, searchBox.width, searchBox.height);
+                NordColors.POLAR_NIGHT_3.draw(graphics, boxX, boxY + searchBox.height - 1, searchBox.width, 1);
             }
 
-            int titleMaxWidth = queryBox == null || queryBox.width <= 0
+            int titleMaxWidth = searchBox == null || searchBox.width <= 0
                     ? w - 4
-                    : Math.max(0, queryBox.getX() - 6);
+                    : Math.max(0, searchBox.getX() - 6);
             Component heading = headingSupplier.get().copy().withStyle(ChatFormatting.BOLD);
             if (titleMaxWidth > 0 && theme.getStringWidth(heading) > titleMaxWidth) {
                 heading = Component.literal(theme.trimStringToWidth(heading.getString(), titleMaxWidth - 4) + "...");
@@ -542,34 +530,34 @@ public class ConflictScreen extends BaseScreen {
         }
     }
 
-    private static class EntryListPanel extends Panel {
+    private static class EntryRowsPanel extends Panel {
         private final Supplier<List<ConflictTeamEntry>> entriesSource;
-        private final PanelRole role;
-        private final Component placeholderText;
+        private final RelationKind kind;
+        private final Component emptyText;
 
-        EntryListPanel(BaseScreen screen, Supplier<List<ConflictTeamEntry>> entriesSource, PanelRole role, Component placeholderText) {
+        EntryRowsPanel(BaseScreen screen, Supplier<List<ConflictTeamEntry>> entriesSource, RelationKind kind, Component emptyText) {
             super(screen);
             this.entriesSource = entriesSource;
-            this.role = role;
-            this.placeholderText = placeholderText;
+            this.kind = kind;
+            this.emptyText = emptyText;
             setOnlyRenderWidgetsInside(true);
             setOnlyInteractWithWidgetsInside(true);
         }
 
         @Override
         public void addWidgets() {
-            if (role == PanelRole.DECLARE && !ClientConflictState.canManageWar()) {
-                add(new PlaceholderRow(this, Component.translatable("gui.lc_claim_economy.war.view_only").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)));
+            if (kind == RelationKind.DECLARE && !ClientConflictState.canManageWar()) {
+                add(new EmptyStateLabel(this, Component.translatable("gui.lc_claim_economy.war.view_only").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)));
                 return;
             }
 
             List<ConflictTeamEntry> entries = entriesSource.get();
             if (entries.isEmpty()) {
-                Component message = placeholderText;
-                if (role == PanelRole.DECLARE && !ClientConflictState.availableTargets().isEmpty()) {
+                Component message = emptyText;
+                if (kind == RelationKind.DECLARE && !ClientConflictState.availableTargets().isEmpty()) {
                     message = Component.translatable("gui.lc_claim_economy.war.search_empty").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC);
                 }
-                add(new PlaceholderRow(this, message));
+                add(new EmptyStateLabel(this, message));
                 return;
             }
 
@@ -578,22 +566,22 @@ public class ConflictScreen extends BaseScreen {
             }
         }
 
-        private ConflictEntryRow buildRow(ConflictTeamEntry entry) {
-            return switch (role) {
-                case INCOMING -> new ConflictEntryRow(this, entry, role, null, null, true, false);
-                case OUTGOING -> new ConflictEntryRow(
+        private StandingRow buildRow(ConflictTeamEntry entry) {
+            return switch (kind) {
+                case INCOMING -> new StandingRow(this, entry, kind, null, null, true, false);
+                case OUTGOING -> new StandingRow(
                         this,
                         entry,
-                        role,
+                        kind,
                         entry.isPending() ? null : Component.translatable("gui.lc_claim_economy.war.end_war"),
                         entry.teamId(),
                         false,
                         false
                 );
-                case DECLARE -> new ConflictEntryRow(
+                case DECLARE -> new StandingRow(
                         this,
                         entry,
-                        role,
+                        kind,
                         entry.isPending() ? null : Component.translatable("gui.lc_claim_economy.war.declare"),
                         entry.teamId(),
                         false,
@@ -608,21 +596,21 @@ public class ConflictScreen extends BaseScreen {
             for (Widget widget : widgets) {
                 widget.setPos(0, y);
                 widget.setWidth(width);
-                if (widget instanceof PlaceholderRow) {
-                    widget.setHeight(EMPTY_ROW_HEIGHT);
-                    y += EMPTY_ROW_HEIGHT;
-                } else if (widget instanceof ConflictEntryRow row) {
-                    widget.setHeight(ROW_HEIGHT);
+                if (widget instanceof EmptyStateLabel) {
+                    widget.setHeight(EMPTY_LABEL_H);
+                    y += EMPTY_LABEL_H;
+                } else if (widget instanceof StandingRow row) {
+                    widget.setHeight(ENTRY_H);
                     row.alignWidgets();
-                    y += ROW_HEIGHT + ROW_GAP;
+                    y += ENTRY_H + ENTRY_GAP;
                 }
             }
         }
     }
 
-    /** Italic placeholder label with no background/hover treatment - deliberately not {@link dev.voidpulsar.lc_claim_economy.client.gui.widget.EmptyMessageRow}, whose default hover fill doesn't fit these narrower list rows. */
-    private static class PlaceholderRow extends Button {
-        PlaceholderRow(Panel panel, Component label) {
+    /** Italic placeholder label, deliberately without background/hover treatment - unlike {@link dev.voidpulsar.lc_claim_economy.client.gui.widget.EmptyMessageRow}, whose hover fill doesn't suit these narrower rows. */
+    private static class EmptyStateLabel extends Button {
+        EmptyStateLabel(Panel panel, Component label) {
             super(panel, label, Color4I.empty());
         }
 
@@ -640,53 +628,53 @@ public class ConflictScreen extends BaseScreen {
         }
     }
 
-    private static class ConflictEntryRow extends Panel {
-        private static final int INFO_BUTTON_SIZE = 16;
+    private static class StandingRow extends Panel {
+        private static final int INFO_BTN_SIZE = 16;
 
         private final ConflictTeamEntry entry;
-        private final PanelRole role;
-        private final Component primaryActionLabel;
-        private final UUID targetTeamId;
-        private final boolean noActionButton;
-        private final boolean isDeclareAction;
-        private int costBadgeX;
-        private int costBadgeWidth;
+        private final RelationKind kind;
+        private final Component actionLabel;
+        private final UUID actionTargetId;
+        private final boolean suppressAction;
+        private final boolean declareAction;
+        private int badgeX;
+        private int badgeWidth;
 
-        ConflictEntryRow(
+        StandingRow(
                 Panel panel,
                 ConflictTeamEntry entry,
-                PanelRole role,
-                Component primaryActionLabel,
-                UUID targetTeamId,
-                boolean noActionButton,
-                boolean isDeclareAction
+                RelationKind kind,
+                Component actionLabel,
+                UUID actionTargetId,
+                boolean suppressAction,
+                boolean declareAction
         ) {
             super(panel);
             this.entry = entry;
-            this.role = role;
-            this.primaryActionLabel = primaryActionLabel;
-            this.targetTeamId = targetTeamId;
-            this.noActionButton = noActionButton;
-            this.isDeclareAction = isDeclareAction;
+            this.kind = kind;
+            this.actionLabel = actionLabel;
+            this.actionTargetId = actionTargetId;
+            this.suppressAction = suppressAction;
+            this.declareAction = declareAction;
         }
 
-        private void dispatchToggle() {
-            UUID target = targetTeamId != null ? targetTeamId : entry.teamId();
+        private void sendToggle() {
+            UUID target = actionTargetId != null ? actionTargetId : entry.teamId();
             PacketDistributor.sendToServer(new ToggleConflictPayload(target));
         }
 
-        /** Not a layout concern - flags outgoing-war opponents who are missing a protection we could exploit. */
-        private boolean showsVulnerability() {
-            return role == PanelRole.OUTGOING && entry.hasWarVulnerability();
+        /** Purely informational - flags outgoing-war opponents missing a protection we could exploit. Not a layout concern. */
+        private boolean isVulnerableRow() {
+            return kind == RelationKind.OUTGOING && entry.hasWarVulnerability();
         }
 
         @Override
         public void addWidgets() {
-            if (entry.isPending() && ClientConflictState.canManageWar() && role != PanelRole.INCOMING) {
+            if (entry.isPending() && ClientConflictState.canManageWar() && kind != RelationKind.INCOMING) {
                 add(new Button(this, Component.empty(), Color4I.empty()) {
                     @Override
                     public void onClicked(MouseButton button) {
-                        dispatchToggle();
+                        sendToggle();
                     }
 
                     @Override
@@ -695,23 +683,23 @@ public class ConflictScreen extends BaseScreen {
                 });
             }
 
-            if (!noActionButton && !entry.isPending() && primaryActionLabel != null && ClientConflictState.canManageWar()) {
-                boolean declareWindowClosed = isDeclareAction && !ClientConflictState.warDeclarationWindowOpen();
+            if (!suppressAction && !entry.isPending() && actionLabel != null && ClientConflictState.canManageWar()) {
+                boolean windowClosed = declareAction && !ClientConflictState.warDeclarationWindowOpen();
                 add(new NordButton(
                         this,
-                        primaryActionLabel,
-                        isDeclareAction
-                                ? (declareWindowClosed ? ConflictIcons.SWORD.withTint(NordColors.POLAR_NIGHT_3) : ConflictIcons.SWORD)
+                        actionLabel,
+                        declareAction
+                                ? (windowClosed ? ConflictIcons.SWORD.withTint(NordColors.POLAR_NIGHT_3) : ConflictIcons.SWORD)
                                 : Icons.CANCEL.withTint(NordColors.SNOW_STORM_1)
                 ) {
                     @Override
                     public void onClicked(MouseButton button) {
-                        dispatchToggle();
+                        sendToggle();
                     }
 
                     @Override
                     public void addMouseOverText(TooltipList list) {
-                        if (declareWindowClosed) {
+                        if (windowClosed) {
                             list.add(Component.translatable(
                                     "gui.lc_claim_economy.war.entry_tooltip.declare_window_closed",
                                     ClientConflictState.warDeclarationWindowDescription()
@@ -724,7 +712,7 @@ public class ConflictScreen extends BaseScreen {
             add(new SimpleButton(this, Component.empty(), Icons.INFO, (button, mouseButton) -> {}) {
                 @Override
                 public void addMouseOverText(TooltipList list) {
-                    populateEntryTooltip(list, entry, role);
+                    writeEntryTooltip(list, entry, kind);
                 }
 
                 @Override
@@ -742,36 +730,36 @@ public class ConflictScreen extends BaseScreen {
             Theme theme = getGui().getTheme();
             Component badgeText = entry.isPending()
                     ? Component.translatable("gui.lc_claim_economy.pending").withStyle(ChatFormatting.GOLD)
-                    : formatUpkeepCost(entry.warCostCopper());
-            costBadgeWidth = theme.getStringWidth(badgeText) + 10;
+                    : formatEntryCostLabel(entry.warCostCopper());
+            badgeWidth = theme.getStringWidth(badgeText) + 10;
 
-            int rightEdge = width - ROW_PAD;
+            int rightEdge = width - ENTRY_PAD;
             Widget infoWidget = widgets.getLast();
-            infoWidget.setPosAndSize(rightEdge - INFO_BUTTON_SIZE, (height - INFO_BUTTON_SIZE) / 2, INFO_BUTTON_SIZE, INFO_BUTTON_SIZE);
-            rightEdge -= INFO_BUTTON_SIZE + ROW_BUTTON_GAP;
+            infoWidget.setPosAndSize(rightEdge - INFO_BTN_SIZE, (height - INFO_BTN_SIZE) / 2, INFO_BTN_SIZE, INFO_BTN_SIZE);
+            rightEdge -= INFO_BTN_SIZE + ENTRY_BTN_GAP;
 
-            int leftEdge = ROW_PAD;
+            int leftEdge = ENTRY_PAD;
             if (widgets.size() > 1) {
                 Widget primaryWidget = widgets.getFirst();
                 if (entry.isPending()) {
-                    primaryWidget.setPosAndSize(ROW_PAD, 0, rightEdge - ROW_PAD, height);
-                } else if (primaryActionLabel != null) {
-                    int buttonWidth = Math.min(88, Math.max(68, theme.getStringWidth(primaryActionLabel) + 24));
+                    primaryWidget.setPosAndSize(ENTRY_PAD, 0, rightEdge - ENTRY_PAD, height);
+                } else if (actionLabel != null) {
+                    int buttonWidth = Math.min(88, Math.max(68, theme.getStringWidth(actionLabel) + 24));
                     primaryWidget.setPosAndSize(rightEdge - buttonWidth, (height - 18) / 2, buttonWidth, 18);
-                    rightEdge -= buttonWidth + ROW_BUTTON_GAP;
+                    rightEdge -= buttonWidth + ENTRY_BTN_GAP;
                 }
             }
 
-            costBadgeX = Math.max(leftEdge + 40, rightEdge - costBadgeWidth);
+            badgeX = Math.max(leftEdge + 40, rightEdge - badgeWidth);
         }
 
         @Override
         public void drawBackground(GuiGraphics graphics, Theme theme, int x, int y, int w, int h) {
-            if (costBadgeWidth <= 0) {
+            if (badgeWidth <= 0) {
                 alignWidgets();
             }
 
-            boolean vulnerable = showsVulnerability();
+            boolean vulnerable = isVulnerableRow();
             Color4I rowColor = isMouseOver() ? NordColors.POLAR_NIGHT_1 : NordColors.POLAR_NIGHT_2;
             if (vulnerable && !isMouseOver()) {
                 rowColor = NordColors.POLAR_NIGHT_1;
@@ -780,13 +768,13 @@ public class ConflictScreen extends BaseScreen {
             if (vulnerable) {
                 NordColors.YELLOW.withAlpha(isMouseOver() ? 200 : 140).draw(graphics, x + 1, y, 2, h);
             } else if (isMouseOver()) {
-                (isDeclareAction ? NordColors.RED : NordColors.FROST_1).withAlpha(160).draw(graphics, x + 1, y, 2, h);
+                (declareAction ? NordColors.RED : NordColors.FROST_1).withAlpha(160).draw(graphics, x + 1, y, 2, h);
             }
 
             Component badgeText = entry.isPending()
                     ? Component.translatable("gui.lc_claim_economy.pending").withStyle(ChatFormatting.GOLD)
-                    : formatUpkeepCost(entry.warCostCopper());
-            int maxNameWidth = Math.max(0, costBadgeX - ROW_PAD - ROW_BUTTON_GAP);
+                    : formatEntryCostLabel(entry.warCostCopper());
+            int maxNameWidth = Math.max(0, badgeX - ENTRY_PAD - ENTRY_BTN_GAP);
             Component displayName = Component.literal(entry.displayName()).withStyle(ChatFormatting.WHITE);
             Color4I labelColor = vulnerable ? NordColors.YELLOW : NordColors.SNOW_STORM_0;
             if (maxNameWidth > 0 && theme.getStringWidth(displayName) > maxNameWidth) {
@@ -794,11 +782,11 @@ public class ConflictScreen extends BaseScreen {
             }
 
             if (maxNameWidth > 0) {
-                theme.drawString(graphics, displayName, x + ROW_PAD, y + 7, labelColor, 0);
+                theme.drawString(graphics, displayName, x + ENTRY_PAD, y + 7, labelColor, 0);
             }
 
-            NordColors.POLAR_NIGHT_0.withAlpha(200).draw(graphics, x + costBadgeX, y + 4, costBadgeWidth, h - 8);
-            theme.drawString(graphics, badgeText, x + costBadgeX + 5, y + 7, NordColors.SNOW_STORM_0, 0);
+            NordColors.POLAR_NIGHT_0.withAlpha(200).draw(graphics, x + badgeX, y + 4, badgeWidth, h - 8);
+            theme.drawString(graphics, badgeText, x + badgeX + 5, y + 7, NordColors.SNOW_STORM_0, 0);
         }
     }
 }
