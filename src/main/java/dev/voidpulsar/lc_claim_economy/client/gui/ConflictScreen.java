@@ -245,7 +245,7 @@ public class ConflictScreen extends BaseScreen {
     }
 
     private static void writeDeclareTooltip(TooltipList list, ConflictTeamEntry entry, Component periodLabel) {
-        if (entry.status() == ConflictEntryStatus.PENDING_DECLARE) {
+        if (entry.conflictStatus() == ConflictEntryStatus.DECLARE_QUEUED) {
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.pending_declare")
                     .withStyle(ChatFormatting.GOLD));
             writeCostLines(list, entry, periodLabel);
@@ -270,7 +270,7 @@ public class ConflictScreen extends BaseScreen {
     }
 
     private static void writeIncomingTooltip(TooltipList list, ConflictTeamEntry entry, Component periodLabel) {
-        if (entry.status() == ConflictEntryStatus.PENDING_DECLARE) {
+        if (entry.conflictStatus() == ConflictEntryStatus.DECLARE_QUEUED) {
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.pending_incoming")
                     .withStyle(ChatFormatting.GOLD));
         }
@@ -278,7 +278,7 @@ public class ConflictScreen extends BaseScreen {
     }
 
     private static void writeOutgoingTooltip(TooltipList list, ConflictTeamEntry entry, Component periodLabel) {
-        if (entry.status() == ConflictEntryStatus.PENDING_END) {
+        if (entry.conflictStatus() == ConflictEntryStatus.END_QUEUED) {
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.pending_end")
                     .withStyle(ChatFormatting.GOLD));
             writeCostLines(list, entry, periodLabel);
@@ -296,7 +296,7 @@ public class ConflictScreen extends BaseScreen {
     }
 
     private static void writeOpponentPendingNote(TooltipList list, ConflictTeamEntry entry) {
-        if (entry.opponentPendingDeclareOnViewer()) {
+        if (entry.incomingDeclarePending()) {
             list.blankLine();
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.opponent_pending_declare")
                     .withStyle(ChatFormatting.YELLOW));
@@ -314,9 +314,9 @@ public class ConflictScreen extends BaseScreen {
         record Gap(boolean guarded, String translationKey) {
         }
         List<Gap> gaps = List.of(
-                new Gap(entry.blockEditProtected(), "gui.lc_claim_economy.war.entry_tooltip.missing_block_edit"),
-                new Gap(entry.explosionProtected(), "gui.lc_claim_economy.war.entry_tooltip.missing_explosions"),
-                new Gap(entry.pvpProtected(), "gui.lc_claim_economy.war.entry_tooltip.missing_pvp")
+                new Gap(entry.blockProtectionActive(), "gui.lc_claim_economy.war.entry_tooltip.missing_block_edit"),
+                new Gap(entry.explosionProtectionActive(), "gui.lc_claim_economy.war.entry_tooltip.missing_explosions"),
+                new Gap(entry.pvpProtectionActive(), "gui.lc_claim_economy.war.entry_tooltip.missing_pvp")
         );
         for (Gap gap : gaps) {
             if (!gap.guarded()) {
@@ -328,13 +328,13 @@ public class ConflictScreen extends BaseScreen {
     private static void writeCostLines(TooltipList list, ConflictTeamEntry entry, Component period) {
         list.add(Component.translatable(
                 "gui.lc_claim_economy.war.entry_tooltip.base",
-                CurrencyTextFormat.formatPrice(entry.targetBaseUpkeepCopper()),
+                CurrencyTextFormat.formatPrice(entry.opponentBaseUpkeepCopper()),
                 period
         ));
-        if (entry.warCostCopper() > 0) {
+        if (entry.conflictCostCopper() > 0) {
             list.add(Component.translatable(
                     "gui.lc_claim_economy.war.entry_tooltip.cost",
-                    CurrencyTextFormat.formatPrice(entry.warCostCopper()),
+                    CurrencyTextFormat.formatPrice(entry.conflictCostCopper()),
                     period
             ).withStyle(ChatFormatting.GOLD));
             return;
@@ -355,7 +355,7 @@ public class ConflictScreen extends BaseScreen {
         List<ConflictTeamEntry> contains = new ArrayList<>();
 
         for (ConflictTeamEntry candidate : entries) {
-            String lowerName = candidate.displayName().toLowerCase(Locale.ROOT);
+            String lowerName = candidate.opponentName().toLowerCase(Locale.ROOT);
             if (needle.isEmpty() || lowerName.contains(needle)) {
                 switch (rankMatch(lowerName, needle)) {
                     case 0 -> exact.add(candidate);
@@ -365,7 +365,7 @@ public class ConflictScreen extends BaseScreen {
             }
         }
 
-        Comparator<ConflictTeamEntry> byName = Comparator.comparing(ConflictTeamEntry::displayName, String.CASE_INSENSITIVE_ORDER);
+        Comparator<ConflictTeamEntry> byName = Comparator.comparing(ConflictTeamEntry::opponentName, String.CASE_INSENSITIVE_ORDER);
         exact.sort(byName);
         prefixed.sort(byName);
         contains.sort(byName);
@@ -587,13 +587,13 @@ public class ConflictScreen extends BaseScreen {
                 case INCOMING -> new RowSpec(null, null, true, false);
                 case OUTGOING -> new RowSpec(
                         entry.isPending() ? null : Component.translatable("gui.lc_claim_economy.war.end_war"),
-                        entry.teamId(),
+                        entry.opponentId(),
                         false,
                         false
                 );
                 case DECLARE -> new RowSpec(
                         entry.isPending() ? null : Component.translatable("gui.lc_claim_economy.war.declare"),
-                        entry.teamId(),
+                        entry.opponentId(),
                         false,
                         true
                 );
@@ -674,7 +674,7 @@ public class ConflictScreen extends BaseScreen {
         }
 
         private void sendToggle() {
-            UUID target = actionTargetId != null ? actionTargetId : entry.teamId();
+            UUID target = actionTargetId != null ? actionTargetId : entry.opponentId();
             PacketDistributor.sendToServer(new ToggleConflictPayload(target));
         }
 
@@ -686,7 +686,7 @@ public class ConflictScreen extends BaseScreen {
         private Component currentBadgeText() {
             return entry.isPending()
                     ? Component.translatable("gui.lc_claim_economy.pending").withStyle(ChatFormatting.GOLD)
-                    : formatEntryCostLabel(entry.warCostCopper());
+                    : formatEntryCostLabel(entry.conflictCostCopper());
         }
 
         @Override
@@ -790,7 +790,7 @@ public class ConflictScreen extends BaseScreen {
             }
 
             int maxNameWidth = Math.max(0, badgeX - ENTRY_PAD - ENTRY_BTN_GAP);
-            Component displayName = trimToWidth(theme, Component.literal(entry.displayName()).withStyle(ChatFormatting.WHITE), maxNameWidth);
+            Component displayName = trimToWidth(theme, Component.literal(entry.opponentName()).withStyle(ChatFormatting.WHITE), maxNameWidth);
             Color4I labelColor = vulnerable ? NordColors.YELLOW : NordColors.SNOW_STORM_0;
             if (maxNameWidth > 0) {
                 theme.drawString(graphics, displayName, x + ENTRY_PAD, y + 7, labelColor, 0);

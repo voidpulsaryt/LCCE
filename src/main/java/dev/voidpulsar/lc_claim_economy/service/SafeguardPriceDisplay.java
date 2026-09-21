@@ -227,7 +227,7 @@ public final class SafeguardPriceDisplay {
         }
         int count = 0;
         for (var entry : ClientConflictState.incoming()) {
-            if (entry.status() == ConflictEntryStatus.ACTIVE) {
+            if (entry.conflictStatus() == ConflictEntryStatus.ENGAGED) {
                 count++;
             }
         }

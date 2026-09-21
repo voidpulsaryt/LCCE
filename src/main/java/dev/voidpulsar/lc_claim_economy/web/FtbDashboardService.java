@@ -283,14 +283,14 @@ final class FtbDashboardService {
                         .field("teamId", v.teamId().toString())
                         .field("name", v.displayName())
                         .field("costCopper", v.warCostCopper())
-                        .field("pending", v.status() == dev.voidpulsar.lc_claim_economy.network.ConflictEntryStatus.PENDING_DECLARE))
+                        .field("pending", v.status() == dev.voidpulsar.lc_claim_economy.network.ConflictEntryStatus.DECLARE_QUEUED))
                 .toList();
         List<JsonWriter> outgoing = ConflictService.buildOutgoingViews(server, team).stream()
                 .map(v -> JsonWriter.object()
                         .field("teamId", v.teamId().toString())
                         .field("name", v.displayName())
                         .field("costCopper", v.warCostCopper())
-                        .field("pending", v.status() != dev.voidpulsar.lc_claim_economy.network.ConflictEntryStatus.ACTIVE))
+                        .field("pending", v.status() != dev.voidpulsar.lc_claim_economy.network.ConflictEntryStatus.ENGAGED))
                 .toList();
         List<JsonWriter> available = ConflictService.buildAvailableTargets(server, team).stream()
                 .map(v -> JsonWriter.object()

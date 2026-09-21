@@ -57,7 +57,7 @@ public class ClaimMapPanelMixin implements ClaimMapPanelAltToggleAccess {
     private dev.ftb.mods.ftblibrary.ui.Button lastButtonDragged;
 
     @Unique
-    private static final ThreadLocal<Boolean> lcClaimEconomy$skipProblemCount = ThreadLocal.withInitial(() -> false);
+    private static final ThreadLocal<Boolean> lcClaimEconomy$suppressProblemSuffix = ThreadLocal.withInitial(() -> false);
 
     @Redirect(
             method = "drawBackground",
@@ -81,10 +81,10 @@ public class ClaimMapPanelMixin implements ClaimMapPanelAltToggleAccess {
     )
     private MutableComponent lcClaimEconomy$formatClaimProblem(String key) {
         if (ClientPricingCache.isLcClaimResult(key)) {
-            lcClaimEconomy$skipProblemCount.set(true);
+            lcClaimEconomy$suppressProblemSuffix.set(true);
             return ClientPricingCache.claimProblemLine(key);
         }
-        lcClaimEconomy$skipProblemCount.set(false);
+        lcClaimEconomy$suppressProblemSuffix.set(false);
         return Component.translatable(key);
     }
 
@@ -96,8 +96,8 @@ public class ClaimMapPanelMixin implements ClaimMapPanelAltToggleAccess {
             )
     )
     private MutableComponent lcClaimEconomy$hideProblemChunkCount(MutableComponent component, String suffix) {
-        if (Boolean.TRUE.equals(lcClaimEconomy$skipProblemCount.get())) {
-            lcClaimEconomy$skipProblemCount.set(false);
+        if (Boolean.TRUE.equals(lcClaimEconomy$suppressProblemSuffix.get())) {
+            lcClaimEconomy$suppressProblemSuffix.set(false);
             return component;
         }
         return component.append(suffix);
@@ -129,7 +129,7 @@ public class ClaimMapPanelMixin implements ClaimMapPanelAltToggleAccess {
         ResourceKey<Level> dimension = chunkScreen.getDimension().dimension;
         List<String> keys = new ArrayList<>();
         for (XZ pos : Set.copyOf(selectedChunks)) {
-            if (lcClaimEconomy$isClaimedChunk(pos)) {
+            if (lcClaimEconomy$hasClaimAt(pos)) {
                 keys.add(ChunkCoordKey.encode(dimension.location(), pos.x(), pos.z()));
             }
         }
@@ -148,13 +148,13 @@ public class ClaimMapPanelMixin implements ClaimMapPanelAltToggleAccess {
     }
 
     @Unique
-    private boolean lcClaimEconomy$isClaimedChunk(XZ pos) {
-        MapChunk mapChunk = lcClaimEconomy$mapChunk(pos);
+    private boolean lcClaimEconomy$hasClaimAt(XZ pos) {
+        MapChunk mapChunk = lcClaimEconomy$chunkAt(pos);
         return mapChunk != null && mapChunk.getClaimedDate().isPresent();
     }
 
     @Unique
-    private MapChunk lcClaimEconomy$mapChunk(XZ pos) {
+    private MapChunk lcClaimEconomy$chunkAt(XZ pos) {
         return chunkScreen.getDimension()
                 .getRegion(XZ.regionFromChunk(pos.x(), pos.z()))
                 .getDataBlocking()

@@ -41,13 +41,7 @@ public final class ClaimSettlementSupport {
         }
 
         int[] successCount = {0};
-        Runnable unclaimEach = () -> {
-            for (ClaimedChunk chunk : snapshot) {
-                if (chunkData.unclaim(source, chunk.getPos(), false).isSuccess()) {
-                    successCount[0]++;
-                }
-            }
-        };
+        Runnable unclaimEach = () -> successCount[0] = unclaimSnapshot(chunkData, source, snapshot);
 
         if (suppressNotifications) {
             ClaimTransferContext.runSuppressingNotifications(unclaimEach);
@@ -55,5 +49,15 @@ public final class ClaimSettlementSupport {
             unclaimEach.run();
         }
         return successCount[0];
+    }
+
+    private static int unclaimSnapshot(ChunkTeamData chunkData, CommandSourceStack source, List<ClaimedChunk> snapshot) {
+        int successCount = 0;
+        for (ClaimedChunk chunk : snapshot) {
+            if (chunkData.unclaim(source, chunk.getPos(), false).isSuccess()) {
+                successCount++;
+            }
+        }
+        return successCount;
     }
 }

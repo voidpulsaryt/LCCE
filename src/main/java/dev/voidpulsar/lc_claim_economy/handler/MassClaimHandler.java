@@ -47,14 +47,14 @@ public final class MassClaimHandler {
     }
 
     public static boolean rejectIfInsufficientFunds(
-            RequestChunkChangePacket message,
+            RequestChunkChangePacket bulkRequest,
             ServerPlayer requester,
             CommandSourceStack source,
             ChunkTeamData chunkTeamData
     ) {
         // Single-chunk (or non-claim) requests go through the normal
         // per-chunk path in ChunkAcquisitionHandler instead.
-        if (!isBulkClaimAttempt(message)) {
+        if (!isBulkClaimAttempt(bulkRequest)) {
             return false;
         }
 
@@ -71,7 +71,7 @@ public final class MassClaimHandler {
             return false;
         }
 
-        int claimableCount = tallyClaimableChunks(source, chunkTeamData, message.chunks(), requester.serverLevel());
+        int claimableCount = tallyClaimableChunks(source, chunkTeamData, bulkRequest.chunks(), requester.serverLevel());
         if (claimableCount <= 1) {
             return false;
         }
@@ -88,18 +88,18 @@ public final class MassClaimHandler {
             return false;
         }
 
-        reportShortfall(requester, message, account, totalCost, billableClaims);
+        reportShortfall(requester, bulkRequest, account, totalCost, billableClaims);
         return true;
     }
 
-    private static boolean isBulkClaimAttempt(RequestChunkChangePacket message) {
-        return message.action() == RequestChunkChangePacket.ChunkChangeOp.CLAIM && message.chunks().size() > 1;
+    private static boolean isBulkClaimAttempt(RequestChunkChangePacket bulkRequest) {
+        return bulkRequest.action() == RequestChunkChangePacket.ChunkChangeOp.CLAIM && bulkRequest.chunks().size() > 1;
     }
 
     /** Tells the requester why the batch was rejected, then rewinds the client to pre-drag state. */
     private static void reportShortfall(
             ServerPlayer requester,
-            RequestChunkChangePacket message,
+            RequestChunkChangePacket bulkRequest,
             IBankAccount account,
             MoneyValue totalCost,
             int billableClaims
@@ -114,7 +114,7 @@ public final class MassClaimHandler {
         );
         requester.displayClientMessage(chatMessage, false);
         ClaimPricingBroadcast.syncToPlayer(requester);
-        sendRejectionAck(requester, message.chunks().size(), billableClaims);
+        sendRejectionAck(requester, bulkRequest.chunks().size(), billableClaims);
     }
 
     private static void sendRejectionAck(ServerPlayer requester, int totalChunks, int billableClaims) {
@@ -132,11 +132,11 @@ public final class MassClaimHandler {
     }
 
     @Nullable
-    public static ChunkTeamData resolveTeamData(RequestChunkChangePacket message, ServerPlayer requester) {
-        if (message.teamId().isEmpty()) {
+    public static ChunkTeamData resolveTeamData(RequestChunkChangePacket bulkRequest, ServerPlayer requester) {
+        if (bulkRequest.teamId().isEmpty()) {
             return ClaimedChunkManagerImpl.getInstance().getOrCreateData(requester);
         }
-        Optional<Team> targetTeam = FTBTeamsAPI.api().getManager().getTeamByID(message.teamId().get());
+        Optional<Team> targetTeam = FTBTeamsAPI.api().getManager().getTeamByID(bulkRequest.teamId().get());
         if (targetTeam.isEmpty()) {
             return null;
         }

@@ -109,9 +109,9 @@ public class ClaimMapPanelTileButtonMixin {
             return;
         }
 
-        ResourceKey<Level> dimension = ((ClaimMapPanelAccessor) this$0).lcClaimEconomy$getChunkScreen().getDimension().dimension;
+        ResourceKey<Level> dimension = ((ClaimMapPanelAccessor) this$0).lcClaimEconomy$hostScreen().getDimension().dimension;
         String chunkKey = ChunkCoordKey.encode(dimension.location(), chunkPos.x(), chunkPos.z());
-        BaseScreen screen = (BaseScreen) ((ClaimMapPanelAccessor) this$0).lcClaimEconomy$getChunkScreen();
+        BaseScreen screen = (BaseScreen) ((ClaimMapPanelAccessor) this$0).lcClaimEconomy$hostScreen();
         new ChunkUserPermissionsScreen(screen, chunkKey).openGui();
         ci.cancel();
     }
@@ -125,7 +125,7 @@ public class ClaimMapPanelTileButtonMixin {
             return;
         }
 
-        ResourceKey<Level> dimension = ((ClaimMapPanelAccessor) this$0).lcClaimEconomy$getChunkScreen().getDimension().dimension;
+        ResourceKey<Level> dimension = ((ClaimMapPanelAccessor) this$0).lcClaimEconomy$hostScreen().getDimension().dimension;
         int chunkX = chunkPos.x();
         int chunkZ = chunkPos.z();
 
@@ -171,7 +171,7 @@ public class ClaimMapPanelTileButtonMixin {
             int h,
             CallbackInfo ci
     ) {
-        ResourceKey<Level> dimension = ((ClaimMapPanelAccessor) this$0).lcClaimEconomy$getChunkScreen().getDimension().dimension;
+        ResourceKey<Level> dimension = ((ClaimMapPanelAccessor) this$0).lcClaimEconomy$hostScreen().getDimension().dimension;
         int chunkX = chunkPos.x();
         int chunkZ = chunkPos.z();
 

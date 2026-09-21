@@ -73,11 +73,11 @@ public final class QueuedStateUiRefresh {
         // Background syncs (upkeep pending-state pushes, property broadcasts
         // from other players' accepts) would otherwise silently reset the
         // clicked values, making every subsequent Accept a no-op.
-        if (accessor.lcClaimEconomy$getChanged()) {
+        if (accessor.lcClaimEconomy$hasUnsavedEdits()) {
             return;
         }
 
-        ConfigGroup root = accessor.lcClaimEconomy$getGroup();
+        ConfigGroup root = accessor.lcClaimEconomy$rootConfigGroup();
         if (root == null) {
             return;
         }

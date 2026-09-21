@@ -8,5 +8,5 @@ import org.spongepowered.asm.mixin.gen.Accessor;
 @Mixin(value = ChunkScreenPanel.class, remap = false)
 public interface ClaimMapPanelAccessor {
     @Accessor("chunkScreen")
-    ChunkScreen lcClaimEconomy$getChunkScreen();
+    ChunkScreen lcClaimEconomy$hostScreen();
 }

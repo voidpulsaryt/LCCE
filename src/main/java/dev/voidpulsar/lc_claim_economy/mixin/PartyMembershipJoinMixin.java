@@ -23,15 +23,12 @@ public class PartyMembershipJoinMixin {
     private void lcClaimEconomy$dissolvePersonalClaims(PlayerJoinedPartyTeamEvent joinEvent, CallbackInfo callback) {
         ServerPlayer joiningPlayer = joinEvent.getPlayer();
         Team formerTeam = joinEvent.getPreviousTeam();
-        if (!wasSoloDeparture(joiningPlayer, formerTeam)) {
+        // Only a real player leaving their own solo team is a departure worth settling -
+        // a party-to-party transfer has nothing solo-claim-related to dissolve.
+        if (joiningPlayer == null || formerTeam == null || formerTeam.isPartyTeam()) {
             return;
         }
 
         PartyEnrollmentSettlement.settle(joiningPlayer.server, joiningPlayer, formerTeam);
-    }
-
-    /** True only when a real player left their own solo team to join this party - not a party-to-party transfer. */
-    private static boolean wasSoloDeparture(ServerPlayer joiningPlayer, Team formerTeam) {
-        return joiningPlayer != null && formerTeam != null && !formerTeam.isPartyTeam();
     }
 }

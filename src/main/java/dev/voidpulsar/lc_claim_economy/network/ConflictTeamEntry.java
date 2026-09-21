@@ -19,29 +19,29 @@ import java.util.UUID;
  * against the viewer, letting the client warn before the viewer declares back.
  */
 public record ConflictTeamEntry(
-        UUID teamId,
-        String displayName,
-        long targetBaseUpkeepCopper,
-        long warCostCopper,
-        ConflictEntryStatus status,
-        boolean opponentPendingDeclareOnViewer,
-        boolean blockEditProtected,
-        boolean explosionProtected,
-        boolean pvpProtected
+        UUID opponentId,
+        String opponentName,
+        long opponentBaseUpkeepCopper,
+        long conflictCostCopper,
+        ConflictEntryStatus conflictStatus,
+        boolean incomingDeclarePending,
+        boolean blockProtectionActive,
+        boolean explosionProtectionActive,
+        boolean pvpProtectionActive
 ) {
     /** Shorthand for a freshly-active entry with every safeguard still up and nothing pending. */
     public ConflictTeamEntry(
-            UUID teamId,
-            String displayName,
-            long targetBaseUpkeepCopper,
-            long warCostCopper
+            UUID opponentId,
+            String opponentName,
+            long opponentBaseUpkeepCopper,
+            long conflictCostCopper
     ) {
         this(
-                teamId,
-                displayName,
-                targetBaseUpkeepCopper,
-                warCostCopper,
-                ConflictEntryStatus.ACTIVE,
+                opponentId,
+                opponentName,
+                opponentBaseUpkeepCopper,
+                conflictCostCopper,
+                ConflictEntryStatus.ENGAGED,
                 false,
                 true,
                 true,
@@ -50,27 +50,27 @@ public record ConflictTeamEntry(
     }
 
     public boolean isPending() {
-        return status.isPending();
+        return conflictStatus.isPending();
     }
 
     /** True once at least one of the three claim safeguards has been dropped. */
     public boolean hasWarVulnerability() {
-        return !blockEditProtected || !explosionProtected || !pvpProtected;
+        return !blockProtectionActive || !explosionProtectionActive || !pvpProtectionActive;
     }
 
     public static final StreamCodec<FriendlyByteBuf, ConflictTeamEntry> STREAM_CODEC =
             StreamCodec.of(ConflictTeamEntry::writeTo, ConflictTeamEntry::readFrom);
 
     private static void writeTo(FriendlyByteBuf out, ConflictTeamEntry value) {
-        out.writeUUID(value.teamId);
-        out.writeUtf(value.displayName);
-        out.writeVarLong(value.targetBaseUpkeepCopper);
-        out.writeVarLong(value.warCostCopper);
-        out.writeVarInt(value.status.id());
-        out.writeBoolean(value.opponentPendingDeclareOnViewer);
-        out.writeBoolean(value.blockEditProtected);
-        out.writeBoolean(value.explosionProtected);
-        out.writeBoolean(value.pvpProtected);
+        out.writeUUID(value.opponentId);
+        out.writeUtf(value.opponentName);
+        out.writeVarLong(value.opponentBaseUpkeepCopper);
+        out.writeVarLong(value.conflictCostCopper);
+        out.writeVarInt(value.conflictStatus.id());
+        out.writeBoolean(value.incomingDeclarePending);
+        out.writeBoolean(value.blockProtectionActive);
+        out.writeBoolean(value.explosionProtectionActive);
+        out.writeBoolean(value.pvpProtectionActive);
     }
 
     private static ConflictTeamEntry readFrom(FriendlyByteBuf in) {

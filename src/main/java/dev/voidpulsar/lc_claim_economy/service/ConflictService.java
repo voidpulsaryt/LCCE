@@ -75,7 +75,7 @@ public final class ConflictService {
                     displayName,
                     targetBaseUpkeepCopper,
                     warCostCopper,
-                    ConflictEntryStatus.ACTIVE,
+                    ConflictEntryStatus.ENGAGED,
                     false,
                     true,
                     true,
@@ -328,7 +328,7 @@ public final class ConflictService {
                     aggressor,
                     baseUpkeepCopper(srv, aggressor),
                     viewerBaseline,
-                    ConflictEntryStatus.ACTIVE,
+                    ConflictEntryStatus.ENGAGED,
                     false
             ));
         }
@@ -349,7 +349,7 @@ public final class ConflictService {
                     aggressor,
                     baseUpkeepCopper(srv, aggressor),
                     viewerBaseline,
-                    ConflictEntryStatus.PENDING_DECLARE,
+                    ConflictEntryStatus.DECLARE_QUEUED,
                     false
             ));
         }
@@ -404,7 +404,7 @@ public final class ConflictService {
                 continue;
             }
             long billedCost = ConflictBillingMath.ordinalWarTermCopper(viewerBaseline, position++, multiplier);
-            rows.add(describeOpponent(aggressor, baseUpkeepCopper(srv, aggressor), billedCost, ConflictEntryStatus.ACTIVE, false));
+            rows.add(describeOpponent(aggressor, baseUpkeepCopper(srv, aggressor), billedCost, ConflictEntryStatus.ENGAGED, false));
         }
         return sortByName(rows);
     }
@@ -428,8 +428,8 @@ public final class ConflictService {
                 continue;
             }
             ConflictEntryStatus status = queuedChanges.isPendingWarEnd(hostileId)
-                    ? ConflictEntryStatus.PENDING_END
-                    : ConflictEntryStatus.ACTIVE;
+                    ? ConflictEntryStatus.END_QUEUED
+                    : ConflictEntryStatus.ENGAGED;
             long foeBaseline = baseUpkeepCopper(srv, foe);
             rows.add(describeOpponent(foe, foeBaseline, ConflictBillingMath.outgoingWarCostCopper(foeBaseline), status, false));
         }
@@ -453,8 +453,8 @@ public final class ConflictService {
                 continue;
             }
             ConflictEntryStatus status = queuedChanges.isPendingWarEnd(hostileId)
-                    ? ConflictEntryStatus.PENDING_END
-                    : ConflictEntryStatus.ACTIVE;
+                    ? ConflictEntryStatus.END_QUEUED
+                    : ConflictEntryStatus.ENGAGED;
             long foeBaseline = baseUpkeepCopper(srv, foe);
             rows.add(describeOpponent(foe, foeBaseline, ConflictBillingMath.outgoingWarCostCopper(foeBaseline), status, false));
         }
@@ -471,7 +471,7 @@ public final class ConflictService {
                     foe,
                     baseUpkeepCopper(srv, foe),
                     costToDeclareWar(srv, viewer, foe),
-                    ConflictEntryStatus.PENDING_DECLARE,
+                    ConflictEntryStatus.DECLARE_QUEUED,
                     false
             ));
         }
@@ -498,8 +498,8 @@ public final class ConflictService {
             }
             boolean candidatePendingOnViewer = ledger.getPendingState(candidateId).isPendingWarDeclare(viewerId);
             ConflictEntryStatus status = viewerQueuedChanges.isPendingWarDeclare(candidateId)
-                    ? ConflictEntryStatus.PENDING_DECLARE
-                    : ConflictEntryStatus.ACTIVE;
+                    ? ConflictEntryStatus.DECLARE_QUEUED
+                    : ConflictEntryStatus.ENGAGED;
             rows.add(describeOpponent(
                     candidate,
                     baseUpkeepCopper(srv, candidate),

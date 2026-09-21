@@ -21,8 +21,7 @@ public abstract class PvpGuardMixin {
     @Inject(method = "isPvPProtectedChunk", at = @At("HEAD"), cancellable = true, remap = false)
     private void lcClaimEconomy$landPvp(PvPMode mode, Player player, CallbackInfoReturnable<Boolean> cir) {
         ClaimedChunk chunk = chunkUnderPlayer(player);
-        boolean applies = chunk != null && LandChunkService.isLandChunk(chunk);
-        if (!applies) {
+        if (chunk == null || !LandChunkService.isLandChunk(chunk)) {
             return;
         }
         cir.setReturnValue(mode == PvPMode.NEVER);

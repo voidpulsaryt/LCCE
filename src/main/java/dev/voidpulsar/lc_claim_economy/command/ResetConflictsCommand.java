@@ -42,10 +42,10 @@ public final class ResetConflictsCommand {
         List<UUID> touchedTeams = new ArrayList<>();
         for (LcClaimEconomySavedData.TeamLinkEntry link : economyData.getAllLinks()) {
             UUID teamId = link.ftbTeamId();
-            boolean clearedSomething = clearSettledWars(economyData, link, teamId);
-            clearedSomething |= clearQueuedWarChanges(economyData, teamId);
+            boolean settledWarsCleared = clearSettledWars(economyData, link, teamId);
+            boolean queuedChangesCleared = clearQueuedWarChanges(economyData, teamId);
 
-            if (clearedSomething) {
+            if (settledWarsCleared || queuedChangesCleared) {
                 touchedTeams.add(teamId);
             }
         }

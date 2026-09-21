@@ -43,16 +43,16 @@ public class ChunkChangeRequestMixin {
         if (ownerTeam == null) {
             return;
         }
-
-        CommandSourceStack requesterSource = requester.createCommandSourceStack();
-        boolean cannotAfford = MassClaimHandler.rejectIfInsufficientFunds(incomingRequest, requester, requesterSource, ownerTeam);
-        if (cannotAfford) {
+        if (!canAffordBulkOperation(incomingRequest, requester, ownerTeam)) {
             callback.cancel();
             return;
         }
+        ClaimTransferContext.beginExecution(incomingRequest.action(), incomingRequest.chunks().size(), requester.getUUID());
+    }
 
-        int chunkCount = incomingRequest.chunks().size();
-        ClaimTransferContext.beginExecution(incomingRequest.action(), chunkCount, requester.getUUID());
+    private static boolean canAffordBulkOperation(RequestChunkChangePacket incomingRequest, ServerPlayer requester, ChunkTeamData ownerTeam) {
+        CommandSourceStack requesterSource = requester.createCommandSourceStack();
+        return !MassClaimHandler.rejectIfInsufficientFunds(incomingRequest, requester, requesterSource, ownerTeam);
     }
 
     @Inject(

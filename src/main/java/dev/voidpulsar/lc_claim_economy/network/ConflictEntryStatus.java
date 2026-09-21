@@ -7,14 +7,14 @@ package dev.voidpulsar.lc_claim_economy.network;
  * requested and is itself waiting out the window before it actually stops.
  */
 public enum ConflictEntryStatus {
-    ACTIVE,
-    PENDING_DECLARE,
-    PENDING_END;
+    ENGAGED,
+    DECLARE_QUEUED,
+    END_QUEUED;
 
     public static ConflictEntryStatus fromId(int encoded) {
         ConflictEntryStatus[] known = values();
         if (encoded < 0 || encoded >= known.length) {
-            return ACTIVE;
+            return ENGAGED;
         }
         return known[encoded];
     }
@@ -24,6 +24,6 @@ public enum ConflictEntryStatus {
     }
 
     public boolean isPending() {
-        return this != ACTIVE;
+        return this != ENGAGED;
     }
 }

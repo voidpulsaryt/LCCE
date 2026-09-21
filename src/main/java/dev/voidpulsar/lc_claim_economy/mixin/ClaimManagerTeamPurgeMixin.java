@@ -25,11 +25,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class ClaimManagerTeamPurgeMixin {
     @Inject(method = "deleteTeam", at = @At("HEAD"), remap = false)
     private void lcClaimEconomy$settleBeforeDelete(Team departingTeam, CallbackInfo callback) {
-        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
-        if (departingTeam == null || activeServer == null) {
+        if (departingTeam == null) {
             return;
         }
-        settleQuietly(activeServer, departingTeam);
+        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
+        if (activeServer != null) {
+            settleQuietly(activeServer, departingTeam);
+        }
     }
 
     /** Failures here are caught and logged rather than propagated - a settlement bug must never block the deletion the player asked for. */

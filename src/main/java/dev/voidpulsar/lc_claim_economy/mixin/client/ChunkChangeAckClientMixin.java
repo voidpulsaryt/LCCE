@@ -7,8 +7,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import java.util.Map;
-
 /**
  * FTB Chunks' own bulk-claim response packet already carries per-chunk problem ids
  * (from our {@code ChunkAcquisitionHandler} rejecting individual chunks server-side),
@@ -29,9 +27,6 @@ public class ChunkChangeAckClientMixin {
             dev.architectury.networking.NetworkManager.PacketContext senderContext,
             CallbackInfo callback
     ) {
-        int totalChunks = ackPacket.totalChunks();
-        int changedChunks = ackPacket.changedChunks();
-        Map<String, Integer> problemsById = ackPacket.problems();
-        ClientPricingCache.noteChunkUpdate(totalChunks, changedChunks, problemsById);
+        ClientPricingCache.noteChunkUpdate(ackPacket.totalChunks(), ackPacket.changedChunks(), ackPacket.problems());
     }
 }
