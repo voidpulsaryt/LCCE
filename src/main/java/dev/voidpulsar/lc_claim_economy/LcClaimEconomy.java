@@ -32,6 +32,11 @@ import dev.voidpulsar.lc_claim_economy.network.WarpDeletePayload;
 import dev.voidpulsar.lc_claim_economy.network.WarpSetPublicPayload;
 import dev.voidpulsar.lc_claim_economy.network.WarpTeleportOtherPayload;
 import dev.voidpulsar.lc_claim_economy.network.WarpTeleportOwnPayload;
+import dev.voidpulsar.lc_claim_economy.network.RequestMarketPayload;
+import dev.voidpulsar.lc_claim_economy.network.SyncMarketPayload;
+import dev.voidpulsar.lc_claim_economy.network.MarketSellPayload;
+import dev.voidpulsar.lc_claim_economy.network.MarketCancelPayload;
+import dev.voidpulsar.lc_claim_economy.network.MarketBuyPayload;
 import dev.voidpulsar.lc_claim_economy.client.ClientQueuedStateRefreshHandler;
 import dev.voidpulsar.lc_claim_economy.service.BillingCycleService;
 import dev.voidpulsar.lc_claim_economy.teams.LandProperties;
@@ -172,6 +177,31 @@ public class LcClaimEconomy {
                 WarpTeleportOtherPayload.TYPE,
                 WarpTeleportOtherPayload.STREAM_CODEC,
                 WarpTeleportOtherPayload::handleServer
+        );
+        registrar.playToClient(
+                SyncMarketPayload.TYPE,
+                SyncMarketPayload.STREAM_CODEC,
+                SyncMarketPayload::handleClient
+        );
+        registrar.playToServer(
+                RequestMarketPayload.TYPE,
+                RequestMarketPayload.STREAM_CODEC,
+                RequestMarketPayload::handleServer
+        );
+        registrar.playToServer(
+                MarketSellPayload.TYPE,
+                MarketSellPayload.STREAM_CODEC,
+                MarketSellPayload::handleServer
+        );
+        registrar.playToServer(
+                MarketCancelPayload.TYPE,
+                MarketCancelPayload.STREAM_CODEC,
+                MarketCancelPayload::handleServer
+        );
+        registrar.playToServer(
+                MarketBuyPayload.TYPE,
+                MarketBuyPayload.STREAM_CODEC,
+                MarketBuyPayload::handleServer
         );
         registrar.playToServer(
                 PricingRequestPayload.TYPE,

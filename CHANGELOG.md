@@ -6,6 +6,16 @@ All notable changes to this mod are documented here.
 
 ### Added
 
+- **Chunk market GUI** *(FTB Chunks only)* — `/lcce market` with no
+  arguments now opens a screen instead of just being a bare command
+  stub: a status panel for the chunk you're standing in (list it for
+  sale, cancel your own listing, or buy someone else's - the target is
+  always wherever you're standing, same as the existing `/lcce market
+  sell|cancel|buy` commands) plus a scrollable, live-updating list of
+  every chunk currently for sale server-wide. The existing chat-based
+  commands are unchanged and still work exactly as before; the GUI is
+  a new way to reach the same `MarketService` logic, not a behavior
+  change to it.
 - **"All Allies" chunk permission grant** *(FTB Chunks only)* — the per-chunk
   permission screen (`/lcce` chunk permissions GUI) now has a second
   catch-all row alongside "All Players": permissions granted here apply

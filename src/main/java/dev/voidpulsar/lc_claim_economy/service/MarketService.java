@@ -12,9 +12,12 @@ import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
 import dev.voidpulsar.lc_claim_economy.bank.ClaimTransferContext;
 import dev.voidpulsar.lc_claim_economy.data.ChunkCoordKey;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
+import dev.voidpulsar.lc_claim_economy.network.MarketListingDto;
+import dev.voidpulsar.lc_claim_economy.network.SyncMarketPayload;
 import dev.voidpulsar.lc_claim_economy.teams.TeamRegistry;
 import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
 import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
+import dev.voidpulsar.lc_claim_economy.util.WorldDisplayNames;
 import io.github.lightman314.lightmanscurrency.api.money.bank.IBankAccount;
 import io.github.lightman314.lightmanscurrency.api.money.value.MoneyValue;
 import net.minecraft.ChatFormatting;
@@ -23,8 +26,11 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.neoforge.network.PacketDistributor;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -197,6 +203,61 @@ public final class MarketService {
         buyer.displayClientMessage(Component.translatable("message.lc_claim_economy.market.bought", priceText), false);
         ClaimPricingBroadcast.syncToPlayer(buyer);
         notifySeller(server, sellerTeam, Component.translatable("message.lc_claim_economy.market.sold", buyer.getDisplayName(), priceText));
+    }
+
+    /** Pushes the market GUI's full state to a player: their current chunk's listing status (that's the chunk every list/cancel/buy action targets) plus every active listing server-wide. */
+    public static void syncToPlayer(ServerPlayer player) {
+        MinecraftServer server = player.server;
+        if (!FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
+            PacketDistributor.sendToPlayer(player, new SyncMarketPayload(false, false, false, 0L, List.of()));
+            return;
+        }
+
+        ChunkDimPos pos = new ChunkDimPos(player.level(), player.blockPosition());
+        String chunkKey = ChunkCoordKey.encode(pos);
+        ClaimedChunk claimed = FTBChunksAPI.api().getManager().getChunk(pos);
+        Team viewerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
+        Team currentChunkOwner = claimed == null ? null : claimed.getTeamData().getTeam();
+
+        boolean isClaim = currentChunkOwner != null;
+        boolean isOwnClaim = isClaim && viewerTeam != null && currentChunkOwner.getId().equals(viewerTeam.getId());
+
+        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
+        LcClaimEconomySavedData.MarketListing currentListing = savedData.getMarketListing(chunkKey);
+
+        PacketDistributor.sendToPlayer(player, new SyncMarketPayload(
+                isClaim,
+                isOwnClaim,
+                currentListing != null,
+                currentListing != null ? currentListing.priceCopper() : 0L,
+                buildListingDtos(server, savedData, viewerTeam)
+        ));
+    }
+
+    private static List<MarketListingDto> buildListingDtos(
+            MinecraftServer server,
+            LcClaimEconomySavedData savedData,
+            @Nullable Team viewerTeam
+    ) {
+        List<MarketListingDto> result = new ArrayList<>();
+        for (Map.Entry<String, LcClaimEconomySavedData.MarketListing> entry : savedData.getAllMarketListings().entrySet()) {
+            LcClaimEconomySavedData.MarketListing listing = entry.getValue();
+            Team sellerTeam = TeamRegistry.resolve(server, listing.sellerTeamId());
+            String sellerName = sellerTeam != null ? sellerTeam.getName().getString() : listing.sellerName();
+            ChunkDimPos dimPos = ChunkCoordKey.toChunkDimPos(entry.getKey());
+            boolean ownListing = viewerTeam != null && listing.sellerTeamId().equals(viewerTeam.getId());
+            result.add(new MarketListingDto(
+                    entry.getKey(),
+                    WorldDisplayNames.resolve(dimPos.dimension().location()),
+                    dimPos.x(),
+                    dimPos.z(),
+                    sellerName,
+                    listing.priceCopper(),
+                    ownListing
+            ));
+        }
+        result.sort(Comparator.comparingLong(MarketListingDto::priceCopper));
+        return result;
     }
 
     public static void browse(CommandSourceStack source) {
