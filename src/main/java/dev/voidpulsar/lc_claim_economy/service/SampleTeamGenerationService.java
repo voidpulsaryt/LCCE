@@ -37,12 +37,14 @@ import java.util.UUID;
 public final class SampleTeamGenerationService {
     public static final String TEAM_PREFIX = "WarTest";
     public static final int DEFAULT_COUNT = 20;
-    private static final int DEMO_INCOMING_WARS = 4;
-    private static final int DEMO_OUTGOING_WARS = 3;
-    private static final int CHUNK_BASE_X = 2000;
-    private static final int CHUNK_BASE_Z = 2000;
+    private static final int DEMO_INCOMING_COUNT = 4;
+    private static final int DEMO_OUTGOING_COUNT = 3;
+    private static final int DEMO_CHUNK_ORIGIN_X = 2000;
+    private static final int DEMO_CHUNK_ORIGIN_Z = 2000;
 
-    private static final Color4I[] TEAM_COLORS = {
+    // Nord palette, cycled by slot index - just needs to look distinct team-to-team, no
+    // significance beyond that.
+    private static final Color4I[] SLOT_COLORS = {
             Color4I.rgb(0xBF616A),
             Color4I.rgb(0xD08770),
             Color4I.rgb(0xEBCB8B),
@@ -69,6 +71,9 @@ public final class SampleTeamGenerationService {
     public record CountResult(int total, int withClaims, int inDefaultRange) {
     }
 
+    private record DemoWarPlan(int incomingCount, int outgoingCount, int availableTargets) {
+    }
+
     private SampleTeamGenerationService() {
     }
 
@@ -77,49 +82,49 @@ public final class SampleTeamGenerationService {
             return new CountResult(0, 0, 0);
         }
 
-        TeamManager manager = FTBTeamsAPI.api().getManager();
-        int total = 0;
-        int withClaims = 0;
-        for (Team team : manager.getTeams()) {
+        TeamManager teamManager = FTBTeamsAPI.api().getManager();
+        int totalCount = 0;
+        int claimedCount = 0;
+        for (Team team : teamManager.getTeams()) {
             if (!matchesTestTeamPrefix(team.getName().getString())) {
                 continue;
             }
-            total++;
+            totalCount++;
             if (FTBChunksAPI.api().isManagerLoaded() && ConflictService.isClaimTeam(server, team)) {
-                withClaims++;
+                claimedCount++;
             }
         }
 
-        int inDefaultRange = 0;
-        for (int index = 1; index <= DEFAULT_COUNT; index++) {
-            if (findTestTeamBySlot(manager, index) != null) {
-                inDefaultRange++;
+        int filledSlots = 0;
+        for (int slot = 1; slot <= DEFAULT_COUNT; slot++) {
+            if (resolveSlot(teamManager, slot) != null) {
+                filledSlots++;
             }
         }
 
-        return new CountResult(total, withClaims, inDefaultRange);
+        return new CountResult(totalCount, claimedCount, filledSlots);
     }
 
-    public static List<Team> findAllTestTeams(TeamManager manager) {
-        List<Team> testTeams = new ArrayList<>();
-        for (Team team : manager.getTeams()) {
+    public static List<Team> findAllTestTeams(TeamManager teamManager) {
+        List<Team> matches = new ArrayList<>();
+        for (Team team : teamManager.getTeams()) {
             if (matchesTestTeamPrefix(team.getName().getString())) {
-                testTeams.add(team);
+                matches.add(team);
             }
         }
-        testTeams.sort(Comparator.comparing(team -> team.getName().getString(), String.CASE_INSENSITIVE_ORDER));
-        return testTeams;
+        matches.sort(Comparator.comparing(team -> team.getName().getString(), String.CASE_INSENSITIVE_ORDER));
+        return matches;
     }
 
     @Nullable
-    private static Team findTestTeamBySlot(TeamManager manager, int index) {
-        String expectedName = testTeamName(index);
-        Team byLookup = manager.getTeamByName(expectedName).orElse(null);
-        if (byLookup != null) {
-            return byLookup;
+    private static Team resolveSlot(TeamManager teamManager, int slot) {
+        String slotName = slotName(slot);
+        Team byName = teamManager.getTeamByName(slotName).orElse(null);
+        if (byName != null) {
+            return byName;
         }
-        for (Team team : manager.getTeams()) {
-            if (expectedName.equalsIgnoreCase(team.getName().getString())) {
+        for (Team team : teamManager.getTeams()) {
+            if (slotName.equalsIgnoreCase(team.getName().getString())) {
                 return team;
             }
         }
@@ -130,185 +135,185 @@ public final class SampleTeamGenerationService {
         return name.startsWith(TEAM_PREFIX);
     }
 
-    public static ClearResult clear(MinecraftServer server, CommandSourceStack source, int count) {
+    private static String slotName(int slot) {
+        return TEAM_PREFIX + String.format("%02d", slot);
+    }
+
+    public static ClearResult clear(MinecraftServer server, CommandSourceStack source, int limit) {
         if (!FTBTeamsAPI.api().isManagerLoaded()) {
             return new ClearResult(0, 0, 0);
         }
 
-        TeamManager manager = FTBTeamsAPI.api().getManager();
+        TeamManager teamManager = FTBTeamsAPI.api().getManager();
         CommandSourceStack deleteSource = server.createCommandSourceStack().withPermission(4);
-        List<Team> testTeams = findAllTestTeams(manager);
-        if (count > 0 && testTeams.size() > count) {
-            testTeams = new ArrayList<>(testTeams.subList(0, count));
+        List<Team> toDelete = findAllTestTeams(teamManager);
+        if (limit > 0 && toDelete.size() > limit) {
+            toDelete = new ArrayList<>(toDelete.subList(0, limit));
         }
 
-        if (source.getEntity() instanceof ServerPlayer player) {
-            Team playerTeam = manager.getTeamForPlayer(player).orElse(null);
-            if (playerTeam != null) {
-                clearDemoWars(LcClaimEconomySavedData.get(server), playerTeam.getTeamId(), testTeams);
+        ServerPlayer runner = source.getEntity() instanceof ServerPlayer player ? player : null;
+        if (runner != null) {
+            Team runnerTeam = teamManager.getTeamForPlayer(runner).orElse(null);
+            if (runnerTeam != null) {
+                clearDemoWarLinks(LcClaimEconomySavedData.get(server), runnerTeam.getTeamId(), toDelete);
             }
         }
 
-        int deleted = 0;
-        int skipped = 0;
-        int failed = 0;
+        int deletedCount = 0;
+        int skippedCount = 0;
+        int failedCount = 0;
 
-        for (Team team : testTeams) {
+        for (Team team : toDelete) {
             if (!(team instanceof ServerTeam serverTeam)) {
-                skipped++;
+                skippedCount++;
                 LcClaimEconomy.LOGGER.warn("Refusing to delete non-server test team {}", team.getName().getString());
                 continue;
             }
 
             try {
                 serverTeam.delete(deleteSource);
-                deleted++;
+                deletedCount++;
             } catch (Exception exception) {
-                failed++;
+                failedCount++;
                 LcClaimEconomy.LOGGER.warn("Failed to delete test team {}", team.getName().getString(), exception);
             }
         }
 
-        if (source.getEntity() instanceof ServerPlayer player) {
-            ConflictSyncCoordinator.syncToPlayer(player);
+        if (runner != null) {
+            ConflictSyncCoordinator.syncToPlayer(runner);
         }
 
-        return new ClearResult(deleted, skipped, failed);
+        return new ClearResult(deletedCount, skippedCount, failedCount);
     }
 
-    private static String testTeamName(int index) {
-        return TEAM_PREFIX + String.format("%02d", index);
-    }
-
-    public static SeedResult seed(MinecraftServer server, CommandSourceStack source, int count) throws CommandSyntaxException {
+    public static SeedResult seed(MinecraftServer server, CommandSourceStack source, int requestedCount) throws CommandSyntaxException {
         if (!FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
             return new SeedResult(0, 0, 0, 0, 0, 0);
         }
 
-        TeamManager manager = FTBTeamsAPI.api().getManager();
+        TeamManager teamManager = FTBTeamsAPI.api().getManager();
         ResourceKey<Level> dimension = source.getEntity() != null
                 ? source.getEntity().level().dimension()
                 : Level.OVERWORLD;
         CommandSourceStack claimSource = server.createCommandSourceStack().withPermission(4);
 
-        int created = 0;
-        int skipped = 0;
-        int failed = 0;
+        int createdCount = 0;
+        int skippedCount = 0;
+        int failedCount = 0;
 
-        for (int index = 1; index <= count; index++) {
-            String name = testTeamName(index);
-            Team team = findTestTeamBySlot(manager, index);
+        for (int slot = 1; slot <= requestedCount; slot++) {
+            String slotName = slotName(slot);
+            Team team = resolveSlot(teamManager, slot);
             if (team != null) {
                 ChunkTeamData existingClaims = FTBChunksAPI.api().getManager().getOrCreateData(team);
                 if (!existingClaims.getClaimedChunks().isEmpty()) {
-                    skipped++;
+                    skippedCount++;
                     continue;
                 }
             } else {
-                team = manager.createServerTeam(
+                team = teamManager.createServerTeam(
                         source,
-                        name,
+                        slotName,
                         "Dev test team for war UI",
-                        TEAM_COLORS[(index - 1) % TEAM_COLORS.length]
+                        SLOT_COLORS[(slot - 1) % SLOT_COLORS.length]
                 );
             }
 
-            ChunkDimPos chunkPos = new ChunkDimPos(dimension, CHUNK_BASE_X + index, CHUNK_BASE_Z);
+            ChunkDimPos claimPos = new ChunkDimPos(dimension, DEMO_CHUNK_ORIGIN_X + slot, DEMO_CHUNK_ORIGIN_Z);
             ChunkTeamData chunkData = FTBChunksAPI.api().getManager().getOrCreateData(team);
-            ClaimResult claimResult = chunkData.claim(claimSource, chunkPos, false);
+            ClaimResult claimResult = chunkData.claim(claimSource, claimPos, false);
             if (!claimResult.isSuccess()) {
-                failed++;
-                LcClaimEconomy.LOGGER.warn("Failed to claim chunk for {} at {}: {}", name, chunkPos, claimResult.getResultId());
+                failedCount++;
+                LcClaimEconomy.LOGGER.warn("Failed to claim chunk for {} at {}: {}", slotName, claimPos, claimResult.getResultId());
                 continue;
             }
 
-            created++;
+            createdCount++;
         }
 
-        WarSeedResult warResult = seedDemoWars(server, source.getEntity() instanceof ServerPlayer player ? player : null, count);
-        if (source.getEntity() instanceof ServerPlayer player) {
-            ConflictSyncCoordinator.syncToPlayer(player);
+        ServerPlayer runner = source.getEntity() instanceof ServerPlayer player ? player : null;
+        DemoWarPlan warPlan = seedDemoWars(server, runner, requestedCount);
+        if (runner != null) {
+            ConflictSyncCoordinator.syncToPlayer(runner);
         }
 
         return new SeedResult(
-                created,
-                skipped,
-                failed,
-                warResult.incomingWars(),
-                warResult.outgoingWars(),
-                warResult.availableTargets()
+                createdCount,
+                skippedCount,
+                failedCount,
+                warPlan.incomingCount(),
+                warPlan.outgoingCount(),
+                warPlan.availableTargets()
         );
     }
 
-    private record WarSeedResult(int incomingWars, int outgoingWars, int availableTargets) {
-    }
-
-    private static WarSeedResult seedDemoWars(MinecraftServer server, @Nullable ServerPlayer player, int count) {
+    private static DemoWarPlan seedDemoWars(MinecraftServer server, @Nullable ServerPlayer runner, int slotLimit) {
         if (!ConflictService.isEnabled()) {
-            return new WarSeedResult(0, 0, 0);
+            return new DemoWarPlan(0, 0, 0);
         }
-        if (player == null || !FTBTeamsAPI.api().isManagerLoaded()) {
-            return new WarSeedResult(0, 0, 0);
-        }
-
-        Team playerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
-        if (playerTeam == null || !ConflictService.isClaimTeam(server, playerTeam)) {
-            LcClaimEconomy.LOGGER.info("Skipped demo war seeding: {} has no claimed chunks", player.getGameProfile().getName());
-            return new WarSeedResult(0, 0, 0);
+        if (runner == null || !FTBTeamsAPI.api().isManagerLoaded()) {
+            return new DemoWarPlan(0, 0, 0);
         }
 
-        TeamManager manager = FTBTeamsAPI.api().getManager();
+        Team runnerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(runner).orElse(null);
+        if (runnerTeam == null || !ConflictService.isClaimTeam(server, runnerTeam)) {
+            LcClaimEconomy.LOGGER.info("Skipped demo war seeding: {} has no claimed chunks", runner.getGameProfile().getName());
+            return new DemoWarPlan(0, 0, 0);
+        }
+
+        TeamManager teamManager = FTBTeamsAPI.api().getManager();
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        UUID playerTeamId = playerTeam.getTeamId();
+        UUID runnerTeamId = runnerTeam.getTeamId();
 
-        List<Team> testTeams = new ArrayList<>();
-        for (int index = 1; index <= count; index++) {
-            Team testTeam = findTestTeamBySlot(manager, index);
-            if (testTeam != null && ConflictService.isClaimTeam(server, testTeam)) {
-                testTeams.add(testTeam);
+        List<Team> candidates = new ArrayList<>();
+        for (int slot = 1; slot <= slotLimit; slot++) {
+            Team slotTeam = resolveSlot(teamManager, slot);
+            if (slotTeam != null && ConflictService.isClaimTeam(server, slotTeam)) {
+                candidates.add(slotTeam);
             }
         }
-        if (testTeams.isEmpty()) {
-            for (Team testTeam : findAllTestTeams(manager)) {
-                if (ConflictService.isClaimTeam(server, testTeam)) {
-                    testTeams.add(testTeam);
+        if (candidates.isEmpty()) {
+            for (Team team : findAllTestTeams(teamManager)) {
+                if (ConflictService.isClaimTeam(server, team)) {
+                    candidates.add(team);
                 }
             }
         }
 
-        clearDemoWars(savedData, playerTeamId, testTeams);
+        clearDemoWarLinks(savedData, runnerTeamId, candidates);
 
-        int incomingCount = Math.min(DEMO_INCOMING_WARS, testTeams.size());
-        int outgoingCount = Math.min(DEMO_OUTGOING_WARS, Math.max(0, testTeams.size() - incomingCount));
+        int incomingCount = Math.min(DEMO_INCOMING_COUNT, candidates.size());
+        int outgoingCount = Math.min(DEMO_OUTGOING_COUNT, Math.max(0, candidates.size() - incomingCount));
 
         for (int i = 0; i < incomingCount; i++) {
-            savedData.setWarTarget(testTeams.get(i).getTeamId(), playerTeamId, true);
+            savedData.setWarTarget(candidates.get(i).getTeamId(), runnerTeamId, true);
         }
 
         for (int i = 0; i < outgoingCount; i++) {
-            savedData.setWarTarget(playerTeamId, testTeams.get(incomingCount + i).getTeamId(), true);
+            savedData.setWarTarget(runnerTeamId, candidates.get(incomingCount + i).getTeamId(), true);
         }
 
-        int availableTargets = Math.max(0, testTeams.size() - incomingCount - outgoingCount);
-        return new WarSeedResult(incomingCount, outgoingCount, availableTargets);
+        int availableTargets = Math.max(0, candidates.size() - incomingCount - outgoingCount);
+        return new DemoWarPlan(incomingCount, outgoingCount, availableTargets);
     }
 
-    private static void clearDemoWars(LcClaimEconomySavedData savedData, UUID playerTeamId, List<Team> testTeams) {
-        Set<UUID> testTeamIds = new HashSet<>();
-        for (Team testTeam : testTeams) {
-            testTeamIds.add(testTeam.getTeamId());
+    /** Clears any war link between {@code centerTeamId} and the given demo teams, in either direction. */
+    private static void clearDemoWarLinks(LcClaimEconomySavedData savedData, UUID centerTeamId, List<Team> demoTeams) {
+        Set<UUID> demoTeamIds = new HashSet<>();
+        for (Team team : demoTeams) {
+            demoTeamIds.add(team.getTeamId());
         }
 
-        for (UUID targetId : new HashSet<>(savedData.getWarTargets(playerTeamId))) {
-            if (testTeamIds.contains(targetId)) {
-                savedData.setWarTarget(playerTeamId, targetId, false);
+        for (UUID targetId : new HashSet<>(savedData.getWarTargets(centerTeamId))) {
+            if (demoTeamIds.contains(targetId)) {
+                savedData.setWarTarget(centerTeamId, targetId, false);
             }
         }
 
-        for (Team testTeam : testTeams) {
-            UUID testTeamId = testTeam.getTeamId();
-            if (savedData.isAtWarWith(testTeamId, playerTeamId)) {
-                savedData.setWarTarget(testTeamId, playerTeamId, false);
+        for (Team team : demoTeams) {
+            UUID demoTeamId = team.getTeamId();
+            if (savedData.isAtWarWith(demoTeamId, centerTeamId)) {
+                savedData.setWarTarget(demoTeamId, centerTeamId, false);
             }
         }
     }
