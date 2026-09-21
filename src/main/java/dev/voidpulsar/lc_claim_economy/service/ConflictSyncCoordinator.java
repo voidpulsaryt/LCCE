@@ -15,6 +15,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * Pushes a fresh {@link ConflictStateBroadcastPayload} to whichever clients need one - a single
+ * player reconnecting or opening the war screen, an entire team after one of its members' views
+ * would go stale, or the wider ripple of everyone whose numbers depend on a team that just
+ * changed (see {@link #onUpkeepFactorsChanged}).
+ */
 public final class ConflictSyncCoordinator {
     private ConflictSyncCoordinator() {
     }
@@ -23,11 +29,11 @@ public final class ConflictSyncCoordinator {
         if (!FTBTeamsAPI.api().isManagerLoaded()) {
             return;
         }
-        Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
-        if (team == null) {
+        Team playerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
+        if (playerTeam == null) {
             return;
         }
-        PacketDistributor.sendToPlayer(player, createPayload(player.server, team, player.getUUID()));
+        PacketDistributor.sendToPlayer(player, snapshotFor(player.server, playerTeam, player.getUUID()));
     }
 
     public static void syncToTeam(MinecraftServer server, UUID teamId) {
@@ -38,18 +44,21 @@ public final class ConflictSyncCoordinator {
         if (team == null) {
             return;
         }
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            Team playerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
-            if (playerTeam != null && playerTeam.getTeamId().equals(teamId)) {
-                PacketDistributor.sendToPlayer(player, createPayload(server, team, player.getUUID()));
+        for (ServerPlayer online : server.getPlayerList().getPlayers()) {
+            Team onlinePlayerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(online).orElse(null);
+            if (onlinePlayerTeam != null && onlinePlayerTeam.getTeamId().equals(teamId)) {
+                PacketDistributor.sendToPlayer(online, snapshotFor(server, team, online.getUUID()));
             }
         }
     }
 
     /**
-     * War costs are derived from each team's live upkeep (including queued
-     * protection changes). Push fresh values to every team whose war UI or
-     * next upkeep charge depends on the changed team.
+     * War costs are derived from each team's live upkeep (including queued protection
+     * changes), so a change to one team can silently stale-date the numbers several other
+     * teams are looking at: the team itself, every team currently at war with it (their
+     * outgoing-war line depends on the changed team's upkeep), and - if the changed team is
+     * still a live claim team - every other online claim team, since it might newly qualify or
+     * stop qualifying as a war target.
      */
     public static void onUpkeepFactorsChanged(MinecraftServer server, Team changedTeam) {
         if (!ConflictService.isEnabled()) {
@@ -59,35 +68,34 @@ public final class ConflictSyncCoordinator {
             return;
         }
 
-        UUID teamId = changedTeam.getTeamId();
-        Set<UUID> synced = new HashSet<>();
-        syncToTeam(server, teamId);
-        synced.add(teamId);
+        UUID changedTeamId = changedTeam.getTeamId();
+        Set<UUID> alreadyPushed = new HashSet<>();
+        syncToTeam(server, changedTeamId);
+        alreadyPushed.add(changedTeamId);
 
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        for (LcClaimEconomySavedData.TeamLinkEntry entry : savedData.getAllLinks()) {
-            if (entry.warTargets().contains(teamId) && synced.add(entry.ftbTeamId())) {
-                syncToTeam(server, entry.ftbTeamId());
+        LcClaimEconomySavedData ledger = LcClaimEconomySavedData.get(server);
+        for (LcClaimEconomySavedData.TeamLinkEntry link : ledger.getAllLinks()) {
+            if (link.warTargets().contains(changedTeamId) && alreadyPushed.add(link.ftbTeamId())) {
+                syncToTeam(server, link.ftbTeamId());
             }
         }
 
         if (!ConflictService.isClaimTeam(server, changedTeam)) {
             return;
         }
-        for (Team team : TeamRegistry.trackedTeams(server)) {
-            if (team.getTeamId().equals(teamId)) {
+        for (Team candidate : TeamRegistry.trackedTeams(server)) {
+            UUID candidateId = candidate.getTeamId();
+            if (candidateId.equals(changedTeamId)) {
                 continue;
             }
-            if (!ConflictService.isClaimTeam(server, team) || team.getOnlineMembers().isEmpty()) {
-                continue;
-            }
-            if (synced.add(team.getTeamId())) {
-                syncToTeam(server, team.getTeamId());
+            boolean worthPushing = ConflictService.isClaimTeam(server, candidate) && !candidate.getOnlineMembers().isEmpty();
+            if (worthPushing && alreadyPushed.add(candidateId)) {
+                syncToTeam(server, candidateId);
             }
         }
     }
 
-    private static ConflictStateBroadcastPayload createPayload(MinecraftServer server, Team team, UUID viewerId) {
+    private static ConflictStateBroadcastPayload snapshotFor(MinecraftServer server, Team team, UUID viewerId) {
         ConflictService.WarCostBreakdown costs = ConflictService.calculateWarCosts(server, team);
         return new ConflictStateBroadcastPayload(
                 costs.baseUpkeepCopper(),
@@ -103,18 +111,18 @@ public final class ConflictSyncCoordinator {
         );
     }
 
-    private static List<ConflictTeamEntry> toEntries(List<ConflictService.WarTeamView> views) {
-        return views.stream()
-                .map(view -> new ConflictTeamEntry(
-                        view.teamId(),
-                        view.displayName(),
-                        view.targetBaseUpkeepCopper(),
-                        view.warCostCopper(),
-                        view.status(),
-                        view.opponentPendingDeclareOnViewer(),
-                        view.blockEditProtected(),
-                        view.explosionProtected(),
-                        view.pvpProtected()
+    private static List<ConflictTeamEntry> toEntries(List<ConflictService.WarTeamView> rows) {
+        return rows.stream()
+                .map(row -> new ConflictTeamEntry(
+                        row.teamId(),
+                        row.displayName(),
+                        row.targetBaseUpkeepCopper(),
+                        row.warCostCopper(),
+                        row.status(),
+                        row.opponentPendingDeclareOnViewer(),
+                        row.blockEditProtected(),
+                        row.explosionProtected(),
+                        row.pvpProtected()
                 ))
                 .toList();
     }
