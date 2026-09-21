@@ -10,49 +10,60 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 
 import javax.annotation.Nullable;
+import java.util.EnumSet;
 import java.util.UUID;
 
+/**
+ * Thread-scoped coordination for chunk claim/unclaim flows: suppressing duplicate
+ * chat spam and ledger writes while a batch of chunks is being processed together,
+ * and rolling the per-chunk outcomes up into a single summary once the batch ends.
+ */
 public final class ClaimTransferContext {
-    private static final ThreadLocal<Boolean> VALIDATING = ThreadLocal.withInitial(() -> false);
-    private static final ThreadLocal<Boolean> SUPPRESS_NOTIFICATIONS = ThreadLocal.withInitial(() -> false);
-    private static final ThreadLocal<Boolean> SUPPRESS_ECONOMY = ThreadLocal.withInitial(() -> false);
-    private static final ThreadLocal<UUID> PERSONAL_REFUND_PLAYER = new ThreadLocal<>();
-    private static final ThreadLocal<BatchState> EXECUTING = new ThreadLocal<>();
+
+    private enum Mode {
+        VALIDATING,
+        SUPPRESS_NOTIFICATIONS,
+        SUPPRESS_ECONOMY
+    }
+
+    /** Everything this thread is currently doing lives in one slot instead of several independent ThreadLocals. */
+    private static final class ThreadScope {
+        private final EnumSet<Mode> modes = EnumSet.noneOf(Mode.class);
+        private UUID personalRefundPlayer;
+        private Ledger ledger;
+    }
+
+    private static final ThreadLocal<ThreadScope> SCOPE = ThreadLocal.withInitial(ThreadScope::new);
 
     private ClaimTransferContext() {
     }
 
     public static boolean isValidating() {
-        return VALIDATING.get();
+        return SCOPE.get().modes.contains(Mode.VALIDATING);
     }
 
     public static void beginValidation() {
-        VALIDATING.set(true);
+        SCOPE.get().modes.add(Mode.VALIDATING);
     }
 
     public static void endValidation() {
-        VALIDATING.remove();
+        SCOPE.get().modes.remove(Mode.VALIDATING);
     }
 
     public static boolean isExecuting() {
-        return EXECUTING.get() != null;
+        return SCOPE.get().ledger != null;
     }
 
     public static boolean suppressNotifications() {
-        return SUPPRESS_NOTIFICATIONS.get();
+        return SCOPE.get().modes.contains(Mode.SUPPRESS_NOTIFICATIONS);
     }
 
     public static void runSuppressingNotifications(Runnable action) {
-        SUPPRESS_NOTIFICATIONS.set(true);
-        try {
-            action.run();
-        } finally {
-            SUPPRESS_NOTIFICATIONS.remove();
-        }
+        withMode(Mode.SUPPRESS_NOTIFICATIONS, action);
     }
 
     public static boolean isEconomySuppressed() {
-        return SUPPRESS_ECONOMY.get();
+        return SCOPE.get().modes.contains(Mode.SUPPRESS_ECONOMY);
     }
 
     /**
@@ -63,181 +74,212 @@ public final class ClaimTransferContext {
      * chat spam, since the caller sends its own messages.
      */
     public static void runAsInternalTransfer(Runnable action) {
-        SUPPRESS_NOTIFICATIONS.set(true);
-        SUPPRESS_ECONOMY.set(true);
+        ThreadScope scope = SCOPE.get();
+        scope.modes.add(Mode.SUPPRESS_NOTIFICATIONS);
+        scope.modes.add(Mode.SUPPRESS_ECONOMY);
         try {
             action.run();
         } finally {
-            SUPPRESS_NOTIFICATIONS.remove();
-            SUPPRESS_ECONOMY.remove();
+            scope.modes.remove(Mode.SUPPRESS_NOTIFICATIONS);
+            scope.modes.remove(Mode.SUPPRESS_ECONOMY);
         }
     }
 
     public static void runPersonalRefundSettlement(UUID playerId, Runnable action) {
-        SUPPRESS_NOTIFICATIONS.set(true);
-        PERSONAL_REFUND_PLAYER.set(playerId);
+        ThreadScope scope = SCOPE.get();
+        scope.modes.add(Mode.SUPPRESS_NOTIFICATIONS);
+        scope.personalRefundPlayer = playerId;
         try {
             action.run();
         } finally {
-            SUPPRESS_NOTIFICATIONS.remove();
-            PERSONAL_REFUND_PLAYER.remove();
+            scope.modes.remove(Mode.SUPPRESS_NOTIFICATIONS);
+            scope.personalRefundPlayer = null;
         }
     }
 
     @Nullable
     public static UUID personalRefundPlayerId() {
-        return PERSONAL_REFUND_PLAYER.get();
+        return SCOPE.get().personalRefundPlayer;
+    }
+
+    private static void withMode(Mode mode, Runnable action) {
+        ThreadScope scope = SCOPE.get();
+        scope.modes.add(mode);
+        try {
+            action.run();
+        } finally {
+            scope.modes.remove(mode);
+        }
     }
 
     public static void beginExecution(RequestChunkChangePacket.ChunkChangeOp operation, int chunkCount, UUID playerId) {
         if (chunkCount <= 1) {
             return;
         }
-        if (operation != RequestChunkChangePacket.ChunkChangeOp.CLAIM
-                && operation != RequestChunkChangePacket.ChunkChangeOp.UNCLAIM) {
+        boolean claimOrUnclaim = operation == RequestChunkChangePacket.ChunkChangeOp.CLAIM
+                || operation == RequestChunkChangePacket.ChunkChangeOp.UNCLAIM;
+        if (!claimOrUnclaim) {
             return;
         }
-        EXECUTING.set(new BatchState(operation, playerId));
+        SCOPE.get().ledger = new Ledger(operation, playerId);
     }
 
     public static void recordClaimSpend(long priceCopper) {
-        BatchState state = EXECUTING.get();
-        if (state == null) {
+        Ledger ledger = SCOPE.get().ledger;
+        if (ledger == null) {
             return;
         }
-        state.claimPaidCopper += priceCopper;
-        state.claimPaidCount++;
-        state.uiSyncNeeded = true;
+        ledger.tally[Tally.CLAIM_PAID_COPPER.ordinal()] += priceCopper;
+        ledger.tally[Tally.CLAIM_PAID_COUNT.ordinal()] += 1;
+        ledger.dirty = true;
     }
 
     public static void recordClaimFree() {
-        BatchState state = EXECUTING.get();
-        if (state == null) {
+        Ledger ledger = SCOPE.get().ledger;
+        if (ledger == null) {
             return;
         }
-        state.claimFreeCount++;
-        state.uiSyncNeeded = true;
+        ledger.tally[Tally.CLAIM_FREE_COUNT.ordinal()] += 1;
+        ledger.dirty = true;
     }
 
     public static void recordUnclaim(long refundCopper) {
-        BatchState state = EXECUTING.get();
-        if (state == null) {
+        Ledger ledger = SCOPE.get().ledger;
+        if (ledger == null) {
             return;
         }
-        state.unclaimCount++;
-        state.refundCopper += refundCopper;
-        state.uiSyncNeeded = true;
+        ledger.tally[Tally.UNCLAIM_COUNT.ordinal()] += 1;
+        ledger.tally[Tally.REFUND_COPPER.ordinal()] += refundCopper;
+        ledger.dirty = true;
     }
 
     public static void recordClaimInsufficientFunds(IBankAccount account, long unitPriceCopper) {
-        BatchState state = EXECUTING.get();
-        if (state == null) {
+        Ledger ledger = SCOPE.get().ledger;
+        if (ledger == null) {
             return;
         }
-        state.claimInsufficientCount++;
-        state.claimUnitPriceCopper = unitPriceCopper;
-        state.insufficientBalance = CurrencyTextFormat.formatBalance(account);
-        state.uiSyncNeeded = true;
+        ledger.tally[Tally.CLAIM_INSUFFICIENT_COUNT.ordinal()] += 1;
+        ledger.tally[Tally.CLAIM_UNIT_PRICE_COPPER.ordinal()] = unitPriceCopper;
+        ledger.insufficientBalanceText = CurrencyTextFormat.formatBalance(account);
+        ledger.dirty = true;
     }
 
     public static void markUiSyncNeeded() {
-        BatchState state = EXECUTING.get();
-        if (state != null) {
-            state.uiSyncNeeded = true;
+        Ledger ledger = SCOPE.get().ledger;
+        if (ledger != null) {
+            ledger.dirty = true;
         }
     }
 
     public static void flush(@Nullable ServerPlayer player) {
-        BatchState state = EXECUTING.get();
-        if (state == null) {
+        ThreadScope scope = SCOPE.get();
+        Ledger ledger = scope.ledger;
+        if (ledger == null) {
             return;
         }
 
         try {
-            if (player == null || !player.getUUID().equals(state.playerId)) {
+            if (player == null || !player.getUUID().equals(ledger.playerId)) {
                 return;
             }
 
-            if (state.operation == RequestChunkChangePacket.ChunkChangeOp.UNCLAIM && state.unclaimCount > 0) {
-                announceUnclaimBatch(player, state);
-                if (state.refundCopper > 0) {
-                    BankLedgerAccess.logTransaction(
-                            BankLedgerAccess.getAccountForPlayer(player.server, player),
-                            true,
-                            CurrencyAmounts.fromCopper(state.refundCopper),
-                            Component.translatable(state.unclaimCount == 1 ? "message.lc_claim_economy.ledger.unclaim_refund" : "message.lc_claim_economy.ledger.unclaim_refund_bulk")
-                    );
+            switch (ledger.operation) {
+                case UNCLAIM -> settleUnclaims(player, ledger);
+                case CLAIM -> settleClaims(player, ledger);
+                default -> {
                 }
             }
 
-            if (state.operation == RequestChunkChangePacket.ChunkChangeOp.CLAIM) {
-                announceClaimBatch(player, state);
-                if (state.claimPaidCopper > 0) {
-                    BankLedgerAccess.logTransaction(
-                            BankLedgerAccess.getAccountForPlayer(player.server, player),
-                            false,
-                            CurrencyAmounts.fromCopper(state.claimPaidCopper),
-                            Component.translatable(state.claimPaidCount == 1 ? "message.lc_claim_economy.ledger.claim_purchase" : "message.lc_claim_economy.ledger.claim_purchase_bulk")
-                    );
-                }
-            }
-
-            if (state.uiSyncNeeded) {
+            if (ledger.dirty) {
                 ClaimPricingBroadcast.syncToPlayer(player);
             }
         } finally {
-            EXECUTING.remove();
+            scope.ledger = null;
+        }
+    }
+
+    private static void settleUnclaims(ServerPlayer player, Ledger ledger) {
+        long unclaimCount = ledger.tally[Tally.UNCLAIM_COUNT.ordinal()];
+        if (unclaimCount <= 0) {
+            return;
+        }
+        long refundCopper = ledger.tally[Tally.REFUND_COPPER.ordinal()];
+        announceUnclaimBatch(player, unclaimCount, refundCopper);
+        if (refundCopper > 0) {
+            BankLedgerAccess.logTransaction(
+                    BankLedgerAccess.getAccountForPlayer(player.server, player),
+                    true,
+                    CurrencyAmounts.fromCopper(refundCopper),
+                    Component.translatable(unclaimCount == 1 ? "message.lc_claim_economy.ledger.unclaim_refund" : "message.lc_claim_economy.ledger.unclaim_refund_bulk")
+            );
+        }
+    }
+
+    private static void settleClaims(ServerPlayer player, Ledger ledger) {
+        announceClaimBatch(player, ledger);
+        long claimPaidCopper = ledger.tally[Tally.CLAIM_PAID_COPPER.ordinal()];
+        if (claimPaidCopper > 0) {
+            long claimPaidCount = ledger.tally[Tally.CLAIM_PAID_COUNT.ordinal()];
+            BankLedgerAccess.logTransaction(
+                    BankLedgerAccess.getAccountForPlayer(player.server, player),
+                    false,
+                    CurrencyAmounts.fromCopper(claimPaidCopper),
+                    Component.translatable(claimPaidCount == 1 ? "message.lc_claim_economy.ledger.claim_purchase" : "message.lc_claim_economy.ledger.claim_purchase_bulk")
+            );
         }
     }
 
     /** One chat line summarizing every unclaim in the batch: refund amount (if any) and how many chunks it covered. */
-    private static void announceUnclaimBatch(ServerPlayer player, BatchState state) {
-        if (state.refundCopper <= 0) {
-            String key = state.unclaimCount == 1 ? "message.lc_claim_economy.unclaim_bulk_single" : "message.lc_claim_economy.unclaim_bulk";
-            tell(player, state.unclaimCount == 1 ? Component.translatable(key) : Component.translatable(key, state.unclaimCount));
+    private static void announceUnclaimBatch(ServerPlayer player, long unclaimCount, long refundCopper) {
+        if (refundCopper <= 0) {
+            String key = unclaimCount == 1 ? "message.lc_claim_economy.unclaim_bulk_single" : "message.lc_claim_economy.unclaim_bulk";
+            tell(player, unclaimCount == 1 ? Component.translatable(key) : Component.translatable(key, (int) unclaimCount));
             return;
         }
 
-        Component refundText = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(state.refundCopper));
+        Component refundText = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(refundCopper));
         int refundPercent = unclaimRefundPercent();
-        Component message = state.unclaimCount == 1
+        Component message = unclaimCount == 1
                 ? Component.translatable("message.lc_claim_economy.unclaim_refund", refundText, refundPercent)
-                : Component.translatable("message.lc_claim_economy.unclaim_refund_bulk", refundText, state.unclaimCount, refundPercent);
+                : Component.translatable("message.lc_claim_economy.unclaim_refund_bulk", refundText, (int) unclaimCount, refundPercent);
         tell(player, message);
     }
 
     /** One or two chat lines summarizing every claim attempt in the batch: any insufficient-funds failures, then the successes (paid or free). */
-    private static void announceClaimBatch(ServerPlayer player, BatchState state) {
-        if (state.claimInsufficientCount > 0) {
-            announceInsufficientFunds(player, state);
+    private static void announceClaimBatch(ServerPlayer player, Ledger ledger) {
+        long insufficientCount = ledger.tally[Tally.CLAIM_INSUFFICIENT_COUNT.ordinal()];
+        if (insufficientCount > 0) {
+            announceInsufficientFunds(player, ledger, insufficientCount);
         }
 
-        int succeededCount = state.claimPaidCount + state.claimFreeCount;
+        long succeededCount = ledger.tally[Tally.CLAIM_PAID_COUNT.ordinal()] + ledger.tally[Tally.CLAIM_FREE_COUNT.ordinal()];
         if (succeededCount <= 0) {
             return;
         }
 
-        if (state.claimPaidCopper <= 0) {
+        long claimPaidCopper = ledger.tally[Tally.CLAIM_PAID_COPPER.ordinal()];
+        if (claimPaidCopper <= 0) {
             String key = succeededCount == 1 ? "message.lc_claim_economy.claim_free" : "message.lc_claim_economy.claim_free_bulk";
-            tell(player, succeededCount == 1 ? Component.translatable(key) : Component.translatable(key, succeededCount));
+            tell(player, succeededCount == 1 ? Component.translatable(key) : Component.translatable(key, (int) succeededCount));
             return;
         }
 
-        Component spentText = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(state.claimPaidCopper));
+        Component spentText = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(claimPaidCopper));
         Component message = succeededCount == 1
                 ? Component.translatable("message.lc_claim_economy.claim_paid", spentText)
-                : Component.translatable("message.lc_claim_economy.claim_paid_bulk", spentText, succeededCount);
+                : Component.translatable("message.lc_claim_economy.claim_paid_bulk", spentText, (int) succeededCount);
         tell(player, message);
     }
 
-    private static void announceInsufficientFunds(ServerPlayer player, BatchState state) {
-        Component unitPriceText = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(state.claimUnitPriceCopper));
-        Component balanceText = state.insufficientBalance == null
+    private static void announceInsufficientFunds(ServerPlayer player, Ledger ledger, long insufficientCount) {
+        long unitPriceCopper = ledger.tally[Tally.CLAIM_UNIT_PRICE_COPPER.ordinal()];
+        Component unitPriceText = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(unitPriceCopper));
+        Component balanceText = ledger.insufficientBalanceText == null
                 ? Component.translatable("message.lc_claim_economy.balance_empty")
-                : state.insufficientBalance;
-        Component message = state.claimInsufficientCount == 1
+                : ledger.insufficientBalanceText;
+        Component message = insufficientCount == 1
                 ? Component.translatable("message.lc_claim_economy.insufficient_funds", unitPriceText, balanceText)
-                : Component.translatable("message.lc_claim_economy.insufficient_funds_bulk_claim", unitPriceText, state.claimInsufficientCount, balanceText);
+                : Component.translatable("message.lc_claim_economy.insufficient_funds_bulk_claim", unitPriceText, (int) insufficientCount, balanceText);
         tell(player, message);
     }
 
@@ -249,21 +291,26 @@ public final class ClaimTransferContext {
         return (int) Math.round(LcClaimEconomyConfig.SERVER.unclaimRefundRatio.get() * 100.0D);
     }
 
-    private static final class BatchState {
+    /** Index space for the running totals kept while a batch is in flight; backed by a flat array rather than named fields. */
+    private enum Tally {
+        UNCLAIM_COUNT,
+        REFUND_COPPER,
+        CLAIM_PAID_COPPER,
+        CLAIM_PAID_COUNT,
+        CLAIM_FREE_COUNT,
+        CLAIM_INSUFFICIENT_COUNT,
+        CLAIM_UNIT_PRICE_COPPER
+    }
+
+    private static final class Ledger {
         private final RequestChunkChangePacket.ChunkChangeOp operation;
         private final UUID playerId;
-        private long refundCopper;
-        private int unclaimCount;
-        private long claimPaidCopper;
-        private int claimPaidCount;
-        private int claimFreeCount;
-        private int claimInsufficientCount;
-        private long claimUnitPriceCopper;
+        private final long[] tally = new long[Tally.values().length];
         @Nullable
-        private Component insufficientBalance;
-        private boolean uiSyncNeeded;
+        private Component insufficientBalanceText;
+        private boolean dirty;
 
-        private BatchState(RequestChunkChangePacket.ChunkChangeOp operation, UUID playerId) {
+        private Ledger(RequestChunkChangePacket.ChunkChangeOp operation, UUID playerId) {
             this.operation = operation;
             this.playerId = playerId;
         }

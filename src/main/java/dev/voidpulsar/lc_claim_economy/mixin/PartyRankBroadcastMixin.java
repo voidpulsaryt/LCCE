@@ -43,13 +43,17 @@ public class PartyRankBroadcastMixin {
     }
 
     private static void syncLinkedLcTeam(Team partyTeam) {
-        if (!partyTeam.isPartyTeam() || !partyTeam.isValid()) {
+        if (!eligibleForSync(partyTeam)) {
             return;
         }
-
         MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
-        if (activeServer != null) {
-            CurrencyTeamLinkService.ensureLinked(activeServer, partyTeam);
+        if (activeServer == null) {
+            return;
         }
+        CurrencyTeamLinkService.ensureLinked(activeServer, partyTeam);
+    }
+
+    private static boolean eligibleForSync(Team partyTeam) {
+        return partyTeam.isPartyTeam() && partyTeam.isValid();
     }
 }

@@ -13,6 +13,7 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 /**
  * Answers "what kind of FTB team is this, and does the mod care about it".
@@ -31,6 +32,13 @@ public final class TeamRegistry {
         INACTIVE_PARTY
     }
 
+    /** Coarse shape of a team before we bother asking whether a party is actually in use. */
+    private enum Shape {
+        MISSING,
+        SOLO,
+        PARTY
+    }
+
     private TeamRegistry() {
     }
 
@@ -38,24 +46,27 @@ public final class TeamRegistry {
     // Classification
     // ------------------------------------------------------------------
 
-    public static TeamKind kindOf(MinecraftServer server, @Nullable Team team) {
+    private static Shape shapeOf(@Nullable Team team) {
         if (team == null || !team.isValid()) {
-            return TeamKind.INVALID;
+            return Shape.MISSING;
         }
-        if (!team.isPartyTeam()) {
-            return TeamKind.SINGLE_PLAYER;
-        }
-        return TeamBankLinkRegistry.isFtbPartyInUse(server, team)
-                ? TeamKind.ACTIVE_PARTY
-                : TeamKind.INACTIVE_PARTY;
+        return team.isPartyTeam() ? Shape.PARTY : Shape.SOLO;
+    }
+
+    public static TeamKind kindOf(MinecraftServer server, @Nullable Team team) {
+        return switch (shapeOf(team)) {
+            case MISSING -> TeamKind.INVALID;
+            case SOLO -> TeamKind.SINGLE_PLAYER;
+            case PARTY -> TeamBankLinkRegistry.isFtbPartyInUse(server, team) ? TeamKind.ACTIVE_PARTY : TeamKind.INACTIVE_PARTY;
+        };
     }
 
     public static boolean isSinglePlayerTeam(@Nullable Team team) {
-        return team != null && team.isValid() && !team.isPartyTeam();
+        return shapeOf(team) == Shape.SOLO;
     }
 
     public static boolean isPartyTeam(@Nullable Team team) {
-        return team != null && team.isValid() && team.isPartyTeam();
+        return shapeOf(team) == Shape.PARTY;
     }
 
     public static boolean isActiveParty(MinecraftServer server, @Nullable Team team) {
@@ -68,11 +79,14 @@ public final class TeamRegistry {
 
     /** True for any team the mod should surface in war, upkeep and billing logic. */
     public static boolean isTracked(MinecraftServer server, @Nullable Team team) {
-        return switch (kindOf(server, team)) {
-            case ACTIVE_PARTY -> true;
-            case SINGLE_PLAYER -> isActiveSinglePlayerTeam(server, team);
-            case INACTIVE_PARTY, INVALID -> false;
-        };
+        TeamKind kind = kindOf(server, team);
+        if (kind == TeamKind.ACTIVE_PARTY) {
+            return true;
+        }
+        if (kind == TeamKind.SINGLE_PLAYER) {
+            return isActiveSinglePlayerTeam(server, team);
+        }
+        return false;
     }
 
     /**
@@ -87,10 +101,18 @@ public final class TeamRegistry {
 
         TeamManager teamManager = FTBTeamsAPI.api().getManager();
         UUID soloTeamId = team.getTeamId();
-        return team.getMembers().stream().anyMatch(memberUuid ->
-                teamManager.getTeamForPlayerID(memberUuid)
-                        .map(currentTeam -> currentTeam.getTeamId().equals(soloTeamId))
-                        .orElse(false));
+        for (UUID memberUuid : team.getMembers()) {
+            if (isMemberCurrentlyOn(teamManager, memberUuid, soloTeamId)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isMemberCurrentlyOn(TeamManager teamManager, UUID memberUuid, UUID teamId) {
+        return teamManager.getTeamForPlayerID(memberUuid)
+                .map(currentTeam -> currentTeam.getTeamId().equals(teamId))
+                .orElse(false);
     }
 
     // ------------------------------------------------------------------
@@ -114,31 +136,30 @@ public final class TeamRegistry {
         if (server == null || !FTBTeamsAPI.api().isManagerLoaded()) {
             return List.of();
         }
-        List<Team> validTeams = new ArrayList<>();
-        for (Team candidate : FTBTeamsAPI.api().getManager().getTeams()) {
-            if (candidate.isValid()) {
-                validTeams.add(candidate);
-            }
-        }
-        return validTeams;
+        return selectFrom(FTBTeamsAPI.api().getManager().getTeams(), Team::isValid);
     }
 
     public static List<Team> trackedTeams(MinecraftServer server) {
-        return allStoredTeams(server).stream()
-                .filter(candidate -> isTracked(server, candidate))
-                .toList();
+        return selectFrom(allStoredTeams(server), candidate -> isTracked(server, candidate));
     }
 
     public static List<Team> singlePlayerTeams(MinecraftServer server) {
-        return allStoredTeams(server).stream()
-                .filter(TeamRegistry::isSinglePlayerTeam)
-                .toList();
+        return selectFrom(allStoredTeams(server), TeamRegistry::isSinglePlayerTeam);
     }
 
     public static List<Team> activeParties(MinecraftServer server) {
-        return allStoredTeams(server).stream()
-                .filter(candidate -> isActiveParty(server, candidate))
-                .toList();
+        return selectFrom(allStoredTeams(server), candidate -> isActiveParty(server, candidate));
+    }
+
+    /** Shared accumulate-and-filter step so each listing method above doesn't repeat the loop. */
+    private static List<Team> selectFrom(Iterable<Team> source, Predicate<Team> predicate) {
+        List<Team> matches = new ArrayList<>();
+        for (Team candidate : source) {
+            if (predicate.test(candidate)) {
+                matches.add(candidate);
+            }
+        }
+        return matches;
     }
 
     // ------------------------------------------------------------------
@@ -157,12 +178,15 @@ public final class TeamRegistry {
         }
 
         dissolveWarLinks(server, teamId);
+        clearPendingStateIfAny(server, teamId);
 
+        LcClaimEconomy.LOGGER.debug("Processed team deletion cleanup for {}", teamId);
+    }
+
+    private static void clearPendingStateIfAny(MinecraftServer server, UUID teamId) {
         LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
         if (!savedData.getPendingState(teamId).isEmpty()) {
             savedData.setPendingState(teamId, new TeamQueuedChanges());
         }
-
-        LcClaimEconomy.LOGGER.debug("Processed team deletion cleanup for {}", teamId);
     }
 }

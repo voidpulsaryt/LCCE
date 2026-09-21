@@ -39,18 +39,20 @@ public class ChunkChangeRequestMixin {
             CallbackInfo callback
     ) {
         ServerPlayer requester = (ServerPlayer) senderContext.getPlayer();
-        CommandSourceStack requesterSource = requester.createCommandSourceStack();
         ChunkTeamData ownerTeam = MassClaimHandler.resolveTeamData(incomingRequest, requester);
         if (ownerTeam == null) {
             return;
         }
 
-        if (MassClaimHandler.rejectIfInsufficientFunds(incomingRequest, requester, requesterSource, ownerTeam)) {
+        CommandSourceStack requesterSource = requester.createCommandSourceStack();
+        boolean cannotAfford = MassClaimHandler.rejectIfInsufficientFunds(incomingRequest, requester, requesterSource, ownerTeam);
+        if (cannotAfford) {
             callback.cancel();
             return;
         }
 
-        ClaimTransferContext.beginExecution(incomingRequest.action(), incomingRequest.chunks().size(), requester.getUUID());
+        int chunkCount = incomingRequest.chunks().size();
+        ClaimTransferContext.beginExecution(incomingRequest.action(), chunkCount, requester.getUUID());
     }
 
     @Inject(
@@ -63,8 +65,10 @@ public class ChunkChangeRequestMixin {
             dev.architectury.networking.NetworkManager.PacketContext senderContext,
             CallbackInfo callback
     ) {
-        if (senderContext.getPlayer() instanceof ServerPlayer requester) {
-            ClaimTransferContext.flush(requester);
+        Object rawSender = senderContext.getPlayer();
+        if (!(rawSender instanceof ServerPlayer requester)) {
+            return;
         }
+        ClaimTransferContext.flush(requester);
     }
 }

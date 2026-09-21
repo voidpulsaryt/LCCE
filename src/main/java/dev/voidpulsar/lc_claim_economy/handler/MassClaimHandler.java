@@ -25,11 +25,11 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 
+import javax.annotation.Nullable;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * FTB Chunks' drag-select claim tool submits an entire batch of chunks in a
@@ -52,9 +52,9 @@ public final class MassClaimHandler {
             CommandSourceStack source,
             ChunkTeamData chunkTeamData
     ) {
-        if (message.action() != RequestChunkChangePacket.ChunkChangeOp.CLAIM || message.chunks().size() <= 1) {
-            // Single-chunk (or non-claim) requests go through the normal
-            // per-chunk path in ChunkAcquisitionHandler instead.
+        // Single-chunk (or non-claim) requests go through the normal
+        // per-chunk path in ChunkAcquisitionHandler instead.
+        if (!isBulkClaimAttempt(message)) {
             return false;
         }
 
@@ -88,6 +88,22 @@ public final class MassClaimHandler {
             return false;
         }
 
+        reportShortfall(requester, message, account, totalCost, billableClaims);
+        return true;
+    }
+
+    private static boolean isBulkClaimAttempt(RequestChunkChangePacket message) {
+        return message.action() == RequestChunkChangePacket.ChunkChangeOp.CLAIM && message.chunks().size() > 1;
+    }
+
+    /** Tells the requester why the batch was rejected, then rewinds the client to pre-drag state. */
+    private static void reportShortfall(
+            ServerPlayer requester,
+            RequestChunkChangePacket message,
+            IBankAccount account,
+            MoneyValue totalCost,
+            int billableClaims
+    ) {
         Component balance = CurrencyTextFormat.formatBalance(account);
         Component priceText = CurrencyTextFormat.formatValue(totalCost);
         Component chatMessage = Component.translatable(
@@ -98,7 +114,10 @@ public final class MassClaimHandler {
         );
         requester.displayClientMessage(chatMessage, false);
         ClaimPricingBroadcast.syncToPlayer(requester);
+        sendRejectionAck(requester, message.chunks().size(), billableClaims);
+    }
 
+    private static void sendRejectionAck(ServerPlayer requester, int totalChunks, int billableClaims) {
         Map<String, Integer> problems = new HashMap<>();
         problems.put(MassClaimShortfallResult.RESULT_ID, billableClaims);
         // ChunkChangeResponsePacket is registered through Architectury's networking layer by
@@ -108,20 +127,20 @@ public final class MassClaimHandler {
         // through Architectury's NetworkManager instead, matching how FTBChunks itself sends it.
         NetworkManager.sendToPlayer(
                 requester,
-                new ChunkChangeResponsePacket(message.chunks().size(), 0, problems)
+                new ChunkChangeResponsePacket(totalChunks, 0, problems)
         );
-        return true;
     }
 
+    @Nullable
     public static ChunkTeamData resolveTeamData(RequestChunkChangePacket message, ServerPlayer requester) {
-        if (message.teamId().isPresent()) {
-            Optional<Team> targetTeam = FTBTeamsAPI.api().getManager().getTeamByID(message.teamId().get());
-            if (targetTeam.isEmpty()) {
-                return null;
-            }
-            return ClaimedChunkManagerImpl.getInstance().getOrCreateData(targetTeam.get());
+        if (message.teamId().isEmpty()) {
+            return ClaimedChunkManagerImpl.getInstance().getOrCreateData(requester);
         }
-        return ClaimedChunkManagerImpl.getInstance().getOrCreateData(requester);
+        Optional<Team> targetTeam = FTBTeamsAPI.api().getManager().getTeamByID(message.teamId().get());
+        if (targetTeam.isEmpty()) {
+            return null;
+        }
+        return ClaimedChunkManagerImpl.getInstance().getOrCreateData(targetTeam.get());
     }
 
     /**
@@ -141,7 +160,8 @@ public final class MassClaimHandler {
         try {
             int claimableCount = 0;
             for (XZ pos : chunks) {
-                if (chunkTeamData.claim(source, pos.dim(level), true).isSuccess()) {
+                ClaimResult result = chunkTeamData.claim(source, pos.dim(level), true);
+                if (result.isSuccess()) {
                     claimableCount++;
                 }
             }

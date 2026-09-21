@@ -37,36 +37,52 @@ public final class BillingDetailsCommand {
     private static int showDetails(CommandContext<CommandSourceStack> context) {
         CommandSourceStack source = context.getSource();
         ServerPlayer viewer = source.getPlayer();
-        if (viewer == null || !FTBTeamsAPI.api().isManagerLoaded()) {
+        if (!canRun(viewer)) {
             return 0;
         }
 
-        Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(viewer).orElse(null);
+        Team team = resolveTeam(viewer);
         if (team == null) {
             return 0;
         }
 
-        if (team.isPartyTeam() && !BankLedgerAccess.canPurchaseForTeam(team, viewer.getUUID())) {
-            viewer.displayClientMessage(
-                    Component.translatable("message.lc_claim_economy.upkeep_detail.denied"),
-                    false
-            );
+        if (!isAuthorized(team, viewer)) {
+            denyAccess(viewer);
             return 0;
         }
 
+        announceNextCharge(source, viewer, team);
+        return announceBreakdown(viewer, team);
+    }
+
+    private static boolean canRun(ServerPlayer viewer) {
+        return viewer != null && FTBTeamsAPI.api().isManagerLoaded();
+    }
+
+    private static Team resolveTeam(ServerPlayer viewer) {
+        return FTBTeamsAPI.api().getManager().getTeamForPlayer(viewer).orElse(null);
+    }
+
+    private static boolean isAuthorized(Team team, ServerPlayer viewer) {
+        return !team.isPartyTeam() || BankLedgerAccess.canPurchaseForTeam(team, viewer.getUUID());
+    }
+
+    private static void denyAccess(ServerPlayer viewer) {
+        viewer.displayClientMessage(Component.translatable("message.lc_claim_economy.upkeep_detail.denied"), false);
+    }
+
+    private static void announceNextCharge(CommandSourceStack source, ServerPlayer viewer, Team team) {
         long currentGameTime = source.getServer().overworld().getGameTime();
         long nextUpkeepTick = LcClaimEconomySavedData.get(source.getServer()).getNextUpkeepTick(team.getTeamId());
         viewer.displayClientMessage(BillingMessageComposer.buildNextChargeLine(nextUpkeepTick, currentGameTime), false);
+    }
 
+    private static int announceBreakdown(ServerPlayer viewer, Team team) {
         BillingBreakdown breakdown = BillingBreakdownStore.get(team.getTeamId());
         if (breakdown == null) {
-            viewer.displayClientMessage(
-                    Component.translatable("message.lc_claim_economy.upkeep_detail.unavailable"),
-                    false
-            );
+            viewer.displayClientMessage(Component.translatable("message.lc_claim_economy.upkeep_detail.unavailable"), false);
             return 1;
         }
-
         viewer.displayClientMessage(BillingMessageComposer.buildDetails(breakdown), false);
         return 1;
     }

@@ -70,19 +70,25 @@ public record QueuedStateBroadcastPayload(
     }
 
     public static void handleClient(QueuedStateBroadcastPayload payload, IPayloadContext context) {
-        context.enqueueWork(() -> {
-            LcClaimEconomy.LOGGER.debug("Client received pending state: properties={}, forceLoads={}, forceUnloads={}, landChunks={}, buildChunks={}",
-                    payload.pendingProperties, payload.pendingForceLoads, payload.pendingForceUnloads,
-                    payload.pendingLandChunks, payload.pendingBuildChunks);
-            ClientQueuedChanges.update(
-                    payload.pendingProperties,
-                    payload.pendingForceLoads,
-                    payload.pendingForceUnloads,
-                    payload.pendingLandChunks,
-                    payload.pendingBuildChunks
-            );
-            QueuedStateUiRefresh.syncSelfTeamOpenScreen();
-            QueuedStateUiRefresh.refreshOpenScreens();
-        });
+        context.enqueueWork(() -> applyToClient(payload));
+    }
+
+    private static void applyToClient(QueuedStateBroadcastPayload payload) {
+        LcClaimEconomy.LOGGER.debug("Client received pending state: properties={}, forceLoads={}, forceUnloads={}, landChunks={}, buildChunks={}",
+                payload.pendingProperties, payload.pendingForceLoads, payload.pendingForceUnloads,
+                payload.pendingLandChunks, payload.pendingBuildChunks);
+        ClientQueuedChanges.update(
+                payload.pendingProperties,
+                payload.pendingForceLoads,
+                payload.pendingForceUnloads,
+                payload.pendingLandChunks,
+                payload.pendingBuildChunks
+        );
+        refreshClientScreens();
+    }
+
+    private static void refreshClientScreens() {
+        QueuedStateUiRefresh.syncSelfTeamOpenScreen();
+        QueuedStateUiRefresh.refreshOpenScreens();
     }
 }

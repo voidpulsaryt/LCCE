@@ -15,6 +15,8 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import javax.annotation.Nullable;
+
 /**
  * Publishes whether the chunk being checked is a land chunk so that
  * {@code canPlayerUse} (which only receives the privacy property) can swap in
@@ -31,16 +33,18 @@ public abstract class ClaimManagerGuardMixin {
             Entity targetEntity,
             CallbackInfoReturnable<Boolean> cir
     ) {
-        if (actor instanceof ServerPlayer player && player.level() != null) {
-            ClaimedChunk chunk = ((dev.ftb.mods.ftbchunks.api.ClaimedChunkManager) this)
-                    .getChunk(new ChunkDimPos(player.level(), pos));
-            LandProtectionContext.set(chunk != null && LandChunkService.isLandChunk(chunk));
-            if (ChunkUserPermissionService.isExplicitlyAllowed(player, chunk, protection)) {
-                LandProtectionContext.clear();
-                cir.setReturnValue(false);
-            }
-        } else {
+        if (!(actor instanceof ServerPlayer player) || player.level() == null) {
             LandProtectionContext.set(false);
+            return;
+        }
+
+        ClaimedChunk chunk = resolveChunk(player, pos);
+        LandProtectionContext.set(isLandChunk(chunk));
+
+        boolean explicitlyAllowed = ChunkUserPermissionService.isExplicitlyAllowed(player, chunk, protection);
+        if (explicitlyAllowed) {
+            LandProtectionContext.clear();
+            cir.setReturnValue(false);
         }
     }
 
@@ -54,5 +58,14 @@ public abstract class ClaimManagerGuardMixin {
             CallbackInfoReturnable<Boolean> cir
     ) {
         LandProtectionContext.clear();
+    }
+
+    private ClaimedChunk resolveChunk(ServerPlayer player, BlockPos pos) {
+        dev.ftb.mods.ftbchunks.api.ClaimedChunkManager manager = (dev.ftb.mods.ftbchunks.api.ClaimedChunkManager) this;
+        return manager.getChunk(new ChunkDimPos(player.level(), pos));
+    }
+
+    private static boolean isLandChunk(@Nullable ClaimedChunk chunk) {
+        return chunk != null && LandChunkService.isLandChunk(chunk);
     }
 }

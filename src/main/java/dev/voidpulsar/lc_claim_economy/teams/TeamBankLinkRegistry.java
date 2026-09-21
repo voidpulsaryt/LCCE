@@ -89,10 +89,14 @@ public final class TeamBankLinkRegistry {
         }
 
         TeamManager teamManager = FTBTeamsAPI.api().getManager();
-        return party.getMembers().stream().anyMatch(memberUuid ->
-                teamManager.getTeamForPlayerID(memberUuid)
-                        .map(selectedTeam -> selectedTeam.getId().equals(party.getId()))
-                        .orElse(false));
+        UUID partyId = party.getId();
+        for (UUID memberUuid : party.getMembers()) {
+            Team selectedTeam = teamManager.getTeamForPlayerID(memberUuid).orElse(null);
+            if (selectedTeam != null && selectedTeam.getId().equals(partyId)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @Nullable
@@ -184,58 +188,17 @@ public final class TeamBankLinkRegistry {
      * sure every currently-active party has a link at all. Returns how many links changed.
      */
     public static int reconcile(MinecraftServer server) {
-        if (server == null || CurrencyTeamAccess.cache() == null) {
-            return 0;
-        }
-        if (!FTBTeamsAPI.api().isManagerLoaded()) {
+        if (!canReconcile(server)) {
             return 0;
         }
 
         LcClaimEconomySavedData store = LcClaimEconomySavedData.get(server);
-        int mutationCount = 0;
-
         List<LcClaimEconomySavedData.TeamLinkEntry> snapshot = new ArrayList<>(store.getAllLinks());
+
+        int mutationCount = 0;
         for (LcClaimEconomySavedData.TeamLinkEntry link : snapshot) {
-            Team storedTeam = findStoredTeam(server, link.ftbTeamId());
-
-            if (storedTeam == null) {
-                // TeamManagerEvent.CREATED can fire before FTB Teams has finished its own load(),
-                // in which case an empty team list here just means "not loaded yet", not "deleted".
-                if (FTBTeamsAPI.api().getManager().getTeams().isEmpty()) {
-                    continue;
-                }
-                // Route through the shared purge path so wars, pending state, and the LC
-                // account all get torn down together, the same as the live deletion event does.
-                TeamPurgeService.purge(server, link.ftbTeamId(), null);
+            if (reconcileEntry(server, store, link)) {
                 mutationCount++;
-                LcClaimEconomy.LOGGER.info(
-                        "Reconcile: purged stale hook data for deleted FTB team {} (LC team {})",
-                        link.ftbTeamId(),
-                        link.lcTeamId()
-                );
-                continue;
-            }
-
-            if (link.lcTeamId() > 0 && findLcTeam(link.lcTeamId()) == null) {
-                if (store.clearLcTeamLink(link.ftbTeamId())) {
-                    mutationCount++;
-                    LcClaimEconomy.LOGGER.info(
-                            "Cleared stale LC link {} for FTB team {}",
-                            link.lcTeamId(),
-                            link.ftbTeamId()
-                    );
-                }
-                continue;
-            }
-
-            if (storedTeam.isPartyTeam() && link.lcTeamId() > 0 && storedTeam.getMembers().isEmpty()) {
-                if (store.clearLcTeamLink(link.ftbTeamId())) {
-                    mutationCount++;
-                    LcClaimEconomy.LOGGER.info(
-                            "Cleared LC link for empty FTB party {}",
-                            link.ftbTeamId()
-                    );
-                }
             }
         }
 
@@ -244,5 +207,65 @@ public final class TeamBankLinkRegistry {
         }
 
         return mutationCount;
+    }
+
+    private static boolean canReconcile(MinecraftServer server) {
+        if (server == null || CurrencyTeamAccess.cache() == null) {
+            return false;
+        }
+        return FTBTeamsAPI.api().isManagerLoaded();
+    }
+
+    /** Applies whichever single stale-link rule (if any) matches this entry; reports whether it mutated the store. */
+    private static boolean reconcileEntry(MinecraftServer server, LcClaimEconomySavedData store, LcClaimEconomySavedData.TeamLinkEntry link) {
+        Team storedTeam = findStoredTeam(server, link.ftbTeamId());
+
+        if (storedTeam == null) {
+            return reconcileDeletedTeam(server, link);
+        }
+        if (link.lcTeamId() > 0 && findLcTeam(link.lcTeamId()) == null) {
+            return reconcileMissingLcTeam(store, link);
+        }
+        if (storedTeam.isPartyTeam() && link.lcTeamId() > 0 && storedTeam.getMembers().isEmpty()) {
+            return reconcileEmptiedParty(store, link);
+        }
+        return false;
+    }
+
+    private static boolean reconcileDeletedTeam(MinecraftServer server, LcClaimEconomySavedData.TeamLinkEntry link) {
+        // TeamManagerEvent.CREATED can fire before FTB Teams has finished its own load(),
+        // in which case an empty team list here just means "not loaded yet", not "deleted".
+        if (FTBTeamsAPI.api().getManager().getTeams().isEmpty()) {
+            return false;
+        }
+        // Route through the shared purge path so wars, pending state, and the LC
+        // account all get torn down together, the same as the live deletion event does.
+        TeamPurgeService.purge(server, link.ftbTeamId(), null);
+        LcClaimEconomy.LOGGER.info(
+                "Reconcile: purged stale hook data for deleted FTB team {} (LC team {})",
+                link.ftbTeamId(),
+                link.lcTeamId()
+        );
+        return true;
+    }
+
+    private static boolean reconcileMissingLcTeam(LcClaimEconomySavedData store, LcClaimEconomySavedData.TeamLinkEntry link) {
+        if (!store.clearLcTeamLink(link.ftbTeamId())) {
+            return false;
+        }
+        LcClaimEconomy.LOGGER.info(
+                "Cleared stale LC link {} for FTB team {}",
+                link.lcTeamId(),
+                link.ftbTeamId()
+        );
+        return true;
+    }
+
+    private static boolean reconcileEmptiedParty(LcClaimEconomySavedData store, LcClaimEconomySavedData.TeamLinkEntry link) {
+        if (!store.clearLcTeamLink(link.ftbTeamId())) {
+            return false;
+        }
+        LcClaimEconomy.LOGGER.info("Cleared LC link for empty FTB party {}", link.ftbTeamId());
+        return true;
     }
 }

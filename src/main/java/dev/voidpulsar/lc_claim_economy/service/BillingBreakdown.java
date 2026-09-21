@@ -80,14 +80,14 @@ public record BillingBreakdown(
 
         long buildBase = SafeguardPricing.calculateBuildBasePrice(properties, noPending);
         int buildUnits = counts.buildBillable();
-        long buildProtectionCopper = buildBase > 0 ? buildBase * buildUnits : 0L;
+        long buildProtectionCopper = scaledCopper(buildBase, buildUnits);
 
         long landBase = SafeguardPricing.calculateLandBasePrice(properties, noPending);
         int landUnits = SafeguardPricing.landChunkUnits(counts.landBillable());
-        long landProtectionCopper = landBase > 0 ? landBase * landUnits : 0L;
+        long landProtectionCopper = scaledCopper(landBase, landUnits);
 
         long forceLoadUnit = LcClaimEconomyConfig.SERVER.forceLoadUpkeepPrice.get();
-        long forceLoadCopper = forceLoadUnit > 0 && forceLoadCount > 0 ? forceLoadUnit * forceLoadCount : 0L;
+        long forceLoadCopper = forceLoadCount > 0 ? scaledCopper(forceLoadUnit, forceLoadCount) : 0L;
 
         return new BillingBreakdown(
                 team.getTeamId(),
@@ -121,6 +121,10 @@ public record BillingBreakdown(
         );
     }
 
+    private static long scaledCopper(long unitPrice, int units) {
+        return unitPrice > 0 ? unitPrice * units : 0L;
+    }
+
     public boolean hasPendingItems() {
         return !pendingProtections.isEmpty()
                 || !pendingWars.isEmpty()
@@ -132,28 +136,27 @@ public record BillingBreakdown(
 
     private static List<WarLine> collectWarLines(MinecraftServer server, Team team) {
         List<WarLine> lines = new ArrayList<>();
-        for (ConflictService.WarTeamView view : ConflictService.buildBilledIncomingViews(server, team)) {
-            lines.add(new WarLine(view.displayName(), view.warCostCopper(), true));
-        }
-        for (ConflictService.WarTeamView view : ConflictService.buildBilledOutgoingViews(server, team)) {
-            lines.add(new WarLine(view.displayName(), view.warCostCopper(), false));
-        }
+        appendWarLines(lines, ConflictService.buildBilledIncomingViews(server, team), true);
+        appendWarLines(lines, ConflictService.buildBilledOutgoingViews(server, team), false);
         return lines;
+    }
+
+    private static void appendWarLines(List<WarLine> lines, List<ConflictService.WarTeamView> views, boolean incoming) {
+        for (ConflictService.WarTeamView view : views) {
+            lines.add(new WarLine(view.displayName(), view.warCostCopper(), incoming));
+        }
     }
 
     private static List<ProtectionLine> collectBuildProtectionLines(Team team) {
         List<ProtectionLine> lines = new ArrayList<>();
         var config = LcClaimEconomyConfig.SERVER;
 
-        if (!team.getProperty(FTBChunksProperties.ALLOW_MOB_GRIEFING)) {
-            lines.add(new ProtectionLine("message.lc_claim_economy.upkeep_detail.mob_grief", config.mobGriefProtectionPrice.get()));
-        }
-        if (!team.getProperty(FTBChunksProperties.ALLOW_EXPLOSIONS)) {
-            lines.add(new ProtectionLine("message.lc_claim_economy.upkeep_detail.explosions", config.explosionProtectionPrice.get()));
-        }
-        if (!team.getProperty(FTBChunksProperties.ALLOW_PVP)) {
-            lines.add(new ProtectionLine("message.lc_claim_economy.upkeep_detail.pvp", config.pvpDisablePrice.get()));
-        }
+        addBooleanLine(lines, team, FTBChunksProperties.ALLOW_MOB_GRIEFING,
+                "message.lc_claim_economy.upkeep_detail.mob_grief", config.mobGriefProtectionPrice.get());
+        addBooleanLine(lines, team, FTBChunksProperties.ALLOW_EXPLOSIONS,
+                "message.lc_claim_economy.upkeep_detail.explosions", config.explosionProtectionPrice.get());
+        addBooleanLine(lines, team, FTBChunksProperties.ALLOW_PVP,
+                "message.lc_claim_economy.upkeep_detail.pvp", config.pvpDisablePrice.get());
         addPrivacyLine(lines, team.getProperty(FTBChunksProperties.BLOCK_INTERACT_MODE),
                 "message.lc_claim_economy.upkeep_detail.block_interact", config.blockInteractProtectionPrice.get());
         addPrivacyLine(lines, team.getProperty(FTBChunksProperties.BLOCK_EDIT_MODE),
@@ -161,6 +164,12 @@ public record BillingBreakdown(
         addPrivacyLine(lines, team.getProperty(FTBChunksProperties.ENTITY_INTERACT_MODE),
                 "message.lc_claim_economy.upkeep_detail.entity_interact", config.entityInteractProtectionPrice.get());
         return lines;
+    }
+
+    private static void addBooleanLine(List<ProtectionLine> lines, Team team, TeamProperty<Boolean> property, String labelKey, long price) {
+        if (!team.getProperty(property)) {
+            lines.add(new ProtectionLine(labelKey, price));
+        }
     }
 
     private static List<ProtectionLine> collectLandProtectionLines(Team team) {
@@ -204,13 +213,15 @@ public record BillingBreakdown(
             TeamQueuedChanges pendingState
     ) {
         List<PendingWarLine> lines = new ArrayList<>();
-        for (UUID targetId : pendingState.pendingWarDeclares()) {
-            lines.add(new PendingWarLine(resolveTeamName(server, targetId), false));
-        }
-        for (UUID targetId : pendingState.pendingWarEnds()) {
-            lines.add(new PendingWarLine(resolveTeamName(server, targetId), true));
-        }
+        appendPendingWarLines(lines, server, pendingState.pendingWarDeclares(), false);
+        appendPendingWarLines(lines, server, pendingState.pendingWarEnds(), true);
         return lines;
+    }
+
+    private static void appendPendingWarLines(List<PendingWarLine> lines, MinecraftServer server, java.util.Collection<UUID> targetIds, boolean endWar) {
+        for (UUID targetId : targetIds) {
+            lines.add(new PendingWarLine(resolveTeamName(server, targetId), endWar));
+        }
     }
 
     private static String resolveTeamName(MinecraftServer server, UUID teamId) {
@@ -219,19 +230,13 @@ public record BillingBreakdown(
     }
 
     private static String formatPendingPropertyValue(TeamProperty<?> property, String serialized) {
-        if (property instanceof dev.ftb.mods.ftbteams.api.property.PrivacyProperty privacyProp) {
-            PrivacyMode mode = SafeguardPricing.deserializePropertyValue(
-                    privacyProp,
-                    serialized,
-                    PrivacyMode.PUBLIC
-            );
-            return mode.name();
-        }
-        if (property instanceof dev.ftb.mods.ftbteams.api.property.BooleanProperty boolProp) {
-            boolean value = SafeguardPricing.deserializePropertyValue(boolProp, serialized, true);
-            return String.valueOf(value);
-        }
-        return serialized;
+        return switch (property) {
+            case dev.ftb.mods.ftbteams.api.property.PrivacyProperty privacyProp ->
+                    SafeguardPricing.deserializePropertyValue(privacyProp, serialized, PrivacyMode.PUBLIC).name();
+            case dev.ftb.mods.ftbteams.api.property.BooleanProperty boolProp ->
+                    String.valueOf(SafeguardPricing.deserializePropertyValue(boolProp, serialized, true));
+            default -> serialized;
+        };
     }
 
     public long forceLoadUnitPrice() {

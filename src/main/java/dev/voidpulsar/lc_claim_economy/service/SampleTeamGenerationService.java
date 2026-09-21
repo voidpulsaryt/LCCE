@@ -83,17 +83,13 @@ public final class SampleTeamGenerationService {
         }
 
         TeamManager teamManager = FTBTeamsAPI.api().getManager();
-        int totalCount = 0;
-        int claimedCount = 0;
-        for (Team team : teamManager.getTeams()) {
-            if (!matchesTestTeamPrefix(team.getName().getString())) {
-                continue;
-            }
-            totalCount++;
-            if (FTBChunksAPI.api().isManagerLoaded() && ConflictService.isClaimTeam(server, team)) {
-                claimedCount++;
-            }
-        }
+        List<Team> testTeams = teamManager.getTeams().stream()
+                .filter(team -> matchesTestTeamPrefix(team.getName().getString()))
+                .toList();
+
+        long claimedCount = FTBChunksAPI.api().isManagerLoaded()
+                ? testTeams.stream().filter(team -> ConflictService.isClaimTeam(server, team)).count()
+                : 0L;
 
         int filledSlots = 0;
         for (int slot = 1; slot <= DEFAULT_COUNT; slot++) {
@@ -102,18 +98,14 @@ public final class SampleTeamGenerationService {
             }
         }
 
-        return new CountResult(totalCount, claimedCount, filledSlots);
+        return new CountResult(testTeams.size(), (int) claimedCount, filledSlots);
     }
 
     public static List<Team> findAllTestTeams(TeamManager teamManager) {
-        List<Team> matches = new ArrayList<>();
-        for (Team team : teamManager.getTeams()) {
-            if (matchesTestTeamPrefix(team.getName().getString())) {
-                matches.add(team);
-            }
-        }
-        matches.sort(Comparator.comparing(team -> team.getName().getString(), String.CASE_INSENSITIVE_ORDER));
-        return matches;
+        return teamManager.getTeams().stream()
+                .filter(team -> matchesTestTeamPrefix(team.getName().getString()))
+                .sorted(Comparator.comparing(team -> team.getName().getString(), String.CASE_INSENSITIVE_ORDER))
+                .toList();
     }
 
     @Nullable
@@ -164,18 +156,10 @@ public final class SampleTeamGenerationService {
         int failedCount = 0;
 
         for (Team team : toDelete) {
-            if (!(team instanceof ServerTeam serverTeam)) {
-                skippedCount++;
-                LcClaimEconomy.LOGGER.warn("Refusing to delete non-server test team {}", team.getName().getString());
-                continue;
-            }
-
-            try {
-                serverTeam.delete(deleteSource);
-                deletedCount++;
-            } catch (Exception exception) {
-                failedCount++;
-                LcClaimEconomy.LOGGER.warn("Failed to delete test team {}", team.getName().getString(), exception);
+            switch (deleteOneTestTeam(team, deleteSource)) {
+                case DELETED -> deletedCount++;
+                case SKIPPED -> skippedCount++;
+                case FAILED -> failedCount++;
             }
         }
 
@@ -184,6 +168,24 @@ public final class SampleTeamGenerationService {
         }
 
         return new ClearResult(deletedCount, skippedCount, failedCount);
+    }
+
+    private enum ClearOutcome {
+        DELETED, SKIPPED, FAILED
+    }
+
+    private static ClearOutcome deleteOneTestTeam(Team team, CommandSourceStack deleteSource) {
+        if (!(team instanceof ServerTeam serverTeam)) {
+            LcClaimEconomy.LOGGER.warn("Refusing to delete non-server test team {}", team.getName().getString());
+            return ClearOutcome.SKIPPED;
+        }
+        try {
+            serverTeam.delete(deleteSource);
+            return ClearOutcome.DELETED;
+        } catch (Exception exception) {
+            LcClaimEconomy.LOGGER.warn("Failed to delete test team {}", team.getName().getString(), exception);
+            return ClearOutcome.FAILED;
+        }
     }
 
     public static SeedResult seed(MinecraftServer server, CommandSourceStack source, int requestedCount) throws CommandSyntaxException {
@@ -202,33 +204,11 @@ public final class SampleTeamGenerationService {
         int failedCount = 0;
 
         for (int slot = 1; slot <= requestedCount; slot++) {
-            String slotName = slotName(slot);
-            Team team = resolveSlot(teamManager, slot);
-            if (team != null) {
-                ChunkTeamData existingClaims = FTBChunksAPI.api().getManager().getOrCreateData(team);
-                if (!existingClaims.getClaimedChunks().isEmpty()) {
-                    skippedCount++;
-                    continue;
-                }
-            } else {
-                team = teamManager.createServerTeam(
-                        source,
-                        slotName,
-                        "Dev test team for war UI",
-                        SLOT_COLORS[(slot - 1) % SLOT_COLORS.length]
-                );
+            switch (seedOneSlot(slot, teamManager, source, claimSource, dimension)) {
+                case CREATED -> createdCount++;
+                case SKIPPED -> skippedCount++;
+                case FAILED -> failedCount++;
             }
-
-            ChunkDimPos claimPos = new ChunkDimPos(dimension, DEMO_CHUNK_ORIGIN_X + slot, DEMO_CHUNK_ORIGIN_Z);
-            ChunkTeamData chunkData = FTBChunksAPI.api().getManager().getOrCreateData(team);
-            ClaimResult claimResult = chunkData.claim(claimSource, claimPos, false);
-            if (!claimResult.isSuccess()) {
-                failedCount++;
-                LcClaimEconomy.LOGGER.warn("Failed to claim chunk for {} at {}: {}", slotName, claimPos, claimResult.getResultId());
-                continue;
-            }
-
-            createdCount++;
         }
 
         ServerPlayer runner = source.getEntity() instanceof ServerPlayer player ? player : null;
@@ -245,6 +225,43 @@ public final class SampleTeamGenerationService {
                 warPlan.outgoingCount(),
                 warPlan.availableTargets()
         );
+    }
+
+    private enum SeedOutcome {
+        CREATED, SKIPPED, FAILED
+    }
+
+    private static SeedOutcome seedOneSlot(
+            int slot,
+            TeamManager teamManager,
+            CommandSourceStack source,
+            CommandSourceStack claimSource,
+            ResourceKey<Level> dimension
+    ) throws CommandSyntaxException {
+        String slotName = slotName(slot);
+        Team team = resolveSlot(teamManager, slot);
+        if (team != null) {
+            ChunkTeamData existingClaims = FTBChunksAPI.api().getManager().getOrCreateData(team);
+            if (!existingClaims.getClaimedChunks().isEmpty()) {
+                return SeedOutcome.SKIPPED;
+            }
+        } else {
+            team = teamManager.createServerTeam(
+                    source,
+                    slotName,
+                    "Dev test team for war UI",
+                    SLOT_COLORS[(slot - 1) % SLOT_COLORS.length]
+            );
+        }
+
+        ChunkDimPos claimPos = new ChunkDimPos(dimension, DEMO_CHUNK_ORIGIN_X + slot, DEMO_CHUNK_ORIGIN_Z);
+        ChunkTeamData chunkData = FTBChunksAPI.api().getManager().getOrCreateData(team);
+        ClaimResult claimResult = chunkData.claim(claimSource, claimPos, false);
+        if (!claimResult.isSuccess()) {
+            LcClaimEconomy.LOGGER.warn("Failed to claim chunk for {} at {}: {}", slotName, claimPos, claimResult.getResultId());
+            return SeedOutcome.FAILED;
+        }
+        return SeedOutcome.CREATED;
     }
 
     private static DemoWarPlan seedDemoWars(MinecraftServer server, @Nullable ServerPlayer runner, int slotLimit) {

@@ -11,19 +11,25 @@ import net.neoforged.neoforge.network.PacketDistributor;
 
 public final class ClientQueuedStateRefreshHandler {
     public ClientQueuedStateRefreshHandler() {
-        TeamEvent.CLIENT_PROPERTIES_CHANGED.register(event -> {
-            PacketDistributor.sendToServer(new PricingRequestPayload());
-            PacketDistributor.sendToServer(new QueuedStateRequestPayload());
-            PacketDistributor.sendToServer(new RequestLandChunksPayload());
-            PacketDistributor.sendToServer(new ConflictStateRequestPayload());
+        TeamEvent.CLIENT_PROPERTIES_CHANGED.register(event -> handlePropertiesChanged(event.getTeam()));
+    }
 
-            // Only push values into an open properties screen when the change
-            // concerns the player's own team; properties of other teams also
-            // sync to all clients.
-            if (isSelfTeam(event.getTeam())) {
-                QueuedStateUiRefresh.syncOpenScreenValues(event.getTeam());
-            }
-        });
+    private void handlePropertiesChanged(Team team) {
+        requestFreshState();
+
+        // Only push values into an open properties screen when the change
+        // concerns the player's own team; properties of other teams also
+        // sync to all clients.
+        if (isSelfTeam(team)) {
+            QueuedStateUiRefresh.syncOpenScreenValues(team);
+        }
+    }
+
+    private static void requestFreshState() {
+        PacketDistributor.sendToServer(new PricingRequestPayload());
+        PacketDistributor.sendToServer(new QueuedStateRequestPayload());
+        PacketDistributor.sendToServer(new RequestLandChunksPayload());
+        PacketDistributor.sendToServer(new ConflictStateRequestPayload());
     }
 
     private static boolean isSelfTeam(Team team) {

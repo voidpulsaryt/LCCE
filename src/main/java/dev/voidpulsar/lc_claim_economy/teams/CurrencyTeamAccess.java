@@ -92,22 +92,12 @@ public final class CurrencyTeamAccess {
         }
     }
 
-    @SuppressWarnings("unchecked")
     static List<PlayerReference> admins(Team team) {
-        try {
-            return (List<PlayerReference>) ADMINS_FIELD.get(team);
-        } catch (IllegalAccessException exception) {
-            throw new IllegalStateException("Failed to read LC team admins", exception);
-        }
+        return readField(ADMINS_FIELD, team, "admins");
     }
 
-    @SuppressWarnings("unchecked")
     static List<PlayerReference> members(Team team) {
-        try {
-            return (List<PlayerReference>) MEMBERS_FIELD.get(team);
-        } catch (IllegalAccessException exception) {
-            throw new IllegalStateException("Failed to read LC team members", exception);
-        }
+        return readField(MEMBERS_FIELD, team, "members");
     }
 
     static void createBankAccount(Team team) {
@@ -138,10 +128,15 @@ public final class CurrencyTeamAccess {
 
     @Nullable
     private static TeamBankAccount readBankAccount(Team team) {
+        return readField(BANK_ACCOUNT_FIELD, team, "bank account");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T readField(Field field, Team team, String label) {
         try {
-            return (TeamBankAccount) BANK_ACCOUNT_FIELD.get(team);
+            return (T) field.get(team);
         } catch (IllegalAccessException exception) {
-            throw new IllegalStateException("Failed to read LC team bank account", exception);
+            throw new IllegalStateException("Failed to read LC team " + label, exception);
         }
     }
 

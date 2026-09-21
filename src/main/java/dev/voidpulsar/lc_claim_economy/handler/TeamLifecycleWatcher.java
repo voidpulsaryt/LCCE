@@ -49,13 +49,16 @@ public class TeamLifecycleWatcher {
     }
 
     private void onTeamCreated(TeamCreatedEvent event) {
-        ClaimVisibilityRules.ensurePublic(event.getTeam());
-        guaranteeAccountExists(event.getTeam());
+        initializeTeamDefaults(event.getTeam());
     }
 
     private void onTeamLoaded(TeamEvent event) {
-        ClaimVisibilityRules.ensurePublic(event.getTeam());
-        guaranteeAccountExists(event.getTeam());
+        initializeTeamDefaults(event.getTeam());
+    }
+
+    private void initializeTeamDefaults(Team team) {
+        ClaimVisibilityRules.ensurePublic(team);
+        guaranteeAccountExists(team);
     }
 
     private void onTeamDeleted(TeamEvent event) {
@@ -71,20 +74,24 @@ public class TeamLifecycleWatcher {
 
     private void onPlayerLeftParty(PlayerLeftPartyTeamEvent event) {
         MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
-        boolean wasDissolved = event.getTeamDeleted();
-        if (activeServer != null && wasDissolved) {
-            PartyDissolutionSettlement.settle(activeServer, event.getTeam());
-            if (event.getPlayer() != null) {
-                ConflictSyncCoordinator.syncToPlayer(event.getPlayer());
-            }
-        }
-
-        if (!wasDissolved) {
+        if (event.getTeamDeleted()) {
+            settlePartyDissolution(activeServer, event);
+        } else {
             guaranteeAccountExists(event.getTeam());
         }
         // The player's new solo/fallback team also needs an account regardless
         // of whether the party they left still exists.
         guaranteeAccountExists(event.getPlayerTeam());
+    }
+
+    private void settlePartyDissolution(MinecraftServer activeServer, PlayerLeftPartyTeamEvent event) {
+        if (activeServer == null) {
+            return;
+        }
+        PartyDissolutionSettlement.settle(activeServer, event.getTeam());
+        if (event.getPlayer() != null) {
+            ConflictSyncCoordinator.syncToPlayer(event.getPlayer());
+        }
     }
 
     private void onOwnershipTransferred(PlayerTransferredTeamOwnershipEvent event) {
@@ -107,6 +114,10 @@ public class TeamLifecycleWatcher {
         if (arrivingPlayer == null) {
             return;
         }
+        syncArrivalState(activeServer, arrivingPlayer);
+    }
+
+    private void syncArrivalState(MinecraftServer activeServer, ServerPlayer arrivingPlayer) {
         ClaimPricingBroadcast.syncToPlayer(arrivingPlayer);
         QueuedStateBroadcast.syncToPlayer(arrivingPlayer);
         dev.voidpulsar.lc_claim_economy.service.LandChunkService.syncToPlayer(arrivingPlayer);

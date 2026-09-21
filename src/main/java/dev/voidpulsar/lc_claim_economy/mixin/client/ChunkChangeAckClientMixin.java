@@ -29,10 +29,9 @@ public class ChunkChangeAckClientMixin {
             dev.architectury.networking.NetworkManager.PacketContext senderContext,
             CallbackInfo callback
     ) {
-        ClientPricingCache.noteChunkUpdate(
-                ackPacket.totalChunks(),
-                ackPacket.changedChunks(),
-                ackPacket.problems()
-        );
+        int totalChunks = ackPacket.totalChunks();
+        int changedChunks = ackPacket.changedChunks();
+        Map<String, Integer> problemsById = ackPacket.problems();
+        ClientPricingCache.noteChunkUpdate(totalChunks, changedChunks, problemsById);
     }
 }

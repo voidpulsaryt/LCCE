@@ -23,32 +23,31 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class TeamRankChangeMixin {
     @Inject(method = "changePromoteMember", at = @At("HEAD"), cancellable = true, remap = false)
     private void lcClaimEconomy$blockManagedPromote(Player actingPlayer, PlayerReference targetMember, CallbackInfo callback) {
-        if (blockRoleChange(actingPlayer, ((Team) (Object) this).getID())) {
-            callback.cancel();
-        }
+        guardManagedRankChange(actingPlayer, callback);
     }
 
     @Inject(method = "changeDemoteMember", at = @At("HEAD"), cancellable = true, remap = false)
     private void lcClaimEconomy$blockManagedDemote(Player actingPlayer, PlayerReference targetMember, CallbackInfo callback) {
-        if (blockRoleChange(actingPlayer, ((Team) (Object) this).getID())) {
-            callback.cancel();
-        }
+        guardManagedRankChange(actingPlayer, callback);
     }
 
     @Inject(method = "changeOwner", at = @At("HEAD"), cancellable = true, remap = false)
     private void lcClaimEconomy$blockManagedOwnerChange(Player actingPlayer, PlayerReference targetMember, CallbackInfo callback) {
-        if (blockRoleChange(actingPlayer, ((Team) (Object) this).getID())) {
-            callback.cancel();
-        }
+        guardManagedRankChange(actingPlayer, callback);
     }
 
-    private static boolean blockRoleChange(Player actingPlayer, long linkedTeamId) {
-        MinecraftServer runningServer = ServerLifecycleHooks.getCurrentServer();
-        if (runningServer == null || !TeamBankLinkRegistry.shouldBlockLcTeamRoleChanges(runningServer, linkedTeamId)) {
-            return false;
+    /** Shared gate for all three injection points above - only the reflected LC method differs. */
+    private void guardManagedRankChange(Player actingPlayer, CallbackInfo callback) {
+        long linkedTeamId = ((Team) (Object) this).getID();
+        if (!isManagedByLinkedParty(linkedTeamId)) {
+            return;
         }
-
         actingPlayer.displayClientMessage(Component.translatable("message.lc_claim_economy.team_role_change_denied"), true);
-        return true;
+        callback.cancel();
+    }
+
+    private static boolean isManagedByLinkedParty(long linkedTeamId) {
+        MinecraftServer runningServer = ServerLifecycleHooks.getCurrentServer();
+        return runningServer != null && TeamBankLinkRegistry.shouldBlockLcTeamRoleChanges(runningServer, linkedTeamId);
     }
 }

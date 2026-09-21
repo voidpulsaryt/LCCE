@@ -39,20 +39,17 @@ public final class BillingPriorityCommand {
     private static int showPriority(CommandContext<CommandSourceStack> context) {
         CommandSourceStack source = context.getSource();
         ServerPlayer viewer = source.getPlayer();
-        if (viewer == null || !FTBTeamsAPI.api().isManagerLoaded()) {
+        if (!canRun(viewer)) {
             return 0;
         }
 
-        Team team = FTBTeamsAPI.api().getManager().getTeamForPlayer(viewer).orElse(null);
+        Team team = resolveTeam(viewer);
         if (team == null) {
             return 0;
         }
 
-        if (team.isPartyTeam() && !BankLedgerAccess.canPurchaseForTeam(team, viewer.getUUID())) {
-            viewer.displayClientMessage(
-                    Component.translatable("message.lc_claim_economy.upkeep_priority.denied"),
-                    false
-            );
+        if (!isAuthorized(team, viewer)) {
+            denyAccess(viewer);
             return 0;
         }
 
@@ -69,30 +66,53 @@ public final class BillingPriorityCommand {
         return 1;
     }
 
+    private static boolean canRun(ServerPlayer viewer) {
+        return viewer != null && FTBTeamsAPI.api().isManagerLoaded();
+    }
+
+    private static Team resolveTeam(ServerPlayer viewer) {
+        return FTBTeamsAPI.api().getManager().getTeamForPlayer(viewer).orElse(null);
+    }
+
+    private static boolean isAuthorized(Team team, ServerPlayer viewer) {
+        return !team.isPartyTeam() || BankLedgerAccess.canPurchaseForTeam(team, viewer.getUUID());
+    }
+
+    private static void denyAccess(ServerPlayer viewer) {
+        viewer.displayClientMessage(Component.translatable("message.lc_claim_economy.upkeep_priority.denied"), false);
+    }
+
     private static MutableComponent buildPriorityListing(java.util.List<BillingPriorityService.PriorityEntry> orderedEntries) {
+        MutableComponent message = buildHeader();
         Component period = SafeguardPriceDisplay.upkeepPeriodLabel();
-        MutableComponent message = Component.translatable("message.lc_claim_economy.upkeep_priority.header")
+        for (BillingPriorityService.PriorityEntry entry : orderedEntries) {
+            message.append(buildEntryLine(entry, period));
+        }
+        return message;
+    }
+
+    private static MutableComponent buildHeader() {
+        return Component.translatable("message.lc_claim_economy.upkeep_priority.header")
                 .withStyle(ChatFormatting.YELLOW)
                 .append("\n")
                 .append(Component.translatable("message.lc_claim_economy.upkeep_priority.legend")
                         .withStyle(ChatFormatting.GRAY))
                 .append("\n");
+    }
 
-        for (BillingPriorityService.PriorityEntry entry : orderedEntries) {
-            Component cost = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(entry.costCopper()));
-            String kindKey = entry.kind() == BillingPriorityService.EntryKind.PROTECTION
-                    ? "message.lc_claim_economy.upkeep_priority.kind.protection"
-                    : "message.lc_claim_economy.upkeep_priority.kind.war";
-            message.append(Component.translatable(
-                    "message.lc_claim_economy.upkeep_priority.line",
-                    entry.priority(),
-                    entry.label(),
-                    Component.translatable(kindKey),
-                    cost,
-                    period
-            ));
-            message.append("\n");
-        }
-        return message;
+    private static MutableComponent buildEntryLine(BillingPriorityService.PriorityEntry entry, Component period) {
+        Component cost = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(entry.costCopper()));
+        String kindKey = entry.kind() == BillingPriorityService.EntryKind.PROTECTION
+                ? "message.lc_claim_economy.upkeep_priority.kind.protection"
+                : "message.lc_claim_economy.upkeep_priority.kind.war";
+        return Component.translatable(
+                        "message.lc_claim_economy.upkeep_priority.line",
+                        entry.priority(),
+                        entry.label(),
+                        Component.translatable(kindKey),
+                        cost,
+                        period
+                )
+                .append("\n");
     }
 }

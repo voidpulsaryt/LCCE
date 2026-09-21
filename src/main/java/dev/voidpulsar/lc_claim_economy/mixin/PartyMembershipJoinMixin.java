@@ -22,15 +22,16 @@ public class PartyMembershipJoinMixin {
     @Inject(method = "playerJoinedParty", at = @At("HEAD"), remap = false)
     private void lcClaimEconomy$dissolvePersonalClaims(PlayerJoinedPartyTeamEvent joinEvent, CallbackInfo callback) {
         ServerPlayer joiningPlayer = joinEvent.getPlayer();
-        if (joiningPlayer == null) {
-            return;
-        }
-
         Team formerTeam = joinEvent.getPreviousTeam();
-        if (formerTeam == null || formerTeam.isPartyTeam()) {
+        if (!wasSoloDeparture(joiningPlayer, formerTeam)) {
             return;
         }
 
         PartyEnrollmentSettlement.settle(joiningPlayer.server, joiningPlayer, formerTeam);
+    }
+
+    /** True only when a real player left their own solo team to join this party - not a party-to-party transfer. */
+    private static boolean wasSoloDeparture(ServerPlayer joiningPlayer, Team formerTeam) {
+        return joiningPlayer != null && formerTeam != null && !formerTeam.isPartyTeam();
     }
 }

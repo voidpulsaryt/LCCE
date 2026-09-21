@@ -28,20 +28,32 @@ public final class QueuedStateBroadcast {
             return;
         }
         QueuedStateBroadcastPayload payload = createPayload(player.server, team);
-        LcClaimEconomy.LOGGER.debug("syncToPlayer {}: team={}, properties={}, forceLoads={}, forceUnloads={}",
-                player.getScoreboardName(), team.getShortName(),
-                payload.pendingProperties(), payload.pendingForceLoads(), payload.pendingForceUnloads());
+        logPlayerSync(player, team, payload);
         PacketDistributor.sendToPlayer(player, payload);
     }
 
     public static void syncTeam(MinecraftServer server, Team team) {
         QueuedStateBroadcastPayload payload = createPayload(server, team);
-        LcClaimEconomy.LOGGER.debug("syncTeam {}: properties={}, forceLoads={}, forceUnloads={}, recipients={}",
-                team.getShortName(), payload.pendingProperties(), payload.pendingForceLoads(),
-                payload.pendingForceUnloads(), team.getOnlineMembers().size());
+        logTeamSync(team, payload);
+        dispatchToOnlineMembers(team, payload);
+    }
+
+    private static void dispatchToOnlineMembers(Team team, QueuedStateBroadcastPayload payload) {
         for (ServerPlayer member : team.getOnlineMembers()) {
             PacketDistributor.sendToPlayer(member, payload);
         }
+    }
+
+    private static void logPlayerSync(ServerPlayer player, Team team, QueuedStateBroadcastPayload payload) {
+        LcClaimEconomy.LOGGER.debug("syncToPlayer {}: team={}, properties={}, forceLoads={}, forceUnloads={}",
+                player.getScoreboardName(), team.getShortName(),
+                payload.pendingProperties(), payload.pendingForceLoads(), payload.pendingForceUnloads());
+    }
+
+    private static void logTeamSync(Team team, QueuedStateBroadcastPayload payload) {
+        LcClaimEconomy.LOGGER.debug("syncTeam {}: properties={}, forceLoads={}, forceUnloads={}, recipients={}",
+                team.getShortName(), payload.pendingProperties(), payload.pendingForceLoads(),
+                payload.pendingForceUnloads(), team.getOnlineMembers().size());
     }
 
     public static QueuedStateBroadcastPayload createPayload(MinecraftServer server, Team team) {

@@ -6,6 +6,7 @@ import dev.ftb.mods.ftbchunks.api.ClaimedChunk;
 import dev.ftb.mods.ftbchunks.api.event.ClaimedChunkEvent;
 import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
+import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
 import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
 import dev.voidpulsar.lc_claim_economy.data.ChunkCoordKey;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
@@ -18,70 +19,90 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.server.ServerLifecycleHooks;
 
+import javax.annotation.Nullable;
+
 public class ChunkLoadPinHandler {
     public ChunkLoadPinHandler() {
         ClaimedChunkEvent.BEFORE_LOAD.register(this::beforeLoad);
         ClaimedChunkEvent.BEFORE_UNLOAD.register(this::beforeUnload);
     }
 
+    /** Everything both handlers need once the requester has been cleared to act on this chunk's team. */
+    private record LoadScope(MinecraftServer server, LcClaimEconomySavedData economyData, TeamQueuedChanges queuedState, String positionKey) {
+    }
+
     private CompoundEventResult<ClaimResult> beforeLoad(CommandSourceStack source, ClaimedChunk chunk) {
-        ServerPlayer requester = source.getPlayer();
-        if (requester == null || !FTBTeamsAPI.api().isManagerLoaded()) {
-            return CompoundEventResult.pass();
+        CompoundEventResult<ClaimResult> denied = checkBasicAuthorization(source, chunk);
+        if (denied != null) {
+            return denied;
         }
 
         Team team = chunk.getTeamData().getTeam();
-        if (team == null) {
-            return CompoundEventResult.pass();
-        }
-        if (!BankLedgerAccess.canPurchaseForTeam(team, requester.getUUID())) {
-            return CompoundEventResult.interruptFalse(ClaimResult.customProblem("message.lc_claim_economy.claim_rank_denied"));
-        }
-
-        MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
-        if (server == null) {
+        LoadScope scope = resolveScope(team, chunk);
+        if (scope == null) {
             return CompoundEventResult.pass();
         }
 
-        LcClaimEconomySavedData economyData = LcClaimEconomySavedData.get(server);
-        if (economyData.isProtectionLocked(team.getTeamId())) {
+        if (scope.economyData().isProtectionLocked(team.getTeamId())) {
             return CompoundEventResult.interruptFalse(ClaimResult.customProblem("message.lc_claim_economy.protection_locked_change"));
         }
 
-        TeamQueuedChanges queuedState = economyData.getPendingState(team.getTeamId());
-        String positionKey = ChunkCoordKey.encode(chunk.getPos());
-
         // A second load click while one's already queued reads as "never mind" -
         // same idea as cycling a protection setting back to cancel it.
-        if (queuedState.isPendingForceLoad(positionKey)) {
-            return cancelQueuedChange(server, team, economyData, queuedState.withoutPendingForceLoad(positionKey));
-        }
-        if (queuedState.isPendingForceUnload(positionKey)) {
-            return cancelQueuedChange(server, team, economyData, queuedState.withoutPendingForceUnload(positionKey));
+        CompoundEventResult<ClaimResult> toggledOff = tryCancelExisting(scope, team);
+        if (toggledOff != null) {
+            return toggledOff;
         }
         if (chunk.isForceLoaded()) {
             return CompoundEventResult.pass();
         }
 
-        TeamQueuedChanges withNewLoad = queuedState.withPendingForceLoad(positionKey);
-        if (!SafeguardEnforcementService.canAffordNextPeriod(server, team, withNewLoad)) {
+        TeamQueuedChanges withNewLoad = scope.queuedState().withPendingForceLoad(scope.positionKey());
+        if (!SafeguardEnforcementService.canAffordNextPeriod(scope.server(), team, withNewLoad)) {
             return CompoundEventResult.interruptFalse(ClaimResult.customProblem("message.lc_claim_economy.insufficient_funds_protection"));
         }
 
-        economyData.setPendingState(team.getTeamId(), withNewLoad);
-        dev.voidpulsar.lc_claim_economy.LcClaimEconomy.LOGGER.debug("Team {}: force-load queued for chunk {}",
-                team.getShortName(), positionKey);
-        QueuedStateBroadcast.syncTeam(server, team);
+        scope.economyData().setPendingState(team.getTeamId(), withNewLoad);
+        LcClaimEconomy.LOGGER.debug("Team {}: force-load queued for chunk {}", team.getShortName(), scope.positionKey());
+        QueuedStateBroadcast.syncTeam(scope.server(), team);
         notifyForceLoadPending(team);
         return CompoundEventResult.interruptFalse(ClaimResult.success());
     }
 
     private CompoundEventResult<ClaimResult> beforeUnload(CommandSourceStack source, ClaimedChunk chunk) {
+        CompoundEventResult<ClaimResult> denied = checkBasicAuthorization(source, chunk);
+        if (denied != null) {
+            return denied;
+        }
+
+        Team team = chunk.getTeamData().getTeam();
+        LoadScope scope = resolveScope(team, chunk);
+        if (scope == null) {
+            return CompoundEventResult.pass();
+        }
+
+        CompoundEventResult<ClaimResult> toggledOff = tryCancelExisting(scope, team);
+        if (toggledOff != null) {
+            return toggledOff;
+        }
+        if (!chunk.isForceLoaded()) {
+            return CompoundEventResult.pass();
+        }
+
+        TeamQueuedChanges withNewUnload = scope.queuedState().withPendingForceUnload(scope.positionKey());
+        scope.economyData().setPendingState(team.getTeamId(), withNewUnload);
+        QueuedStateBroadcast.syncTeam(scope.server(), team);
+        notifyForceLoadPending(team);
+        return CompoundEventResult.interruptFalse(ClaimResult.success());
+    }
+
+    /** Requester must exist, FTB Teams must be up, the chunk must belong to a team, and that requester must hold rank on it. */
+    @Nullable
+    private CompoundEventResult<ClaimResult> checkBasicAuthorization(CommandSourceStack source, ClaimedChunk chunk) {
         ServerPlayer requester = source.getPlayer();
         if (requester == null || !FTBTeamsAPI.api().isManagerLoaded()) {
             return CompoundEventResult.pass();
         }
-
         Team team = chunk.getTeamData().getTeam();
         if (team == null) {
             return CompoundEventResult.pass();
@@ -89,31 +110,31 @@ public class ChunkLoadPinHandler {
         if (!BankLedgerAccess.canPurchaseForTeam(team, requester.getUUID())) {
             return CompoundEventResult.interruptFalse(ClaimResult.customProblem("message.lc_claim_economy.claim_rank_denied"));
         }
+        return null;
+    }
 
+    @Nullable
+    private LoadScope resolveScope(Team team, ClaimedChunk chunk) {
         MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
         if (server == null) {
-            return CompoundEventResult.pass();
+            return null;
         }
-
         LcClaimEconomySavedData economyData = LcClaimEconomySavedData.get(server);
         TeamQueuedChanges queuedState = economyData.getPendingState(team.getTeamId());
         String positionKey = ChunkCoordKey.encode(chunk.getPos());
+        return new LoadScope(server, economyData, queuedState, positionKey);
+    }
 
-        if (queuedState.isPendingForceUnload(positionKey)) {
-            return cancelQueuedChange(server, team, economyData, queuedState.withoutPendingForceUnload(positionKey));
+    /** If a load or unload is already queued for this chunk, undo it and report the toggle-off; otherwise null. */
+    @Nullable
+    private CompoundEventResult<ClaimResult> tryCancelExisting(LoadScope scope, Team team) {
+        if (scope.queuedState().isPendingForceLoad(scope.positionKey())) {
+            return cancelQueuedChange(scope.server(), team, scope.economyData(), scope.queuedState().withoutPendingForceLoad(scope.positionKey()));
         }
-        if (queuedState.isPendingForceLoad(positionKey)) {
-            return cancelQueuedChange(server, team, economyData, queuedState.withoutPendingForceLoad(positionKey));
+        if (scope.queuedState().isPendingForceUnload(scope.positionKey())) {
+            return cancelQueuedChange(scope.server(), team, scope.economyData(), scope.queuedState().withoutPendingForceUnload(scope.positionKey()));
         }
-        if (!chunk.isForceLoaded()) {
-            return CompoundEventResult.pass();
-        }
-
-        TeamQueuedChanges withNewUnload = queuedState.withPendingForceUnload(positionKey);
-        economyData.setPendingState(team.getTeamId(), withNewUnload);
-        QueuedStateBroadcast.syncTeam(server, team);
-        notifyForceLoadPending(team);
-        return CompoundEventResult.interruptFalse(ClaimResult.success());
+        return null;
     }
 
     /**

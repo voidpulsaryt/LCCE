@@ -15,6 +15,8 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import javax.annotation.Nullable;
+
 /**
  * LC lets a player disband their own LC-side team independently of the FTB party it's
  * linked to, which would leave {@link TeamBankLinkRegistry}'s link pointing at a
@@ -27,11 +29,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class TeamCacheEvictionMixin {
     @Inject(method = "removeTeam", at = @At("HEAD"), cancellable = true, remap = false)
     private void lcClaimEconomy$guardManagedTeamRemoval(long lcTeamId, CallbackInfo callback) {
-        if (CurrencyTeamPurgeGuard.isAllowed()) {
-            return;
-        }
-
-        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
+        MinecraftServer activeServer = activeServerIfUnmanagedRemoval();
         if (activeServer == null) {
             return;
         }
@@ -40,33 +38,39 @@ public class TeamCacheEvictionMixin {
             return;
         }
 
-        ITeam blockedTeam = TeamAPI.getApi().GetTeam(false, lcTeamId);
-        if (blockedTeam != null) {
-            for (ServerPlayer onlinePlayer : activeServer.getPlayerList().getPlayers()) {
-                if (blockedTeam.isOwner(onlinePlayer)) {
-                    onlinePlayer.displayClientMessage(Component.translatable("message.lc_claim_economy.team_disband_denied"), true);
-                    break;
-                }
-            }
-        }
-
+        notifyOwnerOfBlockedDisband(activeServer, lcTeamId);
         LcClaimEconomy.LOGGER.debug("Blocked removal of LC team {} while FTB party link is active", lcTeamId);
         callback.cancel();
     }
 
     @Inject(method = "removeTeam", at = @At("TAIL"), remap = false)
     private void lcClaimEconomy$cleanupLinkAfterRemoval(long lcTeamId, CallbackInfo callback) {
-        if (CurrencyTeamPurgeGuard.isAllowed()) {
-            return;
-        }
-
-        MinecraftServer activeServer = ServerLifecycleHooks.getCurrentServer();
+        MinecraftServer activeServer = activeServerIfUnmanagedRemoval();
         if (activeServer == null) {
             return;
         }
+        TeamBankLinkRegistry.unlinkLcTeam(activeServer, lcTeamId);
+    }
 
-        if (TeamBankLinkRegistry.findByLcTeamId(activeServer, lcTeamId) != null) {
-            TeamBankLinkRegistry.unlinkLcTeam(activeServer, lcTeamId);
+    /** Null whenever this removal shouldn't be intercepted at all: it's our own cleanup code, or there's no live server to check against. */
+    @Nullable
+    private static MinecraftServer activeServerIfUnmanagedRemoval() {
+        if (CurrencyTeamPurgeGuard.isAllowed()) {
+            return null;
+        }
+        return ServerLifecycleHooks.getCurrentServer();
+    }
+
+    private static void notifyOwnerOfBlockedDisband(MinecraftServer activeServer, long lcTeamId) {
+        ITeam blockedTeam = TeamAPI.getApi().GetTeam(false, lcTeamId);
+        if (blockedTeam == null) {
+            return;
+        }
+        for (ServerPlayer onlinePlayer : activeServer.getPlayerList().getPlayers()) {
+            if (blockedTeam.isOwner(onlinePlayer)) {
+                onlinePlayer.displayClientMessage(Component.translatable("message.lc_claim_economy.team_disband_denied"), true);
+                break;
+            }
         }
     }
 }
