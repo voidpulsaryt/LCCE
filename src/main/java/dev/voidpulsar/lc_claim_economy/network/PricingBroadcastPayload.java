@@ -12,6 +12,13 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+/**
+ * Server's reply to {@link PricingRequestPayload}, and re-sent after anything that could change
+ * a displayed number (a claim, a config reload, a protection purchase, an upkeep charge). Feeds
+ * both the plain LC Claim Economy HUD/GUIs and, when FTB Library is present, the FTB Chunks/Teams
+ * panels this mod hooks into - {@code balanceText} is pre-formatted server-side so neither side
+ * needs its own currency-formatting logic.
+ */
 public record PricingBroadcastPayload(
         long claimPrice,
         long forceLoadUpkeepPrice,

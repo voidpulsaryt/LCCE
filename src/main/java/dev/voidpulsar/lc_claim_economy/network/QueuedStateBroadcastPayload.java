@@ -14,6 +14,13 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+/**
+ * Server's reply to {@link QueuedStateRequestPayload}, and re-pushed whenever a team's queued
+ * (not-yet-applied) changes are edited - covers everything the pending-changes banner in the
+ * claim GUIs needs to render: renamed/changed properties waiting on their cooldown, chunks
+ * queued to force-load or force-unload, and chunks queued for a land/build type flip.
+ * {@link #EMPTY} is sent to players with no team so the client always has something to render.
+ */
 public record QueuedStateBroadcastPayload(
         Map<String, String> pendingProperties,
         Set<String> pendingForceLoads,
@@ -25,31 +32,37 @@ public record QueuedStateBroadcastPayload(
     public static final QueuedStateBroadcastPayload EMPTY = new QueuedStateBroadcastPayload(Map.of(), Set.of(), Set.of(), Set.of(), Set.of());
     public static final StreamCodec<FriendlyByteBuf, QueuedStateBroadcastPayload> STREAM_CODEC = StreamCodec.of(
             (buffer, payload) -> {
-                buffer.writeVarInt(payload.pendingProperties.size());
-                for (var entry : payload.pendingProperties.entrySet()) {
-                    buffer.writeUtf(entry.getKey());
-                    buffer.writeUtf(entry.getValue());
-                }
+                writePropertyMap(buffer, payload.pendingProperties);
                 buffer.writeCollection(payload.pendingForceLoads, FriendlyByteBuf::writeUtf);
                 buffer.writeCollection(payload.pendingForceUnloads, FriendlyByteBuf::writeUtf);
                 buffer.writeCollection(payload.pendingLandChunks, FriendlyByteBuf::writeUtf);
                 buffer.writeCollection(payload.pendingBuildChunks, FriendlyByteBuf::writeUtf);
             },
-            buffer -> {
-                int propertyCount = buffer.readVarInt();
-                Map<String, String> properties = new HashMap<>(propertyCount);
-                for (int i = 0; i < propertyCount; i++) {
-                    properties.put(buffer.readUtf(), buffer.readUtf());
-                }
-                return new QueuedStateBroadcastPayload(
-                        properties,
-                        buffer.readCollection(HashSet::new, FriendlyByteBuf::readUtf),
-                        buffer.readCollection(HashSet::new, FriendlyByteBuf::readUtf),
-                        buffer.readCollection(HashSet::new, FriendlyByteBuf::readUtf),
-                        buffer.readCollection(HashSet::new, FriendlyByteBuf::readUtf)
-                );
-            }
+            buffer -> new QueuedStateBroadcastPayload(
+                    readPropertyMap(buffer),
+                    buffer.readCollection(HashSet::new, FriendlyByteBuf::readUtf),
+                    buffer.readCollection(HashSet::new, FriendlyByteBuf::readUtf),
+                    buffer.readCollection(HashSet::new, FriendlyByteBuf::readUtf),
+                    buffer.readCollection(HashSet::new, FriendlyByteBuf::readUtf)
+            )
     );
+
+    private static void writePropertyMap(FriendlyByteBuf buffer, Map<String, String> properties) {
+        buffer.writeVarInt(properties.size());
+        for (var entry : properties.entrySet()) {
+            buffer.writeUtf(entry.getKey());
+            buffer.writeUtf(entry.getValue());
+        }
+    }
+
+    private static Map<String, String> readPropertyMap(FriendlyByteBuf buffer) {
+        int count = buffer.readVarInt();
+        Map<String, String> properties = new HashMap<>(count);
+        for (int i = 0; i < count; i++) {
+            properties.put(buffer.readUtf(), buffer.readUtf());
+        }
+        return properties;
+    }
 
     @Override
     public Type<? extends CustomPacketPayload> type() {

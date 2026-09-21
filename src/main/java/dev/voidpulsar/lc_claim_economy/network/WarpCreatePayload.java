@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+/** Client asks to create a new warp at its current position, or overwrite an existing one it owns by the same name. */
 public record WarpCreatePayload(String name) implements CustomPacketPayload {
     public static final Type<WarpCreatePayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "warp_create"));

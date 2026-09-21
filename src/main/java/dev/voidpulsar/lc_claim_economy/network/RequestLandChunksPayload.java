@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+/** Empty request - client asks the server to resend the full set of chunks flagged "land" (vs "build") for the claim-type toggle UI. */
 public record RequestLandChunksPayload() implements CustomPacketPayload {
     public static final Type<RequestLandChunksPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "request_land_chunks"));

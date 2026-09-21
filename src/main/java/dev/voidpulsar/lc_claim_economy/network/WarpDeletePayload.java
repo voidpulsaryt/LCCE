@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+/** Client asks to delete one of its own warps by name. */
 public record WarpDeletePayload(String name) implements CustomPacketPayload {
     public static final Type<WarpDeletePayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "warp_delete"));

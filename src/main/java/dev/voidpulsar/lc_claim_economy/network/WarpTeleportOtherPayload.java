@@ -11,6 +11,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
 
+/** Client asks to teleport to a public warp owned by someone else - {@code ownerId} disambiguates same-named warps across different owners. */
 public record WarpTeleportOtherPayload(UUID ownerId, String name) implements CustomPacketPayload {
     public static final Type<WarpTeleportOtherPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "warp_teleport_other"));

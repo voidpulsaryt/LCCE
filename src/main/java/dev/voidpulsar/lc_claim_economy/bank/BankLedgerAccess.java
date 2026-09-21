@@ -24,33 +24,47 @@ public final class BankLedgerAccess {
     private BankLedgerAccess() {
     }
 
+    /**
+     * Resolves a team's LC bank account: an FTB party gets the LC team account linked via
+     * {@link CurrencyTeamLinkService}, while a player's own solo team (FTB Teams gives every
+     * player one even if they've never joined a party) maps straight to their personal LC
+     * account. Throws rather than returning {@code null} because every code path that reaches
+     * here has already established the team is one this mod tracks, so a missing account means
+     * the link/account bootstrap was skipped somewhere, not a legitimate "no account" state.
+     */
     public static IBankAccount getAccountForTeam(MinecraftServer server, Team team) {
         if (team.isPartyTeam()) {
-            IBankAccount account = CurrencyTeamLinkService.getBankAccount(server, team);
-            if (account == null) {
-                throw new IllegalStateException("Missing LC team bank account for FTB party " + team.getId());
-            }
-            return account;
+            return requireAccount(
+                    CurrencyTeamLinkService.getBankAccount(server, team),
+                    "Missing LC team bank account for FTB party " + team.getId()
+            );
         }
-        IBankAccount account = PlayerBankReference.of(team.getId()).get();
-        if (account == null) {
-            throw new IllegalStateException("Missing personal bank account for player team " + team.getId());
-        }
-        return account;
+        return requireAccount(
+                PlayerBankReference.of(team.getId()).get(),
+                "Missing personal bank account for player team " + team.getId()
+        );
     }
 
+    /** Same resolution as {@link #getAccountForTeam}, but starting from a player rather than an already-known team. */
     public static IBankAccount getAccountForPlayer(MinecraftServer server, ServerPlayer player) {
-        Optional<Team> team = FTBTeamsAPI.api().getManager().getTeamForPlayer(player);
-        if (team.isPresent()) {
-            return getAccountForTeam(server, team.get());
+        Optional<Team> playerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(player);
+        if (playerTeam.isPresent()) {
+            return getAccountForTeam(server, playerTeam.get());
         }
-        IBankAccount account = PlayerBankReference.of(player.getUUID()).get();
+        return requireAccount(
+                PlayerBankReference.of(player.getUUID()).get(),
+                "Missing personal bank account for player " + player.getUUID()
+        );
+    }
+
+    private static IBankAccount requireAccount(@Nullable IBankAccount account, String errorIfMissing) {
         if (account == null) {
-            throw new IllegalStateException("Missing personal bank account for player " + player.getUUID());
+            throw new IllegalStateException(errorIfMissing);
         }
         return account;
     }
 
+    /** Lightweight, serializable counterpart to {@link #getAccountForTeam} for call sites (e.g. GUI screens) that just need to point at an account, not read/write it immediately - lazily links a party's LC team on first use. */
     public static BankReference getReferenceForTeam(MinecraftServer server, Team team) {
         if (team.isPartyTeam()) {
             long lcTeamId = CurrencyTeamLinkService.getLcTeamId(server, team.getId());
@@ -66,14 +80,16 @@ public final class BankLedgerAccess {
         return PlayerBankReference.of(team.getId());
     }
 
+    /** A solo player always spends their own money freely; a party member needs officer+ rank so rank-and-file members can't drain the shared account. */
     public static boolean canPurchaseForTeam(Team team, UUID playerId) {
         if (!team.isPartyTeam()) {
             return true;
         }
-        TeamRank rank = team.getRankForPlayer(playerId);
-        return rank.isOfficerOrBetter();
+        TeamRank purchaserRank = team.getRankForPlayer(playerId);
+        return purchaserRank.isOfficerOrBetter();
     }
 
+    /** No-op for a solo team or an already-disbanded one - otherwise makes sure the party's LC team link (and its bank account) exists before anything tries to touch it. */
     public static void ensurePartyAccountExists(MinecraftServer server, Team team) {
         if (!team.isPartyTeam() || !team.isValid()) {
             return;

@@ -12,6 +12,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import java.util.UUID;
 
+/** Client requests declaring or ending a war against {@code targetTeamId}; {@link dev.voidpulsar.lc_claim_economy.service.ConflictService#toggleWar} decides which based on current state. */
 public record ToggleConflictPayload(UUID targetTeamId) implements CustomPacketPayload {
     public static final Type<ToggleConflictPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "toggle_war"));

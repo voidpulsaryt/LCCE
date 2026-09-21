@@ -13,6 +13,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Server's reply to {@link RequestChunkUserPermsPayload} (or a push after {@link
+ * SetChunkUserPermsPayload} is applied): the full permission list for one chunk, plus whether
+ * the recipient is allowed to edit it - {@code canManage} gates whether the client renders the
+ * list read-only or with edit controls, since a non-manager can still open the screen to view it.
+ */
 public record SyncChunkUserPermsPayload(String chunkKey, boolean canManage, List<ChunkUserPermissionEntry> entries)
         implements CustomPacketPayload {
     public static final Type<SyncChunkUserPermsPayload> TYPE =

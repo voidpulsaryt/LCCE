@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+/** Client asks the server to flip a single claimed chunk between "land" and "build" type. */
 public record ToggleChunkTypePayload(String chunkKey) implements CustomPacketPayload {
     public static final Type<ToggleChunkTypePayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "toggle_chunk_type"));

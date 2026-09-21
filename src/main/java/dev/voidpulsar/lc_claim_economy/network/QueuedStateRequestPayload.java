@@ -7,6 +7,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+/** Empty request - client asks the server to resend the requester's team's queued (not-yet-applied) property/force-load/chunk-type changes. */
 public record QueuedStateRequestPayload() implements CustomPacketPayload {
     public static final Type<QueuedStateRequestPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "request_pending_state"));
     public static final StreamCodec<FriendlyByteBuf, QueuedStateRequestPayload> STREAM_CODEC = StreamCodec.unit(new QueuedStateRequestPayload());

@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+/** Client toggles whether one of its own warps is listed in other players' public warp list. */
 public record WarpSetPublicPayload(String name, boolean isPublic) implements CustomPacketPayload {
     public static final Type<WarpSetPublicPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "warp_set_public"));

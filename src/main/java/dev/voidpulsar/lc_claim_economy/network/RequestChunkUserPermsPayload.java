@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+/** Client asks the server to (re)send the permission list for one chunk - sent when {@code ChunkUserPermissionsScreen} opens or is manually refreshed. */
 public record RequestChunkUserPermsPayload(String chunkKey) implements CustomPacketPayload {
     public static final Type<RequestChunkUserPermsPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "request_chunk_user_perms"));

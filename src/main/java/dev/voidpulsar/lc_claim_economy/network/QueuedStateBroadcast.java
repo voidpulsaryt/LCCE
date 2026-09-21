@@ -9,6 +9,11 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 
+/**
+ * Builds and sends {@link QueuedStateBroadcastPayload}s. Split out from {@code
+ * ChunkUserPermissionService}/other services that trigger a sync so callers pushing to a whole
+ * team don't need to re-resolve {@link TeamQueuedChanges} per online member themselves.
+ */
 public final class QueuedStateBroadcast {
     private QueuedStateBroadcast() {
     }

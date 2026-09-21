@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+/** Empty request - client asks the server to resend claim/upkeep/protection pricing plus the requester's current balance and chunk counts. */
 public record PricingRequestPayload() implements CustomPacketPayload {
     public static final Type<PricingRequestPayload> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "request_claim_prices"));
     public static final StreamCodec<FriendlyByteBuf, PricingRequestPayload> STREAM_CODEC = StreamCodec.unit(new PricingRequestPayload());

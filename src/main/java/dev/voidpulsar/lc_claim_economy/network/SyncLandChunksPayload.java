@@ -11,6 +11,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import java.util.HashSet;
 import java.util.Set;
 
+/** Full set of the recipient's claimed chunks currently flagged as "land" type, keyed by {@code ChunkCoordKey}; anything claimed but absent from this set is a "build" chunk. */
 public record SyncLandChunksPayload(Set<String> landChunkKeys) implements CustomPacketPayload {
     public static final Type<SyncLandChunksPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "sync_land_chunks"));

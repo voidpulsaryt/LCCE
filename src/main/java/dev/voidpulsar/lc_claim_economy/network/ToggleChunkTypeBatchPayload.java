@@ -12,6 +12,7 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import java.util.ArrayList;
 import java.util.List;
 
+/** Multi-select variant of {@link ToggleChunkTypePayload} - flips land/build type for every listed chunk in one server round-trip instead of one packet per chunk. */
 public record ToggleChunkTypeBatchPayload(List<String> chunkKeys) implements CustomPacketPayload {
     public static final Type<ToggleChunkTypeBatchPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "toggle_chunk_type_batch"));

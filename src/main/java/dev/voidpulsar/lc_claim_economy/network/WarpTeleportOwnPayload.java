@@ -9,6 +9,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
+/** Client asks to teleport to one of its own warps. Separate from {@link WarpTeleportOtherPayload} since no owner lookup is needed - the requester is the owner. */
 public record WarpTeleportOwnPayload(String name) implements CustomPacketPayload {
     public static final Type<WarpTeleportOwnPayload> TYPE =
             new Type<>(ResourceLocation.fromNamespaceAndPath(LcClaimEconomy.MOD_ID, "warp_teleport_own"));

@@ -5,6 +5,17 @@ import net.minecraft.network.codec.StreamCodec;
 
 import java.util.UUID;
 
+/**
+ * One row in a {@link ConflictStateBroadcastPayload} list (incoming war, outgoing war, or
+ * available target) describing the other team from the viewer's perspective. The four
+ * protection flags mirror that team's current claim safeguards and drive {@link
+ * #hasWarVulnerability()} - a team with every safeguard enabled is a pointless war target since
+ * nothing about their claims can actually be affected. {@code opponentPendingDeclareOnViewer}
+ * flags that this opponent already has a declare pending against the viewer, so the UI can
+ * warn before the viewer declares back. The 4-arg constructor covers the common case of a
+ * fresh {@code ACTIVE} entry with every safeguard still enabled and no pending declare against
+ * the viewer - callers that need to report an actual protection state use the full constructor.
+ */
 public record ConflictTeamEntry(
         UUID teamId,
         String displayName,

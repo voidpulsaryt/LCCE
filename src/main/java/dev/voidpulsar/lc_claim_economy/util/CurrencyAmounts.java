@@ -9,13 +9,12 @@ public final class CurrencyAmounts {
     private CurrencyAmounts() {
     }
 
+    /** {@code amount <= 0} collapses to {@link MoneyValue#empty()} rather than a zero-valued {@link CoinValue}, since LC treats "empty" as the canonical zero/free sentinel that its own text and comparison helpers already special-case. */
     public static MoneyValue fromCopper(long amount) {
-        if (amount <= 0) {
-            return MoneyValue.empty();
-        }
-        return CoinValue.fromNumber(CoinAPI.MAIN_CHAIN, amount);
+        return amount <= 0 ? MoneyValue.empty() : CoinValue.fromNumber(CoinAPI.MAIN_CHAIN, amount);
     }
 
+    /** An empty (zero/disabled) cost is deliberately never "affordable" - callers that want a disabled price to pass unconditionally should short-circuit on {@code cost.isEmpty()} themselves before calling this, not rely on it here. */
     public static boolean canAfford(MoneyValue balance, MoneyValue cost) {
         return !cost.isEmpty() && balance.containsValue(cost);
     }

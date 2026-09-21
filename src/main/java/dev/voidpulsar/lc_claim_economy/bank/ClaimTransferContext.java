@@ -159,7 +159,7 @@ public final class ClaimTransferContext {
             }
 
             if (state.operation == RequestChunkChangePacket.ChunkChangeOp.UNCLAIM && state.unclaimCount > 0) {
-                sendUnclaimSummary(player, state);
+                announceUnclaimBatch(player, state);
                 if (state.refundCopper > 0) {
                     BankLedgerAccess.logTransaction(
                             BankLedgerAccess.getAccountForPlayer(player.server, player),
@@ -171,7 +171,7 @@ public final class ClaimTransferContext {
             }
 
             if (state.operation == RequestChunkChangePacket.ChunkChangeOp.CLAIM) {
-                sendClaimSummary(player, state);
+                announceClaimBatch(player, state);
                 if (state.claimPaidCopper > 0) {
                     BankLedgerAccess.logTransaction(
                             BankLedgerAccess.getAccountForPlayer(player.server, player),
@@ -190,101 +190,62 @@ public final class ClaimTransferContext {
         }
     }
 
-    private static void sendUnclaimSummary(ServerPlayer player, BatchState state) {
-        int refundPercent = refundPercent();
-        if (state.refundCopper > 0) {
-            Component refund = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(state.refundCopper));
-            if (state.unclaimCount == 1) {
-                player.displayClientMessage(
-                        Component.translatable("message.lc_claim_economy.unclaim_refund", refund, refundPercent),
-                        false
-                );
-            } else {
-                player.displayClientMessage(
-                        Component.translatable(
-                                "message.lc_claim_economy.unclaim_refund_bulk",
-                                refund,
-                                state.unclaimCount,
-                                refundPercent
-                        ),
-                        false
-                );
-            }
+    /** One chat line summarizing every unclaim in the batch: refund amount (if any) and how many chunks it covered. */
+    private static void announceUnclaimBatch(ServerPlayer player, BatchState state) {
+        if (state.refundCopper <= 0) {
+            String key = state.unclaimCount == 1 ? "message.lc_claim_economy.unclaim_bulk_single" : "message.lc_claim_economy.unclaim_bulk";
+            tell(player, state.unclaimCount == 1 ? Component.translatable(key) : Component.translatable(key, state.unclaimCount));
             return;
         }
 
-        if (state.unclaimCount == 1) {
-            player.displayClientMessage(
-                    Component.translatable("message.lc_claim_economy.unclaim_bulk_single"),
-                    false
-            );
-        } else {
-            player.displayClientMessage(
-                    Component.translatable("message.lc_claim_economy.unclaim_bulk", state.unclaimCount),
-                    false
-            );
-        }
+        Component refundText = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(state.refundCopper));
+        int refundPercent = unclaimRefundPercent();
+        Component message = state.unclaimCount == 1
+                ? Component.translatable("message.lc_claim_economy.unclaim_refund", refundText, refundPercent)
+                : Component.translatable("message.lc_claim_economy.unclaim_refund_bulk", refundText, state.unclaimCount, refundPercent);
+        tell(player, message);
     }
 
-    private static void sendClaimSummary(ServerPlayer player, BatchState state) {
+    /** One or two chat lines summarizing every claim attempt in the batch: any insufficient-funds failures, then the successes (paid or free). */
+    private static void announceClaimBatch(ServerPlayer player, BatchState state) {
         if (state.claimInsufficientCount > 0) {
-            Component unitPrice = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(state.claimUnitPriceCopper));
-            Component balance = state.insufficientBalance == null
-                    ? Component.translatable("message.lc_claim_economy.balance_empty")
-                    : state.insufficientBalance;
-            if (state.claimInsufficientCount == 1) {
-                player.displayClientMessage(
-                        Component.translatable("message.lc_claim_economy.insufficient_funds", unitPrice, balance),
-                        false
-                );
-            } else {
-                player.displayClientMessage(
-                        Component.translatable(
-                                "message.lc_claim_economy.insufficient_funds_bulk_claim",
-                                unitPrice,
-                                state.claimInsufficientCount,
-                                balance
-                        ),
-                        false
-                );
-            }
+            announceInsufficientFunds(player, state);
         }
 
-        int claimedCount = state.claimPaidCount + state.claimFreeCount;
-        if (claimedCount <= 0) {
+        int succeededCount = state.claimPaidCount + state.claimFreeCount;
+        if (succeededCount <= 0) {
             return;
         }
 
-        if (state.claimPaidCopper > 0) {
-            Component spent = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(state.claimPaidCopper));
-            if (claimedCount == 1) {
-                player.displayClientMessage(
-                        Component.translatable("message.lc_claim_economy.claim_paid", spent),
-                        false
-                );
-            } else {
-                player.displayClientMessage(
-                        Component.translatable("message.lc_claim_economy.claim_paid_bulk", spent, claimedCount),
-                        false
-                );
-            }
+        if (state.claimPaidCopper <= 0) {
+            String key = succeededCount == 1 ? "message.lc_claim_economy.claim_free" : "message.lc_claim_economy.claim_free_bulk";
+            tell(player, succeededCount == 1 ? Component.translatable(key) : Component.translatable(key, succeededCount));
             return;
         }
 
-        if (claimedCount == 1) {
-            player.displayClientMessage(
-                    Component.translatable("message.lc_claim_economy.claim_free"),
-                    false
-            );
-        } else {
-            player.displayClientMessage(
-                    Component.translatable("message.lc_claim_economy.claim_free_bulk", claimedCount),
-                    false
-            );
-        }
+        Component spentText = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(state.claimPaidCopper));
+        Component message = succeededCount == 1
+                ? Component.translatable("message.lc_claim_economy.claim_paid", spentText)
+                : Component.translatable("message.lc_claim_economy.claim_paid_bulk", spentText, succeededCount);
+        tell(player, message);
     }
 
-    private static int refundPercent() {
+    private static void announceInsufficientFunds(ServerPlayer player, BatchState state) {
+        Component unitPriceText = CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(state.claimUnitPriceCopper));
+        Component balanceText = state.insufficientBalance == null
+                ? Component.translatable("message.lc_claim_economy.balance_empty")
+                : state.insufficientBalance;
+        Component message = state.claimInsufficientCount == 1
+                ? Component.translatable("message.lc_claim_economy.insufficient_funds", unitPriceText, balanceText)
+                : Component.translatable("message.lc_claim_economy.insufficient_funds_bulk_claim", unitPriceText, state.claimInsufficientCount, balanceText);
+        tell(player, message);
+    }
+
+    private static void tell(ServerPlayer player, Component message) {
+        player.displayClientMessage(message, false);
+    }
+
+    private static int unclaimRefundPercent() {
         return (int) Math.round(LcClaimEconomyConfig.SERVER.unclaimRefundRatio.get() * 100.0D);
     }
 
