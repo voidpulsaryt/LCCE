@@ -6,6 +6,11 @@ All notable changes to this mod are documented here.
 
 ### Added
 
+- **Market listings on the claim map** *(FTB Chunks only)* — chunks
+  currently listed for sale now show a distinct overlay color on FTB
+  Chunks' own claim map, with the price and seller added to the
+  tile's tooltip. Refreshed automatically whenever the claim map is
+  opened, independent of the market GUI itself.
 - **Chunk market GUI** *(FTB Chunks only)* — `/lcce market` with no
   arguments now opens a screen instead of just being a bare command
   stub: a status panel for the chunk you're standing in (list it for

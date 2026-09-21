@@ -6,11 +6,15 @@ import dev.ftb.mods.ftblibrary.ui.BaseScreen;
 import dev.ftb.mods.ftblibrary.ui.Theme;
 import dev.ftb.mods.ftblibrary.ui.input.MouseButton;
 import dev.voidpulsar.lc_claim_economy.client.ClientLandChunks;
+import dev.voidpulsar.lc_claim_economy.client.ClientMarket;
 import dev.voidpulsar.lc_claim_economy.client.ClientQueuedChanges;
 import dev.voidpulsar.lc_claim_economy.client.gui.ChunkUserPermissionsScreen;
 import dev.voidpulsar.lc_claim_economy.data.ChunkCoordKey;
 import dev.voidpulsar.lc_claim_economy.client.ClaimMapPanelAltToggleAccess;
+import dev.voidpulsar.lc_claim_economy.network.MarketListingDto;
 import dev.voidpulsar.lc_claim_economy.service.SafeguardPriceDisplay;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
+import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -30,9 +34,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * multi-select for the land/build bulk-toggle in {@link ClaimMapPanelMixin},
  * shift-middle-click opens {@link ChunkUserPermissionsScreen} directly from the map,
  * the tooltip gains a land/build indicator plus a line for whichever queued change (if
- * any) is pending on this chunk, and a checkered overlay in that same change's color
+ * any) is pending on this chunk, a checkered overlay in that same change's color
  * repeats the queued-state signal visually so it reads at a glance across a whole
- * claim without hovering every tile.
+ * claim without hovering every tile, and - independently of all of the above - a chunk
+ * currently listed on the market gets its own overlay color plus a price/seller tooltip
+ * line, sourced from {@link ClientMarket} (kept fresh by {@code ClaimMapScreenMixin}
+ * requesting it whenever this screen opens).
  */
 @Mixin(targets = "dev.ftb.mods.ftbchunks.client.gui.ChunkScreenPanel$ChunkButton", remap = false)
 public class ClaimMapPanelTileButtonMixin {
@@ -48,6 +55,10 @@ public class ClaimMapPanelTileButtonMixin {
     private static final int PENDING_LAND_COLOR = 0x81C784;
     private static final int PENDING_BUILD_COLOR = 0x64B5F6;
     private static final int PENDING_OVERLAY_ALPHA = 170;
+    // Deliberately a different hue family from every PENDING_* color above so a for-sale
+    // chunk never reads as a queued change at a glance.
+    private static final int FOR_SALE_COLOR = 0xFFD600;
+    private static final int FOR_SALE_OVERLAY_ALPHA = 170;
 
     @Shadow(remap = false)
     private dev.ftb.mods.ftblibrary.math.XZ chunkPos;
@@ -107,6 +118,19 @@ public class ClaimMapPanelTileButtonMixin {
                     : "gui.lc_claim_economy.chunk_type_build").withStyle(ChatFormatting.AQUA));
             list.add(Component.translatable("gui.lc_claim_economy.chunk_type_hint").withStyle(ChatFormatting.DARK_GRAY));
             list.add(Component.translatable("gui.lc_claim_economy.chunk_user_perm.open_hint").withStyle(ChatFormatting.DARK_GRAY));
+        }
+
+        MarketListingDto listing = ClientMarket.listingFor(ChunkCoordKey.encode(dimension.location(), chunkX, chunkZ));
+        if (listing != null) {
+            list.blankLine();
+            list.add(Component.translatable(
+                    "gui.lc_claim_economy.market.map_tooltip_price",
+                    CurrencyTextFormat.formatValue(CurrencyAmounts.fromCopper(listing.priceCopper()))
+            ).withStyle(ChatFormatting.GOLD));
+            list.add(Component.translatable(
+                    "gui.lc_claim_economy.market.map_tooltip_seller",
+                    listing.sellerName()
+            ).withStyle(ChatFormatting.DARK_GRAY));
         }
 
         if (ClientQueuedChanges.isPendingForceLoad(dimension, chunkX, chunkZ)) {
@@ -176,6 +200,15 @@ public class ClaimMapPanelTileButtonMixin {
 
         if (ClientQueuedChanges.isPendingBuildChunk(dimension, chunkX, chunkZ)) {
             drawPattern(graphics, x, y, w, h, Color4I.rgb(PENDING_BUILD_COLOR).withAlpha(PENDING_OVERLAY_ALPHA));
+            return;
+        }
+
+        // Checked last and separately from the pending-change patterns above: a chunk can be
+        // both queued for a type change AND listed for sale at once, and the queued-change
+        // signal is the more actionable one for the claim's own owner, so it takes priority
+        // when both would otherwise want the tile.
+        if (ClientMarket.listingFor(ChunkCoordKey.encode(dimension.location(), chunkX, chunkZ)) != null) {
+            drawPattern(graphics, x, y, w, h, Color4I.rgb(FOR_SALE_COLOR).withAlpha(FOR_SALE_OVERLAY_ALPHA));
         }
     }
 

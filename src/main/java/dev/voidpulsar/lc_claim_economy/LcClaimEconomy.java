@@ -37,6 +37,8 @@ import dev.voidpulsar.lc_claim_economy.network.SyncMarketPayload;
 import dev.voidpulsar.lc_claim_economy.network.MarketSellPayload;
 import dev.voidpulsar.lc_claim_economy.network.MarketCancelPayload;
 import dev.voidpulsar.lc_claim_economy.network.MarketBuyPayload;
+import dev.voidpulsar.lc_claim_economy.network.RequestMarketListingsPayload;
+import dev.voidpulsar.lc_claim_economy.network.SyncMarketListingsPayload;
 import dev.voidpulsar.lc_claim_economy.client.ClientQueuedStateRefreshHandler;
 import dev.voidpulsar.lc_claim_economy.service.BillingCycleService;
 import dev.voidpulsar.lc_claim_economy.teams.LandProperties;
@@ -202,6 +204,16 @@ public class LcClaimEconomy {
                 MarketBuyPayload.TYPE,
                 MarketBuyPayload.STREAM_CODEC,
                 MarketBuyPayload::handleServer
+        );
+        registrar.playToClient(
+                SyncMarketListingsPayload.TYPE,
+                SyncMarketListingsPayload.STREAM_CODEC,
+                SyncMarketListingsPayload::handleClient
+        );
+        registrar.playToServer(
+                RequestMarketListingsPayload.TYPE,
+                RequestMarketListingsPayload.STREAM_CODEC,
+                RequestMarketListingsPayload::handleServer
         );
         registrar.playToServer(
                 PricingRequestPayload.TYPE,

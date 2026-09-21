@@ -13,6 +13,7 @@ import dev.voidpulsar.lc_claim_economy.bank.ClaimTransferContext;
 import dev.voidpulsar.lc_claim_economy.data.ChunkCoordKey;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.network.MarketListingDto;
+import dev.voidpulsar.lc_claim_economy.network.SyncMarketListingsPayload;
 import dev.voidpulsar.lc_claim_economy.network.SyncMarketPayload;
 import dev.voidpulsar.lc_claim_economy.teams.TeamRegistry;
 import dev.voidpulsar.lc_claim_economy.util.CurrencyTextFormat;
@@ -232,6 +233,23 @@ public final class MarketService {
                 currentListing != null ? currentListing.priceCopper() : 0L,
                 buildListingDtos(server, savedData, viewerTeam)
         ));
+    }
+
+    /**
+     * A lighter cousin of {@link #syncToPlayer} for the claim map overlay ({@code
+     * ClaimMapPanelTileButtonMixin}): just the listing list, with no current-chunk lookup and,
+     * critically, no {@link SyncMarketPayload} - that payload's client handler opens the market
+     * GUI, which the map screen must never trigger just from being opened.
+     */
+    public static void syncListingsOnlyToPlayer(ServerPlayer player) {
+        if (!FTBTeamsAPI.api().isManagerLoaded() || !FTBChunksAPI.api().isManagerLoaded()) {
+            PacketDistributor.sendToPlayer(player, new SyncMarketListingsPayload(List.of()));
+            return;
+        }
+        MinecraftServer server = player.server;
+        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
+        Team viewerTeam = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
+        PacketDistributor.sendToPlayer(player, new SyncMarketListingsPayload(buildListingDtos(server, savedData, viewerTeam)));
     }
 
     private static List<MarketListingDto> buildListingDtos(

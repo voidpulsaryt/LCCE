@@ -216,6 +216,8 @@
   "gui.lc_claim_economy.market.browse_line_detail": "%1$s, %2$s in %3$s · %4$s",
   "gui.lc_claim_economy.market.browse_line_hint": "Travel here to buy this chunk",
   "gui.lc_claim_economy.market.browse_line_own_hint": "Your team's listing",
+  "gui.lc_claim_economy.market.map_tooltip_price": "For sale: %1$s",
+  "gui.lc_claim_economy.market.map_tooltip_seller": "Seller: %1$s",
   "message.lc_claim_economy.war_declared": "War declared on %s.",
   "message.lc_claim_economy.war_active": "War on %s is now active.",
   "message.lc_claim_economy.war_declare_pending": "War declaration on %s queued until the next upkeep period.",
