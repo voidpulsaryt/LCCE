@@ -22,6 +22,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -125,23 +127,30 @@ public class ClaimMapPanelMixin implements ClaimMapPanelAltToggleAccess {
         }
 
         ResourceKey<Level> dimension = chunkScreen.getDimension().dimension;
-        java.util.ArrayList<String> keys = new java.util.ArrayList<>();
+        List<String> keys = new ArrayList<>();
         for (XZ pos : Set.copyOf(selectedChunks)) {
-            MapChunk mapChunk = lcClaimEconomy$mapChunk(pos);
-            if (mapChunk != null && mapChunk.getClaimedDate().isPresent()) {
+            if (lcClaimEconomy$isClaimedChunk(pos)) {
                 keys.add(ChunkCoordKey.encode(dimension.location(), pos.x(), pos.z()));
             }
         }
 
-        if (keys.size() == 1) {
-            PacketDistributor.sendToServer(new ToggleChunkTypePayload(keys.getFirst()));
-        } else if (!keys.isEmpty()) {
-            PacketDistributor.sendToServer(new ToggleChunkTypeBatchPayload(keys));
+        if (!keys.isEmpty()) {
+            if (keys.size() == 1) {
+                PacketDistributor.sendToServer(new ToggleChunkTypePayload(keys.getFirst()));
+            } else {
+                PacketDistributor.sendToServer(new ToggleChunkTypeBatchPayload(keys));
+            }
         }
 
         selectedChunks.clear();
         firstSelectedChunk = null;
         lastButtonDragged = null;
+    }
+
+    @Unique
+    private boolean lcClaimEconomy$isClaimedChunk(XZ pos) {
+        MapChunk mapChunk = lcClaimEconomy$mapChunk(pos);
+        return mapChunk != null && mapChunk.getClaimedDate().isPresent();
     }
 
     @Unique

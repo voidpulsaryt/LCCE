@@ -36,7 +36,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 /**
  * The team-hub sub-panel for managing standing conflicts: three stacked,
@@ -49,10 +48,6 @@ import java.util.stream.Collectors;
  * to trigger {@link #refreshIfOpen()}.
  */
 public class ConflictScreen extends BaseScreen {
-    private static final int TOPBAR_H = LcScreenChrome.HEADER_HEIGHT;
-    private static final int TOPBAR_BTN = LcScreenChrome.HEADER_BUTTON_SIZE;
-    private static final int OUTER_PAD = LcScreenChrome.CONTENT_PAD;
-    private static final int SB_WIDTH = LcScreenChrome.SCROLLBAR_WIDTH;
     private static final int GROUP_GAP = 6;
     private static final int LIST_HEADER_H = 20;
     private static final int LIST_HEADER_GAP = 2;
@@ -65,11 +60,15 @@ public class ConflictScreen extends BaseScreen {
     private static final int SEARCH_H = 16;
     private static final int SEARCH_MIN_W = 96;
     private static final int SEARCH_MAX_W = 160;
+    private static final int TOPBAR_H = LcScreenChrome.HEADER_HEIGHT;
+    private static final int TOPBAR_BTN = LcScreenChrome.HEADER_BUTTON_SIZE;
+    private static final int OUTER_PAD = LcScreenChrome.CONTENT_PAD;
+    private static final int SB_WIDTH = LcScreenChrome.SCROLLBAR_WIDTH;
 
     private final MyTeamScreen hubScreen;
+    private final StandingList[] standingLists = new StandingList[RelationKind.values().length];
     private SimpleButton backNavButton;
     private SimpleButton upkeepInfoButton;
-    private final List<StandingList> standingLists = new ArrayList<>(3);
 
     public ConflictScreen(MyTeamScreen parentScreen) {
         this.hubScreen = parentScreen;
@@ -107,24 +106,24 @@ public class ConflictScreen extends BaseScreen {
         };
         add(upkeepInfoButton);
 
-        standingLists.add(new StandingList(
+        standingLists[RelationKind.INCOMING.ordinal()] = new StandingList(
                 () -> Component.translatable("gui.lc_claim_economy.war.incoming_heading"),
                 ClientConflictState::incoming,
                 RelationKind.INCOMING,
                 Component.translatable("gui.lc_claim_economy.war.empty_incoming").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)
-        ));
-        standingLists.add(new StandingList(
+        );
+        standingLists[RelationKind.OUTGOING.ordinal()] = new StandingList(
                 () -> Component.translatable("gui.lc_claim_economy.war.outgoing_heading"),
                 ClientConflictState::outgoing,
                 RelationKind.OUTGOING,
                 Component.translatable("gui.lc_claim_economy.war.empty_outgoing").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)
-        ));
-        standingLists.add(new StandingList(
+        );
+        standingLists[RelationKind.DECLARE.ordinal()] = new StandingList(
                 ConflictScreen::declareHeadingText,
                 ClientConflictState::availableTargets,
                 RelationKind.DECLARE,
                 Component.translatable("gui.lc_claim_economy.war.empty_targets").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)
-        ));
+        );
 
         for (StandingList list : standingLists) {
             list.addWidgets();
@@ -140,12 +139,12 @@ public class ConflictScreen extends BaseScreen {
         int contentHeight = height - contentTop - OUTER_PAD;
         int columnWidth = width - OUTER_PAD * 2;
         int evenRowHeight = (contentHeight - GROUP_GAP * 2) / 3;
+        int lastIndex = standingLists.length - 1;
 
         int cursor = contentTop;
-        for (int i = 0; i < standingLists.size(); i++) {
-            boolean isLast = i == standingLists.size() - 1;
-            int rowHeight = isLast ? contentHeight - (cursor - contentTop) : evenRowHeight;
-            standingLists.get(i).setBounds(OUTER_PAD, cursor, columnWidth, rowHeight);
+        for (int i = 0; i < standingLists.length; i++) {
+            int rowHeight = i == lastIndex ? contentHeight - (cursor - contentTop) : evenRowHeight;
+            standingLists[i].setBounds(OUTER_PAD, cursor, columnWidth, rowHeight);
             cursor += rowHeight + GROUP_GAP;
         }
     }
@@ -178,23 +177,20 @@ public class ConflictScreen extends BaseScreen {
     }
 
     private static Component declareHeadingText() {
-        Component base = Component.translatable("gui.lc_claim_economy.war.declare_heading");
-        if (ClientConflictState.warDeclarationWindowOpen()) {
-            return base;
+        if (!ClientConflictState.warDeclarationWindowOpen()) {
+            return Component.empty()
+                    .append(Component.translatable("gui.lc_claim_economy.war.declare_heading"))
+                    .append(Component.literal(" - "))
+                    .append(Component.translatable(
+                            "gui.lc_claim_economy.war.declare_heading_closed_suffix",
+                            ClientConflictState.warDeclarationWindowDescription()
+                    ).withStyle(ChatFormatting.RED));
         }
-        return Component.empty()
-                .append(base)
-                .append(Component.literal(" - "))
-                .append(Component.translatable(
-                        "gui.lc_claim_economy.war.declare_heading_closed_suffix",
-                        ClientConflictState.warDeclarationWindowDescription()
-                ).withStyle(ChatFormatting.RED));
+        return Component.translatable("gui.lc_claim_economy.war.declare_heading");
     }
 
     private static void writeUpkeepCostTooltip(TooltipList list) {
         long baseCopper = ClientConflictState.baseUpkeepCopper();
-        long incomingCopper = ClientConflictState.incomingWarCopper();
-        long outgoingCopper = ClientConflictState.outgoingWarCopper();
 
         list.add(Component.translatable("gui.lc_claim_economy.war.cost_tooltip.title").withStyle(ChatFormatting.GOLD));
         list.blankLine();
@@ -202,18 +198,8 @@ public class ConflictScreen extends BaseScreen {
                 "gui.lc_claim_economy.war.cost_tooltip.base",
                 CurrencyTextFormat.formatPrice(baseCopper)
         ));
-        if (incomingCopper > 0) {
-            list.add(Component.translatable(
-                    "gui.lc_claim_economy.war.cost_tooltip.incoming",
-                    CurrencyTextFormat.formatPrice(incomingCopper)
-            ));
-        }
-        if (outgoingCopper > 0) {
-            list.add(Component.translatable(
-                    "gui.lc_claim_economy.war.cost_tooltip.outgoing",
-                    CurrencyTextFormat.formatPrice(outgoingCopper)
-            ));
-        }
+        appendIfPositive(list, ClientConflictState.incomingWarCopper(), "gui.lc_claim_economy.war.cost_tooltip.incoming");
+        appendIfPositive(list, ClientConflictState.outgoingWarCopper(), "gui.lc_claim_economy.war.cost_tooltip.outgoing");
         list.blankLine();
         list.add(Component.translatable(
                 "gui.lc_claim_economy.war.cost_tooltip.total",
@@ -227,38 +213,43 @@ public class ConflictScreen extends BaseScreen {
         ).withStyle(ChatFormatting.GRAY));
     }
 
+    private static void appendIfPositive(TooltipList list, long copper, String translationKey) {
+        if (copper > 0) {
+            list.add(Component.translatable(translationKey, CurrencyTextFormat.formatPrice(copper)));
+        }
+    }
+
     /** A whole-number multiplier prints without a trailing ".0"; this is display-only text, never parsed back. */
     private static String describeMultiplier(double multiplier) {
-        if (Math.rint(multiplier) == multiplier) {
-            return String.valueOf((long) multiplier);
-        }
-        return String.valueOf(multiplier);
+        return Math.rint(multiplier) == multiplier ? String.valueOf((long) multiplier) : String.valueOf(multiplier);
     }
 
     private static Component formatEntryCostLabel(long copper) {
-        if (copper <= 0) {
-            return CurrencyTextFormat.formatPrice(copper);
+        if (copper > 0) {
+            return Component.translatable(
+                    "gui.lc_claim_economy.war.entry_cost",
+                    CurrencyTextFormat.formatPrice(copper),
+                    SafeguardPriceDisplay.upkeepPeriodLabel()
+            ).withStyle(ChatFormatting.GOLD);
         }
-        return Component.translatable(
-                "gui.lc_claim_economy.war.entry_cost",
-                CurrencyTextFormat.formatPrice(copper),
-                SafeguardPriceDisplay.upkeepPeriodLabel()
-        ).withStyle(ChatFormatting.GOLD);
+        return CurrencyTextFormat.formatPrice(copper);
     }
 
     private static void writeEntryTooltip(TooltipList list, ConflictTeamEntry entry, RelationKind kind) {
         Component periodLabel = SafeguardPriceDisplay.upkeepPeriodLabel();
-        ConflictEntryStatus status = entry.status();
+        switch (kind) {
+            case DECLARE -> writeDeclareTooltip(list, entry, periodLabel);
+            case INCOMING -> writeIncomingTooltip(list, entry, periodLabel);
+            case OUTGOING -> writeOutgoingTooltip(list, entry, periodLabel);
+        }
+    }
 
-        if (status == ConflictEntryStatus.PENDING_DECLARE && kind == RelationKind.DECLARE) {
+    private static void writeDeclareTooltip(TooltipList list, ConflictTeamEntry entry, Component periodLabel) {
+        if (entry.status() == ConflictEntryStatus.PENDING_DECLARE) {
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.pending_declare")
                     .withStyle(ChatFormatting.GOLD));
             writeCostLines(list, entry, periodLabel);
-            if (entry.opponentPendingDeclareOnViewer()) {
-                list.blankLine();
-                list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.opponent_pending_declare")
-                        .withStyle(ChatFormatting.YELLOW));
-            }
+            writeOpponentPendingNote(list, entry);
             if (ClientConflictState.canManageWar()) {
                 list.blankLine();
                 list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.click_to_cancel")
@@ -267,14 +258,27 @@ public class ConflictScreen extends BaseScreen {
             return;
         }
 
-        if (status == ConflictEntryStatus.PENDING_DECLARE && kind == RelationKind.INCOMING) {
+        writeCostLines(list, entry, periodLabel);
+        writeOpponentPendingNote(list, entry);
+        if (!ClientConflictState.warDeclarationWindowOpen()) {
+            list.blankLine();
+            list.add(Component.translatable(
+                    "gui.lc_claim_economy.war.entry_tooltip.declare_window_closed",
+                    ClientConflictState.warDeclarationWindowDescription()
+            ).withStyle(ChatFormatting.RED));
+        }
+    }
+
+    private static void writeIncomingTooltip(TooltipList list, ConflictTeamEntry entry, Component periodLabel) {
+        if (entry.status() == ConflictEntryStatus.PENDING_DECLARE) {
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.pending_incoming")
                     .withStyle(ChatFormatting.GOLD));
-            writeCostLines(list, entry, periodLabel);
-            return;
         }
+        writeCostLines(list, entry, periodLabel);
+    }
 
-        if (status == ConflictEntryStatus.PENDING_END && kind == RelationKind.OUTGOING) {
+    private static void writeOutgoingTooltip(TooltipList list, ConflictTeamEntry entry, Component periodLabel) {
+        if (entry.status() == ConflictEntryStatus.PENDING_END) {
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.pending_end")
                     .withStyle(ChatFormatting.GOLD));
             writeCostLines(list, entry, periodLabel);
@@ -288,20 +292,14 @@ public class ConflictScreen extends BaseScreen {
         }
 
         writeCostLines(list, entry, periodLabel);
-        if (kind == RelationKind.DECLARE && entry.opponentPendingDeclareOnViewer()) {
+        writeVulnerabilityLines(list, entry);
+    }
+
+    private static void writeOpponentPendingNote(TooltipList list, ConflictTeamEntry entry) {
+        if (entry.opponentPendingDeclareOnViewer()) {
             list.blankLine();
             list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.opponent_pending_declare")
                     .withStyle(ChatFormatting.YELLOW));
-        }
-        if (kind == RelationKind.DECLARE && !ClientConflictState.warDeclarationWindowOpen()) {
-            list.blankLine();
-            list.add(Component.translatable(
-                    "gui.lc_claim_economy.war.entry_tooltip.declare_window_closed",
-                    ClientConflictState.warDeclarationWindowDescription()
-            ).withStyle(ChatFormatting.RED));
-        }
-        if (kind == RelationKind.OUTGOING) {
-            writeVulnerabilityLines(list, entry);
         }
     }
 
@@ -312,17 +310,18 @@ public class ConflictScreen extends BaseScreen {
         list.blankLine();
         list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.vulnerabilities_heading")
                 .withStyle(ChatFormatting.GOLD));
-        if (!entry.blockEditProtected()) {
-            list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.missing_block_edit")
-                    .withStyle(ChatFormatting.YELLOW));
+
+        record Gap(boolean guarded, String translationKey) {
         }
-        if (!entry.explosionProtected()) {
-            list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.missing_explosions")
-                    .withStyle(ChatFormatting.YELLOW));
-        }
-        if (!entry.pvpProtected()) {
-            list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.missing_pvp")
-                    .withStyle(ChatFormatting.YELLOW));
+        List<Gap> gaps = List.of(
+                new Gap(entry.blockEditProtected(), "gui.lc_claim_economy.war.entry_tooltip.missing_block_edit"),
+                new Gap(entry.explosionProtected(), "gui.lc_claim_economy.war.entry_tooltip.missing_explosions"),
+                new Gap(entry.pvpProtected(), "gui.lc_claim_economy.war.entry_tooltip.missing_pvp")
+        );
+        for (Gap gap : gaps) {
+            if (!gap.guarded()) {
+                list.add(Component.translatable(gap.translationKey()).withStyle(ChatFormatting.YELLOW));
+            }
         }
     }
 
@@ -332,47 +331,64 @@ public class ConflictScreen extends BaseScreen {
                 CurrencyTextFormat.formatPrice(entry.targetBaseUpkeepCopper()),
                 period
         ));
-        if (entry.warCostCopper() <= 0) {
-            list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.no_claims_yet")
-                    .withStyle(ChatFormatting.GRAY));
+        if (entry.warCostCopper() > 0) {
+            list.add(Component.translatable(
+                    "gui.lc_claim_economy.war.entry_tooltip.cost",
+                    CurrencyTextFormat.formatPrice(entry.warCostCopper()),
+                    period
+            ).withStyle(ChatFormatting.GOLD));
             return;
         }
-        list.add(Component.translatable(
-                "gui.lc_claim_economy.war.entry_tooltip.cost",
-                CurrencyTextFormat.formatPrice(entry.warCostCopper()),
-                period
-        ).withStyle(ChatFormatting.GOLD));
+        list.add(Component.translatable("gui.lc_claim_economy.war.entry_tooltip.no_claims_yet")
+                .withStyle(ChatFormatting.GRAY));
     }
 
-    /** Case-insensitive substring filter; exact and prefix matches sort ahead of plain substring hits via {@link #rankMatch}. */
+    /** Case-insensitive substring filter; exact and prefix matches sort ahead of plain substring hits. */
     private static List<ConflictTeamEntry> applyNameFilter(List<ConflictTeamEntry> entries, String query) {
         if (entries.isEmpty()) {
             return List.of();
         }
 
         String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
-        List<ConflictTeamEntry> filtered = entries.stream()
-                .filter(candidate -> needle.isEmpty() || candidate.displayName().toLowerCase(Locale.ROOT).contains(needle))
-                .collect(Collectors.toCollection(ArrayList::new));
+        List<ConflictTeamEntry> exact = new ArrayList<>();
+        List<ConflictTeamEntry> prefixed = new ArrayList<>();
+        List<ConflictTeamEntry> contains = new ArrayList<>();
 
-        filtered.sort(Comparator
-                .comparingInt((ConflictTeamEntry candidate) -> rankMatch(candidate.displayName(), needle))
-                .thenComparing(ConflictTeamEntry::displayName, String.CASE_INSENSITIVE_ORDER));
-        return filtered;
+        for (ConflictTeamEntry candidate : entries) {
+            String lowerName = candidate.displayName().toLowerCase(Locale.ROOT);
+            if (needle.isEmpty() || lowerName.contains(needle)) {
+                switch (rankMatch(lowerName, needle)) {
+                    case 0 -> exact.add(candidate);
+                    case 1 -> prefixed.add(candidate);
+                    default -> contains.add(candidate);
+                }
+            }
+        }
+
+        Comparator<ConflictTeamEntry> byName = Comparator.comparing(ConflictTeamEntry::displayName, String.CASE_INSENSITIVE_ORDER);
+        exact.sort(byName);
+        prefixed.sort(byName);
+        contains.sort(byName);
+
+        List<ConflictTeamEntry> merged = new ArrayList<>(exact.size() + prefixed.size() + contains.size());
+        merged.addAll(exact);
+        merged.addAll(prefixed);
+        merged.addAll(contains);
+        return merged;
     }
 
-    private static int rankMatch(String name, String query) {
-        if (query.isEmpty()) {
+    private static int rankMatch(String lowerName, String query) {
+        if (query.isEmpty() || lowerName.equals(query)) {
             return 0;
         }
-        String lower = name.toLowerCase(Locale.ROOT);
-        if (lower.equals(query)) {
-            return 0;
+        return lowerName.startsWith(query) ? 1 : 2;
+    }
+
+    private static Component trimToWidth(Theme theme, Component text, int maxWidth) {
+        if (maxWidth <= 0 || theme.getStringWidth(text) <= maxWidth) {
+            return text;
         }
-        if (lower.startsWith(query)) {
-            return 1;
-        }
-        return 2;
+        return Component.literal(theme.trimStringToWidth(text.getString(), maxWidth - 4) + "...");
     }
 
     /** One of the three stacked lists - a header/filter bar, its filtered rows, and its own scrollbar - laid out as a unit. */
@@ -518,11 +534,8 @@ public class ConflictScreen extends BaseScreen {
             int titleMaxWidth = searchBox == null || searchBox.width <= 0
                     ? w - 4
                     : Math.max(0, searchBox.getX() - 6);
-            Component heading = headingSupplier.get().copy().withStyle(ChatFormatting.BOLD);
-            if (titleMaxWidth > 0 && theme.getStringWidth(heading) > titleMaxWidth) {
-                heading = Component.literal(theme.trimStringToWidth(heading.getString(), titleMaxWidth - 4) + "...");
-            }
             if (titleMaxWidth > 0) {
+                Component heading = trimToWidth(theme, headingSupplier.get().copy().withStyle(ChatFormatting.BOLD), titleMaxWidth);
                 theme.drawString(graphics, heading, x + 2, y + 6, NordColors.FROST_2, 0);
             }
 
@@ -553,10 +566,10 @@ public class ConflictScreen extends BaseScreen {
 
             List<ConflictTeamEntry> entries = entriesSource.get();
             if (entries.isEmpty()) {
-                Component message = emptyText;
-                if (kind == RelationKind.DECLARE && !ClientConflictState.availableTargets().isEmpty()) {
-                    message = Component.translatable("gui.lc_claim_economy.war.search_empty").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC);
-                }
+                boolean searchNarrowedToEmpty = kind == RelationKind.DECLARE && !ClientConflictState.availableTargets().isEmpty();
+                Component message = searchNarrowedToEmpty
+                        ? Component.translatable("gui.lc_claim_economy.war.search_empty").withStyle(ChatFormatting.GRAY, ChatFormatting.ITALIC)
+                        : emptyText;
                 add(new EmptyStateLabel(this, message));
                 return;
             }
@@ -566,28 +579,26 @@ public class ConflictScreen extends BaseScreen {
             }
         }
 
+        private record RowSpec(Component actionLabel, UUID targetId, boolean suppressAction, boolean declareAction) {
+        }
+
         private StandingRow buildRow(ConflictTeamEntry entry) {
-            return switch (kind) {
-                case INCOMING -> new StandingRow(this, entry, kind, null, null, true, false);
-                case OUTGOING -> new StandingRow(
-                        this,
-                        entry,
-                        kind,
+            RowSpec spec = switch (kind) {
+                case INCOMING -> new RowSpec(null, null, true, false);
+                case OUTGOING -> new RowSpec(
                         entry.isPending() ? null : Component.translatable("gui.lc_claim_economy.war.end_war"),
                         entry.teamId(),
                         false,
                         false
                 );
-                case DECLARE -> new StandingRow(
-                        this,
-                        entry,
-                        kind,
+                case DECLARE -> new RowSpec(
                         entry.isPending() ? null : Component.translatable("gui.lc_claim_economy.war.declare"),
                         entry.teamId(),
                         false,
                         true
                 );
             };
+            return new StandingRow(this, entry, kind, spec.actionLabel(), spec.targetId(), spec.suppressAction(), spec.declareAction());
         }
 
         @Override
@@ -596,14 +607,18 @@ public class ConflictScreen extends BaseScreen {
             for (Widget widget : widgets) {
                 widget.setPos(0, y);
                 widget.setWidth(width);
-                if (widget instanceof EmptyStateLabel) {
-                    widget.setHeight(EMPTY_LABEL_H);
-                    y += EMPTY_LABEL_H;
-                } else if (widget instanceof StandingRow row) {
-                    widget.setHeight(ENTRY_H);
-                    row.alignWidgets();
-                    y += ENTRY_H + ENTRY_GAP;
-                }
+                y += switch (widget) {
+                    case EmptyStateLabel label -> {
+                        label.setHeight(EMPTY_LABEL_H);
+                        yield EMPTY_LABEL_H;
+                    }
+                    case StandingRow row -> {
+                        row.setHeight(ENTRY_H);
+                        row.alignWidgets();
+                        yield ENTRY_H + ENTRY_GAP;
+                    }
+                    default -> 0;
+                };
             }
         }
     }
@@ -668,6 +683,12 @@ public class ConflictScreen extends BaseScreen {
             return kind == RelationKind.OUTGOING && entry.hasWarVulnerability();
         }
 
+        private Component currentBadgeText() {
+            return entry.isPending()
+                    ? Component.translatable("gui.lc_claim_economy.pending").withStyle(ChatFormatting.GOLD)
+                    : formatEntryCostLabel(entry.warCostCopper());
+        }
+
         @Override
         public void addWidgets() {
             if (entry.isPending() && ClientConflictState.canManageWar() && kind != RelationKind.INCOMING) {
@@ -728,10 +749,7 @@ public class ConflictScreen extends BaseScreen {
             }
 
             Theme theme = getGui().getTheme();
-            Component badgeText = entry.isPending()
-                    ? Component.translatable("gui.lc_claim_economy.pending").withStyle(ChatFormatting.GOLD)
-                    : formatEntryCostLabel(entry.warCostCopper());
-            badgeWidth = theme.getStringWidth(badgeText) + 10;
+            badgeWidth = theme.getStringWidth(currentBadgeText()) + 10;
 
             int rightEdge = width - ENTRY_PAD;
             Widget infoWidget = widgets.getLast();
@@ -760,33 +778,26 @@ public class ConflictScreen extends BaseScreen {
             }
 
             boolean vulnerable = isVulnerableRow();
-            Color4I rowColor = isMouseOver() ? NordColors.POLAR_NIGHT_1 : NordColors.POLAR_NIGHT_2;
-            if (vulnerable && !isMouseOver()) {
-                rowColor = NordColors.POLAR_NIGHT_1;
-            }
-            rowColor.withAlpha(isMouseOver() ? 220 : (vulnerable ? 200 : 180)).draw(graphics, x + 1, y, w - 2, h);
+            boolean hovered = isMouseOver();
+
+            Color4I rowColor = (hovered || vulnerable) ? NordColors.POLAR_NIGHT_1 : NordColors.POLAR_NIGHT_2;
+            int rowAlpha = hovered ? 220 : (vulnerable ? 200 : 180);
+            rowColor.withAlpha(rowAlpha).draw(graphics, x + 1, y, w - 2, h);
             if (vulnerable) {
-                NordColors.YELLOW.withAlpha(isMouseOver() ? 200 : 140).draw(graphics, x + 1, y, 2, h);
-            } else if (isMouseOver()) {
+                NordColors.YELLOW.withAlpha(hovered ? 200 : 140).draw(graphics, x + 1, y, 2, h);
+            } else if (hovered) {
                 (declareAction ? NordColors.RED : NordColors.FROST_1).withAlpha(160).draw(graphics, x + 1, y, 2, h);
             }
 
-            Component badgeText = entry.isPending()
-                    ? Component.translatable("gui.lc_claim_economy.pending").withStyle(ChatFormatting.GOLD)
-                    : formatEntryCostLabel(entry.warCostCopper());
             int maxNameWidth = Math.max(0, badgeX - ENTRY_PAD - ENTRY_BTN_GAP);
-            Component displayName = Component.literal(entry.displayName()).withStyle(ChatFormatting.WHITE);
+            Component displayName = trimToWidth(theme, Component.literal(entry.displayName()).withStyle(ChatFormatting.WHITE), maxNameWidth);
             Color4I labelColor = vulnerable ? NordColors.YELLOW : NordColors.SNOW_STORM_0;
-            if (maxNameWidth > 0 && theme.getStringWidth(displayName) > maxNameWidth) {
-                displayName = Component.literal(theme.trimStringToWidth(displayName.getString(), maxNameWidth - 4) + "...");
-            }
-
             if (maxNameWidth > 0) {
                 theme.drawString(graphics, displayName, x + ENTRY_PAD, y + 7, labelColor, 0);
             }
 
             NordColors.POLAR_NIGHT_0.withAlpha(200).draw(graphics, x + badgeX, y + 4, badgeWidth, h - 8);
-            theme.drawString(graphics, badgeText, x + badgeX + 5, y + 7, NordColors.SNOW_STORM_0, 0);
+            theme.drawString(graphics, currentBadgeText(), x + badgeX + 5, y + 7, NordColors.SNOW_STORM_0, 0);
         }
     }
 }

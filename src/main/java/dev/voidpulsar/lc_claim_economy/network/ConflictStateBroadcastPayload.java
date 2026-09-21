@@ -69,9 +69,7 @@ public record ConflictStateBroadcastPayload(
 
     private static void writeEntryList(FriendlyByteBuf buffer, List<ConflictTeamEntry> entries) {
         buffer.writeVarInt(entries.size());
-        for (ConflictTeamEntry entry : entries) {
-            ConflictTeamEntry.STREAM_CODEC.encode(buffer, entry);
-        }
+        entries.forEach(entry -> ConflictTeamEntry.STREAM_CODEC.encode(buffer, entry));
     }
 
     private static List<ConflictTeamEntry> readEntryList(FriendlyByteBuf buffer) {
@@ -91,7 +89,8 @@ public record ConflictStateBroadcastPayload(
     public static void handleClient(ConflictStateBroadcastPayload payload, IPayloadContext context) {
         context.enqueueWork(() -> {
             ClientConflictState.update(payload);
-            if (ClientUtils.getCurrentGuiAs(ConflictScreen.class) != null) {
+            boolean conflictScreenOpen = ClientUtils.getCurrentGuiAs(ConflictScreen.class) != null;
+            if (conflictScreenOpen) {
                 ConflictScreen.refreshIfOpen();
             } else {
                 QueuedStateUiRefresh.refreshOpenScreens();

@@ -34,13 +34,7 @@ public final class CurrencyTeamLinkService {
     }
 
     public static void ensureLinked(MinecraftServer server, Team ftbTeam) {
-        if (!ftbTeam.isPartyTeam() || !ftbTeam.isValid()) {
-            return;
-        }
-        if (!TeamBankLinkRegistry.isFtbPartyInUse(server, ftbTeam)) {
-            return;
-        }
-        if (CurrencyTeamAccess.cache() == null) {
+        if (!isEligibleForLink(server, ftbTeam)) {
             return;
         }
 
@@ -64,6 +58,13 @@ public final class CurrencyTeamLinkService {
             pruneDuplicateLcTeams(ftbTeam, data, lcTeam.getID());
             applyPartyStateToLcTeam(server, ftbTeam, lcTeam, entry);
         }
+    }
+
+    private static boolean isEligibleForLink(MinecraftServer server, Team ftbTeam) {
+        return ftbTeam.isPartyTeam()
+                && ftbTeam.isValid()
+                && TeamBankLinkRegistry.isFtbPartyInUse(server, ftbTeam)
+                && CurrencyTeamAccess.cache() != null;
     }
 
     private static Object lockFor(UUID ftbTeamId) {
@@ -168,10 +169,7 @@ public final class CurrencyTeamLinkService {
         Set<Long> linkedIds = data.getLinkedLcTeamIds();
 
         for (ITeam candidate : cache.getAllTeams()) {
-            if (candidate.getID() == linkedLcTeamId || linkedIds.contains(candidate.getID())) {
-                continue;
-            }
-            if (!ownerId.equals(candidate.getOwner().id) || !expectedName.equals(candidate.getName())) {
+            if (!isUnlinkedDuplicate(candidate, linkedLcTeamId, linkedIds, ownerId, expectedName)) {
                 continue;
             }
 
@@ -184,6 +182,13 @@ public final class CurrencyTeamLinkService {
                     linkedLcTeamId
             );
         }
+    }
+
+    private static boolean isUnlinkedDuplicate(ITeam candidate, long linkedLcTeamId, Set<Long> linkedIds, UUID ownerId, String expectedName) {
+        if (candidate.getID() == linkedLcTeamId || linkedIds.contains(candidate.getID())) {
+            return false;
+        }
+        return ownerId.equals(candidate.getOwner().id) && expectedName.equals(candidate.getName());
     }
 
     private static void applyPartyStateToLcTeam(
@@ -237,29 +242,31 @@ public final class CurrencyTeamLinkService {
         List<PlayerReference> currentAdmins = CurrencyTeamAccess.admins(lcTeam);
         List<PlayerReference> currentMembers = CurrencyTeamAccess.members(lcTeam);
 
-        for (PlayerReference admin : List.copyOf(currentAdmins)) {
-            if (!wantedAdmins.contains(admin.id)) {
-                PlayerReference.removeFromList(currentAdmins, admin);
-            }
-        }
-        for (PlayerReference member : List.copyOf(currentMembers)) {
-            if (!wantedMembers.contains(member.id)) {
-                PlayerReference.removeFromList(currentMembers, member);
-            }
-        }
+        dropUnwanted(currentAdmins, wantedAdmins);
+        dropUnwanted(currentMembers, wantedMembers);
 
-        for (UUID adminId : wantedAdmins) {
-            PlayerReference ref = toPlayerReference(server, adminId);
-            PlayerReference.removeFromList(currentMembers, ref);
-            PlayerReference.addToList(currentAdmins, ref);
-        }
-        for (UUID memberId : wantedMembers) {
-            PlayerReference ref = toPlayerReference(server, memberId);
-            PlayerReference.removeFromList(currentAdmins, ref);
-            PlayerReference.addToList(currentMembers, ref);
-        }
+        relocateAll(server, wantedAdmins, currentMembers, currentAdmins);
+        relocateAll(server, wantedMembers, currentAdmins, currentMembers);
 
         refreshCachedNames(server, lcTeam);
+    }
+
+    /** Removes any roster entry whose id fell out of the wanted set, without touching entries still wanted. */
+    private static void dropUnwanted(List<PlayerReference> current, Set<UUID> wantedIds) {
+        for (PlayerReference ref : List.copyOf(current)) {
+            if (!wantedIds.contains(ref.id)) {
+                PlayerReference.removeFromList(current, ref);
+            }
+        }
+    }
+
+    /** Moves each wanted id from {@code sourceList} into {@code destinationList}, resolving a fresh reference along the way. */
+    private static void relocateAll(MinecraftServer server, Set<UUID> ids, List<PlayerReference> sourceList, List<PlayerReference> destinationList) {
+        for (UUID id : ids) {
+            PlayerReference ref = toPlayerReference(server, id);
+            PlayerReference.removeFromList(sourceList, ref);
+            PlayerReference.addToList(destinationList, ref);
+        }
     }
 
     /** LC caches each member's display name on their {@link PlayerReference}; re-stamp it in case a player has changed their name since the reference was created. */
@@ -317,38 +324,39 @@ public final class CurrencyTeamLinkService {
             return;
         }
 
-        boolean movedAny = false;
+        List<MoneyValue> heldValues = new java.util.ArrayList<>();
         for (MoneyValue value : legacyAccount.getMoneyStorage().allValues()) {
             if (!value.isEmpty()) {
-                lcAccount.depositMoney(value);
-                movedAny = true;
+                heldValues.add(value);
             }
         }
-        if (movedAny) {
-            legacyAccount.getMoneyStorage().clear();
-            LcClaimEconomySavedData.get(server).clearLegacyAccount(entry.ftbTeamId());
-            LcClaimEconomy.LOGGER.info(
-                    "Migrated legacy FTB hook balance to LC team {} for FTB party {}",
-                    lcTeam.getID(),
-                    entry.ftbTeamId()
-            );
+        if (heldValues.isEmpty()) {
+            return;
         }
+
+        heldValues.forEach(lcAccount::depositMoney);
+        legacyAccount.getMoneyStorage().clear();
+        LcClaimEconomySavedData.get(server).clearLegacyAccount(entry.ftbTeamId());
+        LcClaimEconomy.LOGGER.info(
+                "Migrated legacy FTB hook balance to LC team {} for FTB party {}",
+                lcTeam.getID(),
+                entry.ftbTeamId()
+        );
     }
 
     @Nullable
     private static ServerPlayer resolveOnlinePlayer(Team ftbTeam, UUID preferredId) {
-        MinecraftServer server = ftbTeam.getOnlineMembers().stream()
-                .findFirst()
-                .map(ServerPlayer::getServer)
-                .orElse(null);
-        if (server == null) {
+        ServerPlayer anyOnlineMember = null;
+        for (ServerPlayer candidate : ftbTeam.getOnlineMembers()) {
+            anyOnlineMember = candidate;
+            break;
+        }
+        if (anyOnlineMember == null) {
             return null;
         }
-        ServerPlayer preferred = server.getPlayerList().getPlayer(preferredId);
-        if (preferred != null) {
-            return preferred;
-        }
-        return ftbTeam.getOnlineMembers().stream().findFirst().orElse(null);
+
+        ServerPlayer preferred = anyOnlineMember.getServer().getPlayerList().getPlayer(preferredId);
+        return preferred != null ? preferred : anyOnlineMember;
     }
 
     private static PlayerReference toPlayerReference(MinecraftServer server, UUID playerId) {

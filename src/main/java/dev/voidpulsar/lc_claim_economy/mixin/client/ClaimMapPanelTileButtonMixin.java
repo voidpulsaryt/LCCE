@@ -29,6 +29,8 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import java.util.List;
+
 /**
  * Everything this mod adds to a single claim-map tile: alt-click starts/extends a
  * multi-select for the land/build bulk-toggle in {@link ClaimMapPanelMixin},
@@ -59,6 +61,22 @@ public class ClaimMapPanelTileButtonMixin {
     // chunk never reads as a queued change at a glance.
     private static final int FOR_SALE_COLOR = 0xFFD600;
     private static final int FOR_SALE_OVERLAY_ALPHA = 170;
+
+    @FunctionalInterface
+    private interface PendingCheck {
+        boolean test(ResourceKey<Level> dimension, int chunkX, int chunkZ);
+    }
+
+    private record PendingKind(PendingCheck check, String tooltipKey, int overlayColor) {
+    }
+
+    /** Cascading priority order for both the tooltip line and the tile overlay - first match wins in each. */
+    private static final List<PendingKind> PENDING_KINDS = List.of(
+            new PendingKind(ClientQueuedChanges::isPendingForceLoad, "gui.lc_claim_economy.chunk_pending_forceload", PENDING_FORCELOAD_COLOR),
+            new PendingKind(ClientQueuedChanges::isPendingForceUnload, "gui.lc_claim_economy.chunk_pending_forceunload", PENDING_FORCEUNLOAD_COLOR),
+            new PendingKind(ClientQueuedChanges::isPendingLandChunk, "gui.lc_claim_economy.chunk_pending_land", PENDING_LAND_COLOR),
+            new PendingKind(ClientQueuedChanges::isPendingBuildChunk, "gui.lc_claim_economy.chunk_pending_build", PENDING_BUILD_COLOR)
+    );
 
     @Shadow(remap = false)
     private dev.ftb.mods.ftblibrary.math.XZ chunkPos;
@@ -133,39 +151,13 @@ public class ClaimMapPanelTileButtonMixin {
             ).withStyle(ChatFormatting.DARK_GRAY));
         }
 
-        if (ClientQueuedChanges.isPendingForceLoad(dimension, chunkX, chunkZ)) {
-            list.blankLine();
-            list.add(Component.translatable(
-                    "gui.lc_claim_economy.chunk_pending_forceload",
-                    SafeguardPriceDisplay.upkeepPeriodLabel()
-            ).withStyle(ChatFormatting.GOLD));
-            return;
-        }
-
-        if (ClientQueuedChanges.isPendingForceUnload(dimension, chunkX, chunkZ)) {
-            list.blankLine();
-            list.add(Component.translatable(
-                    "gui.lc_claim_economy.chunk_pending_forceunload",
-                    SafeguardPriceDisplay.upkeepPeriodLabel()
-            ).withStyle(ChatFormatting.GOLD));
-            return;
-        }
-
-        if (ClientQueuedChanges.isPendingLandChunk(dimension, chunkX, chunkZ)) {
-            list.blankLine();
-            list.add(Component.translatable(
-                    "gui.lc_claim_economy.chunk_pending_land",
-                    SafeguardPriceDisplay.upkeepPeriodLabel()
-            ).withStyle(ChatFormatting.GOLD));
-            return;
-        }
-
-        if (ClientQueuedChanges.isPendingBuildChunk(dimension, chunkX, chunkZ)) {
-            list.blankLine();
-            list.add(Component.translatable(
-                    "gui.lc_claim_economy.chunk_pending_build",
-                    SafeguardPriceDisplay.upkeepPeriodLabel()
-            ).withStyle(ChatFormatting.GOLD));
+        for (PendingKind kind : PENDING_KINDS) {
+            if (kind.check().test(dimension, chunkX, chunkZ)) {
+                list.blankLine();
+                list.add(Component.translatable(kind.tooltipKey(), SafeguardPriceDisplay.upkeepPeriodLabel())
+                        .withStyle(ChatFormatting.GOLD));
+                return;
+            }
         }
     }
 
@@ -183,24 +175,11 @@ public class ClaimMapPanelTileButtonMixin {
         int chunkX = chunkPos.x();
         int chunkZ = chunkPos.z();
 
-        if (ClientQueuedChanges.isPendingForceLoad(dimension, chunkX, chunkZ)) {
-            drawPattern(graphics, x, y, w, h, Color4I.rgb(PENDING_FORCELOAD_COLOR).withAlpha(PENDING_OVERLAY_ALPHA));
-            return;
-        }
-
-        if (ClientQueuedChanges.isPendingForceUnload(dimension, chunkX, chunkZ)) {
-            drawPattern(graphics, x, y, w, h, Color4I.rgb(PENDING_FORCEUNLOAD_COLOR).withAlpha(PENDING_OVERLAY_ALPHA));
-            return;
-        }
-
-        if (ClientQueuedChanges.isPendingLandChunk(dimension, chunkX, chunkZ)) {
-            drawPattern(graphics, x, y, w, h, Color4I.rgb(PENDING_LAND_COLOR).withAlpha(PENDING_OVERLAY_ALPHA));
-            return;
-        }
-
-        if (ClientQueuedChanges.isPendingBuildChunk(dimension, chunkX, chunkZ)) {
-            drawPattern(graphics, x, y, w, h, Color4I.rgb(PENDING_BUILD_COLOR).withAlpha(PENDING_OVERLAY_ALPHA));
-            return;
+        for (PendingKind kind : PENDING_KINDS) {
+            if (kind.check().test(dimension, chunkX, chunkZ)) {
+                drawPattern(graphics, x, y, w, h, Color4I.rgb(kind.overlayColor()).withAlpha(PENDING_OVERLAY_ALPHA));
+                return;
+            }
         }
 
         // Checked last and separately from the pending-change patterns above: a chunk can be

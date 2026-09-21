@@ -17,6 +17,9 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * Adds this mod's claim-breakdown and (if wars are enabled) conflict buttons to the
  * right-side toolbar of FTB's team hub screen, to the left of FTB's own settings
@@ -82,30 +85,25 @@ public class TeamHubScreenMixin {
             return;
         }
 
-        int slot = 1;
-
+        List<SimpleButton> activeButtons = new ArrayList<>();
         if (lcClaimEconomy$pricesButton != null) {
-            lcClaimEconomy$pricesButton.setPosAndSize(
-                    settingsButton.getPosX() - TOOLBAR_BUTTON_SPACING * slot,
-                    TOOLBAR_BUTTON_Y,
-                    TOOLBAR_BUTTON_SIZE,
-                    TOOLBAR_BUTTON_SIZE
-            );
-            slot++;
+            activeButtons.add(lcClaimEconomy$pricesButton);
+        }
+        if (lcClaimEconomy$warButton != null && ClientConflictState.warModuleEnabled()) {
+            activeButtons.add(lcClaimEconomy$warButton);
         }
 
-        if (ClientConflictState.warModuleEnabled() && lcClaimEconomy$warButton != null) {
-            lcClaimEconomy$warButton.setPosAndSize(
-                    settingsButton.getPosX() - TOOLBAR_BUTTON_SPACING * slot,
+        for (int slotIndex = 0; slotIndex < activeButtons.size(); slotIndex++) {
+            activeButtons.get(slotIndex).setPosAndSize(
+                    settingsButton.getPosX() - TOOLBAR_BUTTON_SPACING * (slotIndex + 1),
                     TOOLBAR_BUTTON_Y,
                     TOOLBAR_BUTTON_SIZE,
                     TOOLBAR_BUTTON_SIZE
             );
-            slot++;
         }
 
         // Make room for our extra button(s) in FTB's right-side toolbar.
-        int shiftAmount = TOOLBAR_BUTTON_SPACING * (slot - 1);
+        int shiftAmount = TOOLBAR_BUTTON_SPACING * activeButtons.size();
         lcClaimEconomy$shiftToolbarButton(inviteButton, shiftAmount);
         lcClaimEconomy$shiftToolbarButton(allyButton, shiftAmount);
         lcClaimEconomy$shiftToolbarButton(toggleChatButton, shiftAmount);

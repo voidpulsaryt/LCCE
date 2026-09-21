@@ -10,6 +10,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
 import javax.annotation.Nullable;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -143,39 +144,49 @@ public final class ClientPricingCache {
         return upkeepPeriodMinutes;
     }
 
+    private static final Map<String, Long> DEFAULT_PROTECTION_PRICES = Map.of(
+            "allow_mob_griefing", 10L,
+            "allow_explosions", 10L,
+            "allow_pvp", 5L,
+            "block_interact_mode", 15L,
+            "block_edit_mode", 15L,
+            "entity_interact_mode", 15L
+    );
+
     @Nullable
     public static Long protectionPrice(String propertyKey) {
-        return switch (propertyKey) {
-            case "allow_mob_griefing" -> mobGriefProtectionPrice >= 0L ? mobGriefProtectionPrice : null;
-            case "allow_explosions" -> explosionProtectionPrice >= 0L ? explosionProtectionPrice : null;
-            case "allow_pvp" -> pvpDisablePrice >= 0L ? pvpDisablePrice : null;
-            case "block_interact_mode" -> blockInteractProtectionPrice >= 0L ? blockInteractProtectionPrice : null;
-            case "block_edit_mode" -> blockEditProtectionPrice >= 0L ? blockEditProtectionPrice : null;
-            case "entity_interact_mode" -> entityInteractProtectionPrice >= 0L ? entityInteractProtectionPrice : null;
-            default -> null;
+        long raw = switch (propertyKey) {
+            case "allow_mob_griefing" -> mobGriefProtectionPrice;
+            case "allow_explosions" -> explosionProtectionPrice;
+            case "allow_pvp" -> pvpDisablePrice;
+            case "block_interact_mode" -> blockInteractProtectionPrice;
+            case "block_edit_mode" -> blockEditProtectionPrice;
+            case "entity_interact_mode" -> entityInteractProtectionPrice;
+            default -> Long.MIN_VALUE;
         };
+        return raw >= 0L ? raw : null;
     }
 
     @Nullable
     public static Long defaultProtectionPrice(String propertyKey) {
-        return switch (propertyKey) {
-            case "allow_mob_griefing" -> 10L;
-            case "allow_explosions" -> 10L;
-            case "allow_pvp" -> 5L;
-            case "block_interact_mode" -> 15L;
-            case "block_edit_mode" -> 15L;
-            case "entity_interact_mode" -> 15L;
-            default -> null;
-        };
+        return DEFAULT_PROTECTION_PRICES.get(propertyKey);
     }
 
     public static boolean protectionPricesSynced() {
-        return mobGriefProtectionPrice >= 0L
-                && explosionProtectionPrice >= 0L
-                && pvpDisablePrice >= 0L
-                && blockInteractProtectionPrice >= 0L
-                && blockEditProtectionPrice >= 0L
-                && entityInteractProtectionPrice >= 0L;
+        long[] livePrices = {
+                mobGriefProtectionPrice,
+                explosionProtectionPrice,
+                pvpDisablePrice,
+                blockInteractProtectionPrice,
+                blockEditProtectionPrice,
+                entityInteractProtectionPrice
+        };
+        for (long price : livePrices) {
+            if (price < 0L) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public static boolean isSynced() {
@@ -190,22 +201,31 @@ public final class ClientPricingCache {
         return LC_CLAIM_RESULT_IDS.contains(resultId);
     }
 
+    private record BarSegment(Component text, Color4I color) {
+    }
+
     /** Paints the "claim <price> | balance <balance> | upkeep <price> <period>" line into FTB Chunks' bottom bar, left to right, tracking a running cursor since each segment's width depends on its text. */
     public static void renderBottomPanel(GuiGraphics graphics, Theme theme, int x, int y) {
+        List<BarSegment> segments = List.of(
+                new BarSegment(labelText("claim"), LABEL_COLOR),
+                new BarSegment(spaceText(), LABEL_COLOR),
+                new BarSegment(effectivePriceComponent(), VALUE_COLOR),
+                new BarSegment(separatorText(), SEPARATOR_COLOR),
+                new BarSegment(labelText("balance"), LABEL_COLOR),
+                new BarSegment(spaceText(), LABEL_COLOR),
+                new BarSegment(balanceComponent(), VALUE_COLOR),
+                new BarSegment(separatorText(), SEPARATOR_COLOR),
+                new BarSegment(labelText("upkeep"), LABEL_COLOR),
+                new BarSegment(spaceText(), LABEL_COLOR),
+                new BarSegment(priceComponent(forceLoadUpkeepPrice), VALUE_COLOR),
+                new BarSegment(spaceText(), PERIOD_COLOR),
+                new BarSegment(periodComponent(upkeepPeriodMinutes), PERIOD_COLOR)
+        );
+
         int cursor = x;
-        cursor = paintSegment(theme, graphics, cursor, y, labelText("claim"), LABEL_COLOR);
-        cursor = paintSegment(theme, graphics, cursor, y, spaceText(), LABEL_COLOR);
-        cursor = paintSegment(theme, graphics, cursor, y, effectivePriceComponent(), VALUE_COLOR);
-        cursor = paintSegment(theme, graphics, cursor, y, separatorText(), SEPARATOR_COLOR);
-        cursor = paintSegment(theme, graphics, cursor, y, labelText("balance"), LABEL_COLOR);
-        cursor = paintSegment(theme, graphics, cursor, y, spaceText(), LABEL_COLOR);
-        cursor = paintSegment(theme, graphics, cursor, y, balanceComponent(), VALUE_COLOR);
-        cursor = paintSegment(theme, graphics, cursor, y, separatorText(), SEPARATOR_COLOR);
-        cursor = paintSegment(theme, graphics, cursor, y, labelText("upkeep"), LABEL_COLOR);
-        cursor = paintSegment(theme, graphics, cursor, y, spaceText(), LABEL_COLOR);
-        cursor = paintSegment(theme, graphics, cursor, y, priceComponent(forceLoadUpkeepPrice), VALUE_COLOR);
-        cursor = paintSegment(theme, graphics, cursor, y, spaceText(), PERIOD_COLOR);
-        paintSegment(theme, graphics, cursor, y, periodComponent(upkeepPeriodMinutes), PERIOD_COLOR);
+        for (BarSegment segment : segments) {
+            cursor = paintSegment(theme, graphics, cursor, y, segment.text(), segment.color());
+        }
     }
 
     public static void noteChunkUpdate(int totalChunks, int changedChunks, Map<String, Integer> problems) {
@@ -299,19 +319,21 @@ public final class ClientPricingCache {
         return CurrencyAmounts.fromCopper(amount).getText();
     }
 
+    private record PeriodUnit(int minuteSize, String singularKey, String pluralKey) {
+    }
+
+    private static final List<PeriodUnit> LARGE_PERIOD_UNITS = List.of(
+            new PeriodUnit(1440, "gui.lc_claim_economy.period.per_day", "gui.lc_claim_economy.period.per_days"),
+            new PeriodUnit(60, "gui.lc_claim_economy.period.per_hour", "gui.lc_claim_economy.period.per_hours")
+    );
+
     /** Collapses a minute count down to whichever unit divides it evenly (days, then hours, then minutes), matching or pluralizing the translation key as needed. */
     private static Component periodComponent(int minutes) {
-        if (minutes % 1440 == 0) {
-            int days = minutes / 1440;
-            return days == 1
-                    ? Component.translatable("gui.lc_claim_economy.period.per_day")
-                    : Component.translatable("gui.lc_claim_economy.period.per_days", days);
-        }
-        if (minutes % 60 == 0) {
-            int hours = minutes / 60;
-            return hours == 1
-                    ? Component.translatable("gui.lc_claim_economy.period.per_hour")
-                    : Component.translatable("gui.lc_claim_economy.period.per_hours", hours);
+        for (PeriodUnit unit : LARGE_PERIOD_UNITS) {
+            if (minutes % unit.minuteSize() == 0) {
+                int count = minutes / unit.minuteSize();
+                return count == 1 ? Component.translatable(unit.singularKey()) : Component.translatable(unit.pluralKey(), count);
+            }
         }
         return minutes == 1
                 ? Component.translatable("gui.lc_claim_economy.period.per_minute")

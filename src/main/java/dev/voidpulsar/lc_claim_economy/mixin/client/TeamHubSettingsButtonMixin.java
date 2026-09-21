@@ -14,6 +14,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -55,17 +56,18 @@ public class TeamHubSettingsButtonMixin {
     )
     @SuppressWarnings({"rawtypes", "unchecked"})
     private static ConfigValue<?> lcClaimEconomy$routeBuildProtection(TeamProperty key, ConfigGroup cfg, TeamPropertyValue value) {
-        if (SafeguardPricing.BUILD_PROTECTION_PROPERTIES.contains(key) && cfg.getParent() != null) {
-            ConfigGroup buildGroup = cfg.getParent().getOrCreateSubgroup(BUILD_GROUP_ID);
-            ConfigValue<?> configValue = key.config(buildGroup, value);
-            if (configValue != null) {
-                // Reuse the FTB Chunks translations so the entries keep their
-                // familiar names inside the new section.
-                configValue.setNameKey("ftbteamsconfig.ftbchunks." + key.getId().getPath());
-            }
-            return configValue;
+        if (!SafeguardPricing.BUILD_PROTECTION_PROPERTIES.contains(key) || cfg.getParent() == null) {
+            return key.config(cfg, value);
         }
-        return key.config(cfg, value);
+
+        ConfigGroup buildGroup = cfg.getParent().getOrCreateSubgroup(BUILD_GROUP_ID);
+        ConfigValue<?> configValue = key.config(buildGroup, value);
+        if (configValue != null) {
+            // Reuse the FTB Chunks translations so the entries keep their
+            // familiar names inside the new section.
+            configValue.setNameKey("ftbteamsconfig.ftbchunks." + key.getId().getPath());
+        }
+        return configValue;
     }
 
     @Inject(
@@ -86,18 +88,15 @@ public class TeamHubSettingsButtonMixin {
         }
 
         LinkedHashMap<String, ConfigGroup> ordered = new LinkedHashMap<>();
-        moveIfPresent(ordered, subgroups, LAND_GROUP_ID);
-        moveIfPresent(ordered, subgroups, BUILD_GROUP_ID);
+        for (String priorityId : List.of(LAND_GROUP_ID, BUILD_GROUP_ID)) {
+            ConfigGroup group = subgroups.get(priorityId);
+            if (group != null) {
+                ordered.put(priorityId, group);
+            }
+        }
         ordered.putAll(subgroups);
 
         subgroups.clear();
         subgroups.putAll(ordered);
-    }
-
-    private static void moveIfPresent(Map<String, ConfigGroup> target, Map<String, ConfigGroup> source, String id) {
-        ConfigGroup group = source.get(id);
-        if (group != null) {
-            target.put(id, group);
-        }
     }
 }

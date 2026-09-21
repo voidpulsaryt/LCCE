@@ -41,22 +41,17 @@ public final class BillingMessageComposer {
 
     public static Component buildRestorationSummary(List<TeamProperty<?>> restored, List<String> restoredWarNames) {
         MutableComponent out = Component.empty();
-        boolean hasContent = false;
+        LineJoiner joiner = new LineJoiner(out);
 
         if (!restored.isEmpty()) {
-            out.append(Component.translatable("message.lc_claim_economy.restoration_header", restored.size())
+            joiner.add(Component.translatable("message.lc_claim_economy.restoration_header", restored.size())
                     .withStyle(ChatFormatting.GREEN));
             appendBulletedProtections(out, restored, ChatFormatting.WHITE);
-            hasContent = true;
         }
 
         for (String warName : restoredWarNames) {
-            if (hasContent) {
-                out.append("\n");
-            }
-            out.append(Component.translatable("message.lc_claim_economy.war_active", warName)
+            joiner.add(Component.translatable("message.lc_claim_economy.war_active", warName)
                     .withStyle(ChatFormatting.GRAY));
-            hasContent = true;
         }
 
         return out;
@@ -64,31 +59,48 @@ public final class BillingMessageComposer {
 
     public static Component buildSuspensionSummary(List<TeamProperty<?>> suspended, boolean warsSuspended) {
         MutableComponent out = Component.empty();
-        boolean hasContent = false;
+        LineJoiner joiner = new LineJoiner(out);
 
         if (!suspended.isEmpty()) {
-            out.append(Component.translatable("message.lc_claim_economy.suspension_header", suspended.size())
+            joiner.add(Component.translatable("message.lc_claim_economy.suspension_header", suspended.size())
                     .withStyle(ChatFormatting.YELLOW));
             appendBulletedProtections(out, suspended, ChatFormatting.WHITE);
-            hasContent = true;
         }
 
         if (warsSuspended) {
-            if (hasContent) {
-                out.append("\n");
-            }
-            out.append(Component.translatable(
-                    hasContent ? "message.lc_claim_economy.suspension_wars" : "message.lc_claim_economy.suspension_wars_header"
-            ).withStyle(ChatFormatting.YELLOW));
-            hasContent = true;
+            String key = joiner.isEmpty()
+                    ? "message.lc_claim_economy.suspension_wars_header"
+                    : "message.lc_claim_economy.suspension_wars";
+            joiner.add(Component.translatable(key).withStyle(ChatFormatting.YELLOW));
         }
 
-        if (hasContent) {
-            out.append("\n");
-            out.append(Component.translatable("message.lc_claim_economy.suspension_hint").withStyle(ChatFormatting.GRAY));
+        if (!joiner.isEmpty()) {
+            joiner.add(Component.translatable("message.lc_claim_economy.suspension_hint").withStyle(ChatFormatting.GRAY));
         }
 
         return out;
+    }
+
+    /** Tracks whether anything has been written yet so later blocks know to insert a separating newline first. */
+    private static final class LineJoiner {
+        private final MutableComponent target;
+        private boolean started;
+
+        private LineJoiner(MutableComponent target) {
+            this.target = target;
+        }
+
+        private void add(Component piece) {
+            if (started) {
+                target.append("\n");
+            }
+            target.append(piece);
+            started = true;
+        }
+
+        private boolean isEmpty() {
+            return !started;
+        }
     }
 
     private static void appendBulletedProtections(MutableComponent out, List<TeamProperty<?>> properties, ChatFormatting color) {
@@ -302,10 +314,7 @@ public final class BillingMessageComposer {
     }
 
     private static String formatExponent(double exponent) {
-        if (Math.rint(exponent) == exponent) {
-            return String.valueOf((long) exponent);
-        }
-        return String.format("%.2f", exponent);
+        return Math.rint(exponent) == exponent ? String.valueOf((long) exponent) : String.format("%.2f", exponent);
     }
 
     private record PendingCountLine(int count, String translationKey) {
@@ -351,12 +360,11 @@ public final class BillingMessageComposer {
                 new PendingCountLine(breakdown.pendingBuildChunkCount(), "message.lc_claim_economy.upkeep_detail.pending_build_chunks")
         );
         for (PendingCountLine countLine : countLines) {
-            if (countLine.count() <= 0) {
-                continue;
+            if (countLine.count() > 0) {
+                out.append(Component.literal(BULLET).withStyle(ChatFormatting.DARK_GRAY));
+                out.append(Component.translatable(countLine.translationKey(), countLine.count()).withStyle(ChatFormatting.GOLD));
+                out.append("\n");
             }
-            out.append(Component.literal(BULLET).withStyle(ChatFormatting.DARK_GRAY));
-            out.append(Component.translatable(countLine.translationKey(), countLine.count()).withStyle(ChatFormatting.GOLD));
-            out.append("\n");
         }
     }
 

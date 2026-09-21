@@ -53,13 +53,10 @@ public final class ClientQueuedChanges {
             return normalized;
         }
 
-        for (String pendingKey : pendingProperties.keySet()) {
-            if (matchesPendingPropertyKey(propertyId, normalized, pendingKey)) {
-                return pendingKey;
-            }
-        }
-
-        return null;
+        return pendingProperties.keySet().stream()
+                .filter(pendingKey -> matchesPendingPropertyKey(propertyId, normalized, pendingKey))
+                .findFirst()
+                .orElse(null);
     }
 
     private static boolean matchesPendingPropertyKey(
@@ -67,13 +64,7 @@ public final class ClientQueuedChanges {
             @Nullable String normalized,
             String pendingKey
     ) {
-        if (propertyId.equals(pendingKey) || pendingKey.equals(normalized)) {
-            return true;
-        }
-        if (propertyId.endsWith("." + pendingKey)) {
-            return true;
-        }
-        return false;
+        return propertyId.equals(pendingKey) || pendingKey.equals(normalized) || propertyId.endsWith("." + pendingKey);
     }
 
     @Nullable
@@ -83,19 +74,23 @@ public final class ClientQueuedChanges {
     }
 
     public static boolean isPendingForceLoad(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension, int x, int z) {
-        return pendingForceLoads.contains(ChunkCoordKeyClient.encode(dimension.location(), x, z));
+        return containsChunkKey(pendingForceLoads, dimension, x, z);
     }
 
     public static boolean isPendingForceUnload(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension, int x, int z) {
-        return pendingForceUnloads.contains(ChunkCoordKeyClient.encode(dimension.location(), x, z));
+        return containsChunkKey(pendingForceUnloads, dimension, x, z);
     }
 
     public static boolean isPendingLandChunk(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension, int x, int z) {
-        return pendingLandChunks.contains(ChunkCoordKeyClient.encode(dimension.location(), x, z));
+        return containsChunkKey(pendingLandChunks, dimension, x, z);
     }
 
     public static boolean isPendingBuildChunk(net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension, int x, int z) {
-        return pendingBuildChunks.contains(ChunkCoordKeyClient.encode(dimension.location(), x, z));
+        return containsChunkKey(pendingBuildChunks, dimension, x, z);
+    }
+
+    private static boolean containsChunkKey(Set<String> keys, net.minecraft.resources.ResourceKey<net.minecraft.world.level.Level> dimension, int x, int z) {
+        return keys.contains(ChunkCoordKeyClient.encode(dimension.location(), x, z));
     }
 
     @SuppressWarnings("unchecked")
@@ -133,12 +128,10 @@ public final class ClientQueuedChanges {
             return null;
         }
 
-        for (TeamProperty<?> property : SafeguardPricing.PROTECTION_PROPERTIES) {
-            if (SafeguardPricing.propertyKey(property).equals(normalized)) {
-                return property;
-            }
-        }
-        return null;
+        return SafeguardPricing.PROTECTION_PROPERTIES.stream()
+                .filter(property -> SafeguardPricing.propertyKey(property).equals(normalized))
+                .findFirst()
+                .orElse(null);
     }
 
     private static final class ChunkCoordKeyClient {
