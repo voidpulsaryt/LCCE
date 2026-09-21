@@ -4,11 +4,13 @@ import dev.ftb.mods.ftbchunks.api.ChunkTeamData;
 import dev.ftb.mods.ftbchunks.api.FTBChunksAPI;
 import dev.ftb.mods.ftbteams.api.FTBTeamsAPI;
 import dev.ftb.mods.ftbteams.api.Team;
+import dev.ftb.mods.ftbteams.api.property.TeamProperty;
 import dev.voidpulsar.lc_claim_economy.LcClaimEconomy;
 import dev.voidpulsar.lc_claim_economy.bank.BankLedgerAccess;
 import dev.voidpulsar.lc_claim_economy.config.LcClaimEconomyConfig;
 import dev.voidpulsar.lc_claim_economy.data.LcClaimEconomySavedData;
 import dev.voidpulsar.lc_claim_economy.data.TeamQueuedChanges;
+import dev.voidpulsar.lc_claim_economy.integration.quest.QuestAdvancements;
 import dev.voidpulsar.lc_claim_economy.network.ConflictEntryStatus;
 import dev.voidpulsar.lc_claim_economy.teams.TeamRegistry;
 import dev.voidpulsar.lc_claim_economy.util.CurrencyAmounts;
@@ -21,11 +23,19 @@ import net.minecraft.server.level.ServerPlayer;
 import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
+/**
+ * Orchestrates the claim-war subsystem: upkeep/war-cost math is delegated to
+ * {@link ConflictBillingMath} and {@link SafeguardPricing}, this class only
+ * decides which teams are billed, in what order, and what a player sees on
+ * the war screen.
+ */
 public final class ConflictService {
     public record WarCostBreakdown(
             long baseUpkeepCopper,
@@ -85,478 +95,452 @@ public final class ConflictService {
         return LcClaimEconomyConfig.SERVER.warEnabled.get();
     }
 
-    public static boolean isClaimTeam(MinecraftServer server, Team team) {
-        if (!team.isValid() || !FTBChunksAPI.api().isManagerLoaded()) {
+    public static boolean isClaimTeam(MinecraftServer srv, Team squad) {
+        boolean claimSourceUsable = squad.isValid() && FTBChunksAPI.api().isManagerLoaded();
+        if (!claimSourceUsable) {
             return false;
         }
-        if (team.isPartyTeam() && !TeamRegistry.isTracked(server, team)) {
+        boolean untrackedParty = squad.isPartyTeam() && !TeamRegistry.isTracked(srv, squad);
+        if (untrackedParty) {
             return false;
         }
-        ChunkTeamData chunkData = FTBChunksAPI.api().getManager().getOrCreateData(team);
-        return chunkData.getClaimedChunks().size() > 0;
+        ChunkTeamData claimData = FTBChunksAPI.api().getManager().getOrCreateData(squad);
+        return !claimData.getClaimedChunks().isEmpty();
     }
 
-    public static long baseUpkeepCopper(MinecraftServer server, Team team) {
-        return baseUpkeepCopper(server, team, LcClaimEconomySavedData.get(server).getPendingState(team.getTeamId()));
+    public static long baseUpkeepCopper(MinecraftServer srv, Team squad) {
+        return baseUpkeepCopper(srv, squad, LcClaimEconomySavedData.get(srv).getPendingState(squad.getTeamId()));
     }
 
-    public static long baseUpkeepCopper(MinecraftServer server, Team team, TeamQueuedChanges pendingState) {
-        return SafeguardPricing.calculateTotalUpkeepCopper(server, team, pendingState);
+    public static long baseUpkeepCopper(MinecraftServer srv, Team squad, TeamQueuedChanges queuedChanges) {
+        return SafeguardPricing.calculateTotalUpkeepCopper(srv, squad, queuedChanges);
     }
 
-    public static WarCostBreakdown calculateWarCosts(MinecraftServer server, Team team) {
-        return calculateWarCosts(server, team, LcClaimEconomySavedData.get(server).getPendingState(team.getTeamId()));
+    public static WarCostBreakdown calculateWarCosts(MinecraftServer srv, Team squad) {
+        return calculateWarCosts(srv, squad, LcClaimEconomySavedData.get(srv).getPendingState(squad.getTeamId()));
     }
 
-    public static WarCostBreakdown calculateWarCosts(MinecraftServer server, Team team, TeamQueuedChanges pendingState) {
-        return calculateWarCosts(server, team, pendingState, SafeguardRollbackService.pricingProperties(team, pendingState));
+    public static WarCostBreakdown calculateWarCosts(MinecraftServer srv, Team squad, TeamQueuedChanges queuedChanges) {
+        return calculateWarCosts(srv, squad, queuedChanges, SafeguardRollbackService.pricingProperties(squad, queuedChanges));
     }
 
     public static WarCostBreakdown calculateWarCosts(
-            MinecraftServer server,
-            Team team,
-            TeamQueuedChanges pendingState,
-            java.util.Map<String, String> pricingOverrides
+            MinecraftServer srv,
+            Team squad,
+            TeamQueuedChanges queuedChanges,
+            Map<String, String> priceOverrides
     ) {
-        long base = SafeguardPricing.calculateTotalUpkeepCopper(server, team, pendingState, pricingOverrides);
+        long baseline = SafeguardPricing.calculateTotalUpkeepCopper(srv, squad, queuedChanges, priceOverrides);
         if (!isEnabled()) {
-            return new WarCostBreakdown(base, 0L, 0L, 0, 0);
+            return new WarCostBreakdown(baseline, 0L, 0L, 0, 0);
         }
 
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
+        LcClaimEconomySavedData ledger = LcClaimEconomySavedData.get(srv);
 
-        // Only count declarers that still exist and have claimed chunks — the same
-        // filter used by buildIncomingViews. Stale references from deleted or
-        // claim-less teams would otherwise inflate the billing without showing up
-        // in the war screen.
-        int incomingCount = countEligibleIncomingWars(server, savedData, team.getTeamId());
-        long incoming = ConflictBillingMath.sumOrdinalIncomingTerms(base, incomingCount);
+        // Skip aggressor links pointing at teams that were deleted or no longer hold
+        // any claims - resolveEligibleTarget/isClaimTeam are the same gate buildIncomingViews
+        // applies, so a team never gets billed for a war that wouldn't show up on its screen.
+        int inboundCount = countBillableAggressors(srv, ledger, squad.getTeamId());
+        long inboundCopper = ConflictBillingMath.sumOrdinalIncomingTerms(baseline, inboundCount);
 
-        Set<UUID> targets = savedData.getWarTargets(team.getTeamId());
-        long outgoing = 0L;
-        for (UUID targetId : targets) {
-            Team target = TeamRegistry.resolve(server, targetId);
-            if (target != null && isClaimTeam(server, target)) {
-                long targetBase = baseUpkeepCopper(server, target, savedData.getPendingState(targetId));
-                outgoing += ConflictBillingMath.outgoingWarCostCopper(targetBase);
+        Set<UUID> hostileIds = ledger.getWarTargets(squad.getTeamId());
+        long outboundCopper = 0L;
+        for (UUID hostileId : hostileIds) {
+            Team foe = TeamRegistry.resolve(srv, hostileId);
+            if (foe == null || !isClaimTeam(srv, foe)) {
+                continue;
             }
+            long foeBaseline = baseUpkeepCopper(srv, foe, ledger.getPendingState(hostileId));
+            outboundCopper += ConflictBillingMath.outgoingWarCostCopper(foeBaseline);
         }
 
-        return new WarCostBreakdown(base, incoming, outgoing, incomingCount, targets.size());
+        return new WarCostBreakdown(baseline, inboundCopper, outboundCopper, inboundCount, hostileIds.size());
     }
 
-    public static MoneyValue calculateTotalUpkeepCost(MinecraftServer server, Team team, TeamQueuedChanges pendingState) {
-        return CurrencyAmounts.fromCopper(calculateTotalUpkeepCostCopper(server, team, pendingState));
+    public static MoneyValue calculateTotalUpkeepCost(MinecraftServer srv, Team squad, TeamQueuedChanges queuedChanges) {
+        return CurrencyAmounts.fromCopper(calculateTotalUpkeepCostCopper(srv, squad, queuedChanges));
     }
 
-    public static long calculateTotalUpkeepCostCopper(MinecraftServer server, Team team, TeamQueuedChanges pendingState) {
-        return calculateWarCosts(server, team, pendingState).totalUpkeepCopper();
+    public static long calculateTotalUpkeepCostCopper(MinecraftServer srv, Team squad, TeamQueuedChanges queuedChanges) {
+        return calculateWarCosts(srv, squad, queuedChanges).totalUpkeepCopper();
     }
 
     public static long calculateTotalUpkeepCostCopper(
-            MinecraftServer server,
-            Team team,
-            TeamQueuedChanges pendingState,
-            java.util.Map<String, String> pricingOverrides
+            MinecraftServer srv,
+            Team squad,
+            TeamQueuedChanges queuedChanges,
+            Map<String, String> priceOverrides
     ) {
-        return calculateWarCosts(server, team, pendingState, pricingOverrides).totalUpkeepCopper();
+        return calculateWarCosts(srv, squad, queuedChanges, priceOverrides).totalUpkeepCopper();
     }
 
     public static boolean canAffordUpkeepWithPendingProperty(
-            MinecraftServer server,
-            Team team,
-            TeamQueuedChanges pendingState,
-            IBankAccount account,
-            dev.ftb.mods.ftbteams.api.property.TeamProperty<?> property
+            MinecraftServer srv,
+            Team squad,
+            TeamQueuedChanges queuedChanges,
+            IBankAccount wallet,
+            TeamProperty<?> trait
     ) {
-        java.util.Map<String, String> pricing = SafeguardRollbackService.pricingWithAppliedPending(team, pendingState, property);
-        long cost = calculateTotalUpkeepCostCopper(server, team, pendingState, pricing);
-        if (cost <= 0L) {
-            return true;
-        }
-        return account.getMoneyStorage().containsValue(CurrencyAmounts.fromCopper(cost));
+        Map<String, String> pricingSnapshot = SafeguardRollbackService.pricingWithAppliedPending(squad, queuedChanges, trait);
+        long priceCopper = calculateTotalUpkeepCostCopper(srv, squad, queuedChanges, pricingSnapshot);
+        return canCoverCopper(wallet, priceCopper);
     }
 
     public static long calculateProtectionAndIncomingUpkeepCopper(
-            MinecraftServer server,
-            Team team,
-            TeamQueuedChanges pendingState
+            MinecraftServer srv,
+            Team squad,
+            TeamQueuedChanges queuedChanges
     ) {
-        WarCostBreakdown war = calculateWarCosts(server, team, pendingState);
-        return war.baseUpkeepCopper() + war.incomingWarCopper();
+        WarCostBreakdown breakdown = calculateWarCosts(srv, squad, queuedChanges);
+        return breakdown.baseUpkeepCopper() + breakdown.incomingWarCopper();
     }
 
-    public static boolean canAffordUpkeep(MinecraftServer server, Team team, TeamQueuedChanges pendingState, IBankAccount account) {
-        long cost = calculateTotalUpkeepCostCopper(server, team, pendingState);
-        if (cost <= 0L) {
+    public static boolean canAffordUpkeep(MinecraftServer srv, Team squad, TeamQueuedChanges queuedChanges, IBankAccount wallet) {
+        return canCoverCopper(wallet, calculateTotalUpkeepCostCopper(srv, squad, queuedChanges));
+    }
+
+    /** Shared affordability check: no charge is ever refused for a non-positive amount. */
+    private static boolean canCoverCopper(IBankAccount wallet, long amountCopper) {
+        if (amountCopper <= 0L) {
             return true;
         }
-        return account.getMoneyStorage().containsValue(CurrencyAmounts.fromCopper(cost));
+        return wallet.getMoneyStorage().containsValue(CurrencyAmounts.fromCopper(amountCopper));
     }
 
     public static boolean canAffordUpkeepWithOutgoingWar(
-            MinecraftServer server,
-            Team team,
-            TeamQueuedChanges pendingState,
-            IBankAccount account,
-            LcClaimEconomySavedData savedData,
-            UUID targetId
+            MinecraftServer srv,
+            Team squad,
+            TeamQueuedChanges queuedChanges,
+            IBankAccount wallet,
+            LcClaimEconomySavedData ledger,
+            UUID opponentId
     ) {
-        UUID teamId = team.getTeamId();
-        if (savedData.isAtWarWith(teamId, targetId)) {
-            return canAffordUpkeep(server, team, pendingState, account);
+        UUID squadId = squad.getTeamId();
+        if (ledger.isAtWarWith(squadId, opponentId)) {
+            return canAffordUpkeep(srv, squad, queuedChanges, wallet);
         }
-        savedData.setWarTarget(teamId, targetId, true);
-        boolean affordable = canAffordUpkeep(server, team, pendingState, account);
-        savedData.setWarTarget(teamId, targetId, false);
-        return affordable;
+        ledger.setWarTarget(squadId, opponentId, true);
+        boolean canPay = canAffordUpkeep(srv, squad, queuedChanges, wallet);
+        ledger.setWarTarget(squadId, opponentId, false);
+        return canPay;
     }
 
     public static List<UUID> pendingWarRestoreOrder(
-            MinecraftServer server,
-            Team team,
-            TeamQueuedChanges pendingState,
-            LcClaimEconomySavedData savedData
+            MinecraftServer srv,
+            Team squad,
+            TeamQueuedChanges queuedChanges,
+            LcClaimEconomySavedData ledger
     ) {
-        UUID teamId = team.getTeamId();
-        List<UUID> targets = new ArrayList<>();
-        for (UUID targetId : pendingState.pendingWarDeclares()) {
-            if (!savedData.isAtWarWith(teamId, targetId)) {
-                targets.add(targetId);
-            }
-        }
-        targets.sort(Comparator.comparingLong(id -> {
-            Team target = TeamRegistry.resolve(server, id);
-            return target == null ? Long.MAX_VALUE : costToDeclareWar(server, team, target);
+        UUID squadId = squad.getTeamId();
+        List<UUID> candidates = queuedChanges.pendingWarDeclares().stream()
+                .filter(id -> !ledger.isAtWarWith(squadId, id))
+                .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
+        candidates.sort(Comparator.comparingLong(id -> {
+            Team foe = TeamRegistry.resolve(srv, id);
+            return foe == null ? Long.MAX_VALUE : costToDeclareWar(srv, squad, foe);
         }));
-        return targets;
+        return candidates;
     }
 
-    public static List<UUID> outgoingWarDismantleOrder(MinecraftServer server, Team team, LcClaimEconomySavedData savedData) {
-        UUID teamId = team.getTeamId();
-        List<UUID> targets = new ArrayList<>(savedData.getWarTargets(teamId));
-        targets.sort(Comparator.comparing(UUID::toString));
+    public static List<UUID> outgoingWarDismantleOrder(MinecraftServer srv, Team squad, LcClaimEconomySavedData ledger) {
+        UUID squadId = squad.getTeamId();
+        List<UUID> opponents = new ArrayList<>(ledger.getWarTargets(squadId));
+        opponents.sort(Comparator.comparing(UUID::toString));
 
-        java.util.Map<UUID, Long> costByTarget = new java.util.HashMap<>();
-        for (UUID targetId : targets) {
-            Team target = TeamRegistry.resolve(server, targetId);
-            long cost = target == null
-                    ? 0L
-                    : ConflictBillingMath.outgoingWarCostCopper(baseUpkeepCopper(server, target));
-            costByTarget.put(targetId, cost);
+        Map<UUID, Long> priceByOpponent = new HashMap<>();
+        for (UUID opponentId : opponents) {
+            Team foe = TeamRegistry.resolve(srv, opponentId);
+            long price = foe == null ? 0L : ConflictBillingMath.outgoingWarCostCopper(baseUpkeepCopper(srv, foe));
+            priceByOpponent.put(opponentId, price);
         }
 
-        targets.sort(Comparator.comparingLong(id -> costByTarget.getOrDefault(id, 0L)).reversed());
-        return targets;
+        opponents.sort(Comparator.comparingLong((UUID id) -> priceByOpponent.getOrDefault(id, 0L)).reversed());
+        return opponents;
     }
 
-    public static long costToDeclareWar(MinecraftServer server, Team declarer, Team target) {
+    public static long costToDeclareWar(MinecraftServer srv, Team aggressor, Team foe) {
         if (!isEnabled()) {
             return 0L;
         }
-        return ConflictBillingMath.outgoingWarCostCopper(baseUpkeepCopper(server, target));
+        return ConflictBillingMath.outgoingWarCostCopper(baseUpkeepCopper(srv, foe));
     }
 
-    /** True if the given team currently has at least one active war, incoming or outgoing. */
-    public static boolean isAtWar(MinecraftServer server, UUID teamId) {
-        return !LcClaimEconomySavedData.get(server).collectWarPartnerIds(teamId).isEmpty();
+    /** Whether this team is currently a party to any war, as attacker or defender. */
+    public static boolean isAtWar(MinecraftServer srv, UUID squadId) {
+        return !LcClaimEconomySavedData.get(srv).collectWarPartnerIds(squadId).isEmpty();
     }
 
-    public static boolean isWarEligibleTeam(MinecraftServer server, Team team) {
-        if (!TeamRegistry.isTracked(server, team)) {
-            return false;
-        }
-        if (isPeaceful(server, team.getTeamId())) {
-            return false;
-        }
-        return meetsMinClaimThreshold(server, team);
+    public static boolean isWarEligibleTeam(MinecraftServer srv, Team squad) {
+        return TeamRegistry.isTracked(srv, squad)
+                && !isPeaceful(srv, squad.getTeamId())
+                && meetsMinClaimThreshold(srv, squad);
     }
 
-    /** A team that has opted out of the war system entirely via {@code /lcce war peaceful} - see {@link #setPeaceful}. */
-    public static boolean isPeaceful(MinecraftServer server, UUID teamId) {
-        return LcClaimEconomySavedData.get(server).isPeaceful(teamId);
+    /** Whether a team has opted out of the war system via {@code /lcce war peaceful}; see {@link #setPeaceful}. */
+    public static boolean isPeaceful(MinecraftServer srv, UUID squadId) {
+        return LcClaimEconomySavedData.get(srv).isPeaceful(squadId);
     }
 
     /**
-     * Attempts to set a team's peaceful flag. Fails (returns false) if trying to enable it while
-     * the team has any active war - wars must be ended first, so peaceful mode can't be used as a
-     * mid-siege escape hatch.
+     * Flips a team's peaceful flag, unless that would mean going peaceful while still
+     * at war - active wars must be ended first so peaceful mode can't be used to dodge
+     * an ongoing siege. Returns whether the change was applied.
      */
-    public static boolean setPeaceful(MinecraftServer server, UUID teamId, boolean peaceful) {
-        if (peaceful && isAtWar(server, teamId)) {
+    public static boolean setPeaceful(MinecraftServer srv, UUID squadId, boolean wantsPeaceful) {
+        if (wantsPeaceful && isAtWar(srv, squadId)) {
             return false;
         }
-        LcClaimEconomySavedData.get(server).setPeaceful(teamId, peaceful);
+        LcClaimEconomySavedData.get(srv).setPeaceful(squadId, wantsPeaceful);
         return true;
     }
 
-    public static boolean meetsMinClaimThreshold(MinecraftServer server, Team team) {
-        int min = LcClaimEconomyConfig.SERVER.warMinClaimedChunks.get();
-        if (min <= 0) {
+    public static boolean meetsMinClaimThreshold(MinecraftServer srv, Team squad) {
+        int claimFloor = LcClaimEconomyConfig.SERVER.warMinClaimedChunks.get();
+        if (claimFloor <= 0) {
             return true;
         }
         if (!FTBChunksAPI.api().isManagerLoaded()) {
             return false;
         }
-        return FTBChunksAPI.api().getManager().getOrCreateData(team).getClaimedChunks().size() > min;
+        return FTBChunksAPI.api().getManager().getOrCreateData(squad).getClaimedChunks().size() > claimFloor;
     }
 
-    public static List<WarTeamView> buildIncomingViews(MinecraftServer server, Team self) {
+    public static List<WarTeamView> buildIncomingViews(MinecraftServer srv, Team viewer) {
         if (!isEnabled()) {
             return List.of();
         }
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        UUID selfId = self.getTeamId();
-        long selfBase = baseUpkeepCopper(server, self);
-        List<WarTeamView> views = new ArrayList<>();
-        Set<UUID> seen = new HashSet<>();
+        LcClaimEconomySavedData ledger = LcClaimEconomySavedData.get(srv);
+        UUID viewerId = viewer.getTeamId();
+        long viewerBaseline = baseUpkeepCopper(srv, viewer);
+        List<WarTeamView> rows = new ArrayList<>();
+        Set<UUID> claimed = new HashSet<>();
 
-        for (LcClaimEconomySavedData.TeamLinkEntry entry : savedData.getAllLinks()) {
-            if (!entry.warTargets().contains(selfId)) {
+        for (LcClaimEconomySavedData.TeamLinkEntry link : ledger.getAllLinks()) {
+            if (!link.warTargets().contains(viewerId)) {
                 continue;
             }
-            Team declarer = resolveEligibleTarget(server, entry.ftbTeamId());
-            if (declarer == null) {
+            Team aggressor = resolveEligibleTarget(srv, link.ftbTeamId());
+            if (aggressor == null) {
                 continue;
             }
-            seen.add(declarer.getTeamId());
-            views.add(opponentView(
-                    declarer,
-                    baseUpkeepCopper(server, declarer),
-                    selfBase,
+            claimed.add(aggressor.getTeamId());
+            rows.add(describeOpponent(
+                    aggressor,
+                    baseUpkeepCopper(srv, aggressor),
+                    viewerBaseline,
                     ConflictEntryStatus.ACTIVE,
                     false
             ));
         }
 
-        for (LcClaimEconomySavedData.TeamLinkEntry entry : savedData.getAllLinks()) {
-            UUID declarerId = entry.ftbTeamId();
-            if (declarerId.equals(selfId) || seen.contains(declarerId)) {
+        for (LcClaimEconomySavedData.TeamLinkEntry link : ledger.getAllLinks()) {
+            UUID candidateId = link.ftbTeamId();
+            boolean alreadyHandled = candidateId.equals(viewerId) || claimed.contains(candidateId);
+            boolean pendingAgainstViewer = link.pendingState().isPendingWarDeclare(viewerId);
+            if (alreadyHandled || !pendingAgainstViewer) {
                 continue;
             }
-            if (!entry.pendingState().isPendingWarDeclare(selfId)) {
+            Team aggressor = resolveEligibleTarget(srv, candidateId);
+            if (aggressor == null) {
                 continue;
             }
-            Team declarer = resolveEligibleTarget(server, declarerId);
-            if (declarer == null) {
-                continue;
-            }
-            seen.add(declarerId);
-            views.add(opponentView(
-                    declarer,
-                    baseUpkeepCopper(server, declarer),
-                    selfBase,
+            claimed.add(candidateId);
+            rows.add(describeOpponent(
+                    aggressor,
+                    baseUpkeepCopper(srv, aggressor),
+                    viewerBaseline,
                     ConflictEntryStatus.PENDING_DECLARE,
                     false
             ));
         }
 
-        sortedByDisplayName(views);
-        double step = warMultiplier();
-        for (int i = 0; i < views.size(); i++) {
-            WarTeamView view = views.get(i);
-            long term = ConflictBillingMath.ordinalWarTermCopper(selfBase, i, step);
-            views.set(i, new WarTeamView(
-                    view.teamId(),
-                    view.displayName(),
-                    view.targetBaseUpkeepCopper(),
-                    term,
-                    view.status(),
-                    view.opponentPendingDeclareOnViewer(),
-                    view.blockEditProtected(),
-                    view.explosionProtected(),
-                    view.pvpProtected()
+        sortByName(rows);
+        double multiplier = warMultiplier();
+        for (int position = 0; position < rows.size(); position++) {
+            WarTeamView row = rows.get(position);
+            long ordinalCost = ConflictBillingMath.ordinalWarTermCopper(viewerBaseline, position, multiplier);
+            rows.set(position, new WarTeamView(
+                    row.teamId(),
+                    row.displayName(),
+                    row.targetBaseUpkeepCopper(),
+                    ordinalCost,
+                    row.status(),
+                    row.opponentPendingDeclareOnViewer(),
+                    row.blockEditProtected(),
+                    row.explosionProtected(),
+                    row.pvpProtected()
             ));
         }
-        return views;
+        return rows;
     }
 
-    /** Active incoming wars only — used for upkeep billing breakdown lines. */
-    public static List<WarTeamView> buildBilledIncomingViews(MinecraftServer server, Team self) {
+    /** Lists only the wars presently counted in this team's incoming upkeep bill (no pending declares). */
+    public static List<WarTeamView> buildBilledIncomingViews(MinecraftServer srv, Team viewer) {
         if (!isEnabled()) {
             return List.of();
         }
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        UUID selfId = self.getTeamId();
-        long selfBase = baseUpkeepCopper(server, self);
-        double step = warMultiplier();
+        LcClaimEconomySavedData ledger = LcClaimEconomySavedData.get(srv);
+        UUID viewerId = viewer.getTeamId();
+        long viewerBaseline = baseUpkeepCopper(srv, viewer);
+        double multiplier = warMultiplier();
 
-        List<UUID> declarerIds = new ArrayList<>();
-        for (LcClaimEconomySavedData.TeamLinkEntry entry : savedData.getAllLinks()) {
-            if (!entry.warTargets().contains(selfId)) {
+        List<UUID> aggressorIds = new ArrayList<>();
+        for (LcClaimEconomySavedData.TeamLinkEntry link : ledger.getAllLinks()) {
+            if (!link.warTargets().contains(viewerId)) {
                 continue;
             }
-            Team declarer = resolveEligibleTarget(server, entry.ftbTeamId());
-            if (declarer == null) {
-                continue;
+            Team aggressor = resolveEligibleTarget(srv, link.ftbTeamId());
+            if (aggressor != null) {
+                aggressorIds.add(aggressor.getTeamId());
             }
-            declarerIds.add(declarer.getTeamId());
         }
-        declarerIds.sort(Comparator.comparing(UUID::toString));
+        aggressorIds.sort(Comparator.comparing(UUID::toString));
 
-        List<WarTeamView> views = new ArrayList<>();
-        int index = 0;
-        for (UUID declarerId : declarerIds) {
-            Team declarer = TeamRegistry.resolve(server, declarerId);
-            if (declarer == null) {
+        List<WarTeamView> rows = new ArrayList<>();
+        int position = 0;
+        for (UUID aggressorId : aggressorIds) {
+            Team aggressor = TeamRegistry.resolve(srv, aggressorId);
+            if (aggressor == null) {
                 continue;
             }
-            views.add(opponentView(
-                    declarer,
-                    baseUpkeepCopper(server, declarer),
-                    ConflictBillingMath.ordinalWarTermCopper(selfBase, index++, step),
-                    ConflictEntryStatus.ACTIVE,
-                    false
-            ));
+            long billedCost = ConflictBillingMath.ordinalWarTermCopper(viewerBaseline, position++, multiplier);
+            rows.add(describeOpponent(aggressor, baseUpkeepCopper(srv, aggressor), billedCost, ConflictEntryStatus.ACTIVE, false));
         }
-        return sortedByDisplayName(views);
+        return sortByName(rows);
     }
 
-    /** Active outgoing wars only — used for upkeep billing breakdown lines. */
-    public static List<WarTeamView> buildBilledOutgoingViews(MinecraftServer server, Team self) {
+    /** Lists only the wars this team is presently paying for as the aggressor. */
+    public static List<WarTeamView> buildBilledOutgoingViews(MinecraftServer srv, Team viewer) {
         if (!isEnabled()) {
             return List.of();
         }
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        UUID selfId = self.getTeamId();
-        TeamQueuedChanges pendingState = savedData.getPendingState(selfId);
+        LcClaimEconomySavedData ledger = LcClaimEconomySavedData.get(srv);
+        UUID viewerId = viewer.getTeamId();
+        TeamQueuedChanges queuedChanges = ledger.getPendingState(viewerId);
 
-        List<UUID> activeTargetIds = new ArrayList<>(savedData.getWarTargets(selfId));
-        activeTargetIds.sort(Comparator.comparing(UUID::toString));
+        List<UUID> hostileIds = new ArrayList<>(ledger.getWarTargets(viewerId));
+        hostileIds.sort(Comparator.comparing(UUID::toString));
 
-        List<WarTeamView> views = new ArrayList<>();
-        for (UUID targetId : activeTargetIds) {
-            Team target = resolveEligibleTarget(server, targetId);
-            if (target == null) {
+        List<WarTeamView> rows = new ArrayList<>();
+        for (UUID hostileId : hostileIds) {
+            Team foe = resolveEligibleTarget(srv, hostileId);
+            if (foe == null) {
                 continue;
             }
-            ConflictEntryStatus status = pendingState.isPendingWarEnd(targetId)
+            ConflictEntryStatus status = queuedChanges.isPendingWarEnd(hostileId)
                     ? ConflictEntryStatus.PENDING_END
                     : ConflictEntryStatus.ACTIVE;
-            long targetBase = baseUpkeepCopper(server, target);
-            views.add(opponentView(
-                    target,
-                    targetBase,
-                    ConflictBillingMath.outgoingWarCostCopper(targetBase),
-                    status,
-                    false
-            ));
+            long foeBaseline = baseUpkeepCopper(srv, foe);
+            rows.add(describeOpponent(foe, foeBaseline, ConflictBillingMath.outgoingWarCostCopper(foeBaseline), status, false));
         }
-        return sortedByDisplayName(views);
+        return sortByName(rows);
     }
 
-    public static List<WarTeamView> buildOutgoingViews(MinecraftServer server, Team self) {
+    public static List<WarTeamView> buildOutgoingViews(MinecraftServer srv, Team viewer) {
         if (!isEnabled()) {
             return List.of();
         }
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        UUID selfId = self.getTeamId();
-        TeamQueuedChanges pendingState = savedData.getPendingState(selfId);
-        List<WarTeamView> views = new ArrayList<>();
-        List<UUID> activeTargetIds = new ArrayList<>(savedData.getWarTargets(selfId));
-        activeTargetIds.sort(Comparator.comparing(UUID::toString));
-        for (UUID targetId : activeTargetIds) {
-            Team target = resolveEligibleTarget(server, targetId);
-            if (target == null) {
+        LcClaimEconomySavedData ledger = LcClaimEconomySavedData.get(srv);
+        UUID viewerId = viewer.getTeamId();
+        TeamQueuedChanges queuedChanges = ledger.getPendingState(viewerId);
+        List<WarTeamView> rows = new ArrayList<>();
+
+        List<UUID> hostileIds = new ArrayList<>(ledger.getWarTargets(viewerId));
+        hostileIds.sort(Comparator.comparing(UUID::toString));
+        for (UUID hostileId : hostileIds) {
+            Team foe = resolveEligibleTarget(srv, hostileId);
+            if (foe == null) {
                 continue;
             }
-            ConflictEntryStatus status = pendingState.isPendingWarEnd(targetId)
+            ConflictEntryStatus status = queuedChanges.isPendingWarEnd(hostileId)
                     ? ConflictEntryStatus.PENDING_END
                     : ConflictEntryStatus.ACTIVE;
-            long targetBase = baseUpkeepCopper(server, target);
-            views.add(opponentView(
-                    target,
-                    targetBase,
-                    ConflictBillingMath.outgoingWarCostCopper(targetBase),
-                    status,
-                    false
-            ));
+            long foeBaseline = baseUpkeepCopper(srv, foe);
+            rows.add(describeOpponent(foe, foeBaseline, ConflictBillingMath.outgoingWarCostCopper(foeBaseline), status, false));
         }
-        for (UUID targetId : pendingState.pendingWarDeclares()) {
-            if (savedData.isAtWarWith(selfId, targetId)) {
+
+        for (UUID candidateId : queuedChanges.pendingWarDeclares()) {
+            if (ledger.isAtWarWith(viewerId, candidateId)) {
                 continue;
             }
-            Team target = resolveEligibleTarget(server, targetId);
-            if (target == null) {
+            Team foe = resolveEligibleTarget(srv, candidateId);
+            if (foe == null) {
                 continue;
             }
-            views.add(opponentView(
-                    target,
-                    baseUpkeepCopper(server, target),
-                    costToDeclareWar(server, self, target),
+            rows.add(describeOpponent(
+                    foe,
+                    baseUpkeepCopper(srv, foe),
+                    costToDeclareWar(srv, viewer, foe),
                     ConflictEntryStatus.PENDING_DECLARE,
                     false
             ));
         }
-        return sortedByDisplayName(views);
+        return sortByName(rows);
     }
 
-    public static List<WarTeamView> buildAvailableTargets(MinecraftServer server, Team self) {
+    public static List<WarTeamView> buildAvailableTargets(MinecraftServer srv, Team viewer) {
         if (!isEnabled()) {
             return List.of();
         }
-        List<WarTeamView> views = new ArrayList<>();
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        UUID selfId = self.getTeamId();
-        Set<UUID> activeTargets = savedData.getWarTargets(selfId);
-        TeamQueuedChanges selfPending = savedData.getPendingState(selfId);
-        for (Team team : TeamRegistry.trackedTeams(server)) {
-            UUID teamId = team.getTeamId();
-            if (teamId.equals(selfId) || activeTargets.contains(teamId) || selfPending.isPendingWarDeclare(teamId)) {
+        LcClaimEconomySavedData ledger = LcClaimEconomySavedData.get(srv);
+        UUID viewerId = viewer.getTeamId();
+        Set<UUID> hostileIds = ledger.getWarTargets(viewerId);
+        TeamQueuedChanges viewerQueuedChanges = ledger.getPendingState(viewerId);
+
+        List<WarTeamView> rows = new ArrayList<>();
+        for (Team candidate : TeamRegistry.trackedTeams(srv)) {
+            UUID candidateId = candidate.getTeamId();
+            boolean unavailable = candidateId.equals(viewerId)
+                    || hostileIds.contains(candidateId)
+                    || viewerQueuedChanges.isPendingWarDeclare(candidateId);
+            if (unavailable) {
                 continue;
             }
-            boolean opponentPending = savedData.getPendingState(teamId).isPendingWarDeclare(selfId);
-            ConflictEntryStatus status = selfPending.isPendingWarDeclare(teamId)
+            boolean candidatePendingOnViewer = ledger.getPendingState(candidateId).isPendingWarDeclare(viewerId);
+            ConflictEntryStatus status = viewerQueuedChanges.isPendingWarDeclare(candidateId)
                     ? ConflictEntryStatus.PENDING_DECLARE
                     : ConflictEntryStatus.ACTIVE;
-            views.add(opponentView(
-                    team,
-                    baseUpkeepCopper(server, team),
-                    costToDeclareWar(server, self, team),
+            rows.add(describeOpponent(
+                    candidate,
+                    baseUpkeepCopper(srv, candidate),
+                    costToDeclareWar(srv, viewer, candidate),
                     status,
-                    opponentPending
+                    candidatePendingOnViewer
             ));
         }
-        return sortedByDisplayName(views);
+        return sortByName(rows);
     }
 
     /**
-     * Resolves a target team and confirms it's still eligible to be shown/billed as a war
-     * opponent (exists, tracked, not peaceful, meets the min-claims threshold), or {@code null}
-     * if either check fails.
+     * Resolves a team id to a live {@link Team} that is still allowed to appear as a war
+     * opponent (exists, tracked, not peaceful, above the min-claims floor); {@code null}
+     * if it no longer qualifies.
      */
     @Nullable
-    private static Team resolveEligibleTarget(MinecraftServer server, UUID targetId) {
-        Team target = TeamRegistry.resolve(server, targetId);
-        return target != null && isWarEligibleTeam(server, target) ? target : null;
+    private static Team resolveEligibleTarget(MinecraftServer srv, UUID candidateId) {
+        Team candidate = TeamRegistry.resolve(srv, candidateId);
+        return candidate != null && isWarEligibleTeam(srv, candidate) ? candidate : null;
     }
 
-    /** The identical trailing sort every {@code buildXxxViews} method ends with. */
-    private static List<WarTeamView> sortedByDisplayName(List<WarTeamView> views) {
-        views.sort(Comparator.comparing(WarTeamView::displayName, String.CASE_INSENSITIVE_ORDER));
-        return views;
+    /** Common trailing sort shared by every {@code buildXxxViews} method. */
+    private static List<WarTeamView> sortByName(List<WarTeamView> rows) {
+        rows.sort(Comparator.comparing(WarTeamView::displayName, String.CASE_INSENSITIVE_ORDER));
+        return rows;
     }
 
-    private static int countEligibleIncomingWars(MinecraftServer server, LcClaimEconomySavedData savedData, UUID targetId) {
-        int count = 0;
-        for (LcClaimEconomySavedData.TeamLinkEntry entry : savedData.getAllLinks()) {
-            if (!entry.warTargets().contains(targetId)) {
-                continue;
-            }
-            if (resolveEligibleTarget(server, entry.ftbTeamId()) == null) {
-                continue;
-            }
-            count++;
-        }
-        return count;
+    private static int countBillableAggressors(MinecraftServer srv, LcClaimEconomySavedData ledger, UUID viewerId) {
+        return (int) ledger.getAllLinks().stream()
+                .filter(link -> link.warTargets().contains(viewerId))
+                .filter(link -> resolveEligibleTarget(srv, link.ftbTeamId()) != null)
+                .count();
     }
 
-    public static boolean canManageWar(Team team, UUID playerId) {
-        return BankLedgerAccess.canPurchaseForTeam(team, playerId);
+    public static boolean canManageWar(Team squad, UUID playerId) {
+        return BankLedgerAccess.canPurchaseForTeam(squad, playerId);
     }
 
     @Nullable
-    public static Component toggleWar(MinecraftServer server, ServerPlayer player, UUID targetTeamId) {
+    public static Component toggleWar(MinecraftServer srv, ServerPlayer actor, UUID targetTeamId) {
         if (!isEnabled()) {
             return Component.translatable("message.lc_claim_economy.war_disabled");
         }
@@ -564,122 +548,132 @@ public final class ConflictService {
             return Component.translatable("message.lc_claim_economy.war_unavailable");
         }
 
-        Team self = FTBTeamsAPI.api().getManager().getTeamForPlayer(player).orElse(null);
-        Team target = TeamRegistry.resolve(server, targetTeamId);
-        if (self == null || target == null) {
+        Team viewer = FTBTeamsAPI.api().getManager().getTeamForPlayer(actor).orElse(null);
+        Team foe = TeamRegistry.resolve(srv, targetTeamId);
+        if (viewer == null || foe == null) {
             return Component.translatable("message.lc_claim_economy.war_unavailable");
         }
-        if (!canManageWar(self, player.getUUID())) {
+        if (!canManageWar(viewer, actor.getUUID())) {
             return Component.translatable("message.lc_claim_economy.war_denied");
         }
-        if (self.getTeamId().equals(target.getTeamId())) {
+        if (viewer.getTeamId().equals(foe.getTeamId())) {
             return Component.translatable("message.lc_claim_economy.war_self");
         }
-        if (!isWarEligibleTeam(server, self) || !isWarEligibleTeam(server, target)) {
-            if (isPeaceful(server, self.getTeamId())) {
-                return Component.translatable("message.lc_claim_economy.war_self_peaceful");
-            }
-            if (isPeaceful(server, target.getTeamId())) {
-                return Component.translatable("message.lc_claim_economy.war_target_peaceful", displayName(target));
-            }
-            int minClaims = LcClaimEconomyConfig.SERVER.warMinClaimedChunks.get();
-            if (!meetsMinClaimThreshold(server, self)) {
-                return Component.translatable("message.lc_claim_economy.war_self_too_small", minClaims);
-            }
-            if (!meetsMinClaimThreshold(server, target)) {
-                return Component.translatable("message.lc_claim_economy.war_target_too_small", displayName(target), minClaims);
-            }
-            return Component.translatable("message.lc_claim_economy.war_unavailable");
+
+        Component ineligibilityReason = describeWarIneligibility(srv, viewer, foe);
+        if (ineligibilityReason != null) {
+            return ineligibilityReason;
         }
 
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        UUID selfId = self.getTeamId();
-        UUID targetId = target.getTeamId();
-        TeamQueuedChanges pendingState = savedData.getPendingState(selfId);
+        LcClaimEconomySavedData ledger = LcClaimEconomySavedData.get(srv);
+        UUID viewerId = viewer.getTeamId();
+        UUID foeId = foe.getTeamId();
+        TeamQueuedChanges queuedChanges = ledger.getPendingState(viewerId);
 
-        if (pendingState.isPendingWarDeclare(targetId)) {
-            savedData.setPendingState(selfId, pendingState.withoutPendingWarDeclare(targetId));
-            return Component.translatable("message.lc_claim_economy.war_pending_cancelled", displayName(target));
+        if (queuedChanges.isPendingWarDeclare(foeId)) {
+            ledger.setPendingState(viewerId, queuedChanges.withoutPendingWarDeclare(foeId));
+            return Component.translatable("message.lc_claim_economy.war_pending_cancelled", displayName(foe));
         }
 
-        boolean currentlyAtWar = savedData.isAtWarWith(selfId, targetId);
-        if (currentlyAtWar) {
-            if (pendingState.isPendingWarEnd(targetId)) {
-                savedData.setPendingState(selfId, pendingState.withoutPendingWarEnd(targetId));
-                return Component.translatable("message.lc_claim_economy.war_pending_cancelled", displayName(target));
+        boolean alreadyHostile = ledger.isAtWarWith(viewerId, foeId);
+        if (alreadyHostile) {
+            if (queuedChanges.isPendingWarEnd(foeId)) {
+                ledger.setPendingState(viewerId, queuedChanges.withoutPendingWarEnd(foeId));
+                return Component.translatable("message.lc_claim_economy.war_pending_cancelled", displayName(foe));
             }
-            savedData.setPendingState(selfId, pendingState.withPendingWarEnd(targetId));
-            return Component.translatable("message.lc_claim_economy.war_end_pending", displayName(target));
+            ledger.setPendingState(viewerId, queuedChanges.withPendingWarEnd(foeId));
+            return Component.translatable("message.lc_claim_economy.war_end_pending", displayName(foe));
         }
 
         if (!WarDeclarationWindow.isOpenNow()) {
             return Component.translatable("message.lc_claim_economy.war_declare_window_closed", WarDeclarationWindow.describeWindow());
         }
 
-        savedData.setPendingState(selfId, pendingState.withPendingWarDeclare(targetId));
-        dev.voidpulsar.lc_claim_economy.integration.quest.QuestAdvancements.grant(
-                player, dev.voidpulsar.lc_claim_economy.integration.quest.QuestAdvancements.warDeclared());
-        return Component.translatable("message.lc_claim_economy.war_declare_pending", displayName(target));
+        ledger.setPendingState(viewerId, queuedChanges.withPendingWarDeclare(foeId));
+        QuestAdvancements.grant(actor, QuestAdvancements.warDeclared());
+        return Component.translatable("message.lc_claim_economy.war_declare_pending", displayName(foe));
     }
 
-    public static void onTeamRemoved(MinecraftServer server, UUID teamId) {
-        TeamRegistry.onTeamDeleted(server, teamId);
+    /** Builds the "why can't these two teams fight" message, or {@code null} if they can. */
+    @Nullable
+    private static Component describeWarIneligibility(MinecraftServer srv, Team viewer, Team foe) {
+        if (isWarEligibleTeam(srv, viewer) && isWarEligibleTeam(srv, foe)) {
+            return null;
+        }
+        if (isPeaceful(srv, viewer.getTeamId())) {
+            return Component.translatable("message.lc_claim_economy.war_self_peaceful");
+        }
+        if (isPeaceful(srv, foe.getTeamId())) {
+            return Component.translatable("message.lc_claim_economy.war_target_peaceful", displayName(foe));
+        }
+        int claimFloor = LcClaimEconomyConfig.SERVER.warMinClaimedChunks.get();
+        if (!meetsMinClaimThreshold(srv, viewer)) {
+            return Component.translatable("message.lc_claim_economy.war_self_too_small", claimFloor);
+        }
+        if (!meetsMinClaimThreshold(srv, foe)) {
+            return Component.translatable("message.lc_claim_economy.war_target_too_small", displayName(foe), claimFloor);
+        }
+        return Component.translatable("message.lc_claim_economy.war_unavailable");
+    }
+
+    public static void onTeamRemoved(MinecraftServer srv, UUID squadId) {
+        TeamRegistry.onTeamDeleted(srv, squadId);
     }
 
     /**
-     * Removes all wars declared by or against the given team and refreshes
-     * war/upkeep state for every team that was involved.
+     * Tears down every war link touching the given team, whether it was the attacker or the
+     * defender, then pings each formerly-linked team so its cached war/upkeep state gets rebuilt.
      */
-    public static void cleanupTeamWars(MinecraftServer server, UUID teamId) {
-        if (server == null || teamId == null || !FTBTeamsAPI.api().isManagerLoaded()) {
+    public static void cleanupTeamWars(MinecraftServer srv, UUID squadId) {
+        if (srv == null || squadId == null || !FTBTeamsAPI.api().isManagerLoaded()) {
             return;
         }
 
-        LcClaimEconomySavedData savedData = LcClaimEconomySavedData.get(server);
-        Set<UUID> partners = savedData.collectWarPartnerIds(teamId);
-        boolean hadOutgoing = !savedData.getWarTargets(teamId).isEmpty();
-        if (partners.isEmpty() && !hadOutgoing) {
+        LcClaimEconomySavedData ledger = LcClaimEconomySavedData.get(srv);
+        Set<UUID> partnerIds = ledger.collectWarPartnerIds(squadId);
+        boolean hadOutgoingWars = !ledger.getWarTargets(squadId).isEmpty();
+        if (partnerIds.isEmpty() && !hadOutgoingWars) {
             return;
         }
 
-        savedData.clearWarReferences(teamId);
-        for (UUID partnerId : partners) {
-            ConflictSyncCoordinator.syncToTeam(server, partnerId);
-            Team partner = TeamRegistry.resolve(server, partnerId);
-            if (partner != null) {
-                ConflictSyncCoordinator.onUpkeepFactorsChanged(server, partner);
+        ledger.clearWarReferences(squadId);
+        for (UUID partnerId : partnerIds) {
+            ConflictSyncCoordinator.syncToTeam(srv, partnerId);
+            Team ally = TeamRegistry.resolve(srv, partnerId);
+            if (ally != null) {
+                ConflictSyncCoordinator.onUpkeepFactorsChanged(srv, ally);
             }
         }
 
-        LcClaimEconomy.LOGGER.debug("Cleared war state for team {} and refreshed {} partner team(s)", teamId, partners.size());
+        LcClaimEconomy.LOGGER.debug("Cleared war state for team {} and refreshed {} partner team(s)", squadId, partnerIds.size());
     }
 
     public static double warMultiplier() {
         return LcClaimEconomyConfig.SERVER.warCostMultiplier.get();
     }
 
-    private static WarTeamView opponentView(
-            Team opponent,
-            long targetBaseUpkeepCopper,
-            long warCostCopper,
+    private static WarTeamView describeOpponent(
+            Team foe,
+            long foeBaseUpkeepCopper,
+            long hostilityCostCopper,
             ConflictEntryStatus status,
-            boolean opponentPendingDeclareOnViewer
+            boolean foePendingDeclareOnViewer
     ) {
-        ConflictTargetSafeguards protections = ConflictTargetSafeguards.live(opponent);
+        ConflictTargetSafeguards shields = ConflictTargetSafeguards.live(foe);
         return new WarTeamView(
-                opponent.getTeamId(),
-                displayName(opponent),
-                targetBaseUpkeepCopper,
-                warCostCopper,
+                foe.getTeamId(),
+                displayName(foe),
+                foeBaseUpkeepCopper,
+                hostilityCostCopper,
                 status,
-                opponentPendingDeclareOnViewer,
-                protections.blockEditProtected(),
-                protections.explosionProtected(),
-                protections.pvpProtected()
+                foePendingDeclareOnViewer,
+                shields.blockEditProtected(),
+                shields.explosionProtected(),
+                shields.pvpProtected()
         );
     }
 
-    public static String displayName(Team team) {
-        return team.getName().getString();
+    public static String displayName(Team squad) {
+        return squad.getName().getString();
     }
 }
