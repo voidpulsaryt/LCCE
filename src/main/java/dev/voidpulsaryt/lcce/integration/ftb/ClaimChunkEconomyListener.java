@@ -53,7 +53,9 @@ public final class ClaimChunkEconomyListener {
 
             if (!CurrencyBridge.canAfford(player.get(), cost)) {
                 sourceStack.sendFailure(Component.translatable("lcce.claim.insufficient_funds_player", CurrencyBridge.formatValue(cost)));
-                return CompoundEventResult.<ClaimResult>interruptFalse(null);
+                // FTB Chunks treats a null result object as "no objection" and claims anyway, so a
+                // real failing ClaimResult is required for the veto to take effect.
+                return CompoundEventResult.<ClaimResult>interruptFalse(ClaimResult.customProblem("lcce.claim.blocked"));
             }
 
             return CompoundEventResult.pass();

@@ -54,6 +54,7 @@
     "lcce.market.country_cancelled": "Cancelled country listing '%s'.",
     "lcce.map.info_balance": "Team balance: %s",
     "lcce.map.info_nation": "Nation: %s",
+    "lcce.claim.blocked": "Not enough currency to claim this chunk",
     "lcce.map.info_forceloaded": "Force-loaded (%s/period)",
     "lcce.map.info_not_forceloaded": "Not force-loaded (%s/period)",
     "lcce.map.info_region": "Region: %s",

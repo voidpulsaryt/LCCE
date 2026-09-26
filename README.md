@@ -260,6 +260,11 @@ numerical format like `$100` - instead of ever showing a raw, unformatted number
   banner (`assets/lcce/banner.png`, served by and shown in the web dashboard's header) are both
   yours, copied in from `jars/icon.png` and `jars/banner.png`.
 
+## License
+
+MIT - see `LICENSE.md`. Release notes live in `CHANGELOG.md`; `CURSEFORGE_DESCRIPTION.md` and
+`MODRINTH_DESCRIPTION.md` are the mod-page texts for those platforms.
+
 ## Known gaps
 
 - **Nation territory isn't drawn on the map.** A team's own claim color/border reflects that team
