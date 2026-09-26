@@ -1,0 +1,7 @@
+{
+  "icon": "item:minecraft:emerald",
+  "sort_index": 561,
+  "loading_screen": false,
+  "click": ["command:lcce market info"],
+  "tooltip": [{"translate": "lcce.sidebar.market"}]
+}

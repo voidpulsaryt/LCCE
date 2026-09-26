@@ -1,0 +1,76 @@
+modLoader = "javafml"
+loaderVersion = "${loader_version_range}"
+license = "${mod_license}"
+issueTrackerURL = "https://github.com/voidpulsaryt/lcce/issues"
+
+[[mods]]
+modId = "${mod_id}"
+version = "${mod_version}"
+displayName = "${mod_name}"
+logoFile = "icon.png"
+authors = "${mod_authors}"
+description = '''${mod_description}'''
+
+[[dependencies.${mod_id}]]
+    modId = "neoforge"
+    type = "required"
+    versionRange = "${neoforge_version_range}"
+    ordering = "NONE"
+    side = "BOTH"
+
+[[dependencies.${mod_id}]]
+    modId = "minecraft"
+    type = "required"
+    versionRange = "${minecraft_version_range}"
+    ordering = "NONE"
+    side = "BOTH"
+
+[[dependencies.${mod_id}]]
+    modId = "ftbteams"
+    type = "required"
+    versionRange = "[2101.1.0,)"
+    ordering = "AFTER"
+    side = "BOTH"
+
+[[dependencies.${mod_id}]]
+    modId = "ftbchunks"
+    type = "required"
+    versionRange = "[2101.1.0,)"
+    ordering = "AFTER"
+    side = "BOTH"
+
+[[dependencies.${mod_id}]]
+    modId = "lightmanscurrency"
+    type = "required"
+    # Lightman's Currency versions its jars as "<minecraft version>-<mod version>" (e.g.
+    # "1.21-2.3.0.5", confirmed by the actual jar this mod builds against) rather than a bare mod
+    # version, so the lower bound needs that same "1.21-" prefix - "[2.2.0,)" alone compares as a
+    # plain numeric version and (since the comparator flattens both sides into numeric tokens)
+    # reads "1.21-2.3.0.5" as token-wise less than "2.2.0" (1 < 2), rejecting every real version.
+    versionRange = "[1.21-2.2.0,)"
+    ordering = "AFTER"
+    side = "BOTH"
+
+[[dependencies.${mod_id}]]
+    modId = "xaerominimap"
+    type = "optional"
+    versionRange = "[26.0.0,)"
+    ordering = "AFTER"
+    side = "CLIENT"
+
+[[dependencies.${mod_id}]]
+    modId = "xaeroworldmap"
+    type = "optional"
+    versionRange = "[1.40.0,)"
+    ordering = "AFTER"
+    side = "CLIENT"
+
+[[dependencies.${mod_id}]]
+    modId = "bluemap"
+    type = "optional"
+    versionRange = "[5.0,)"
+    ordering = "AFTER"
+    side = "SERVER"
+
+[[mixins]]
+config = "lcce.mixins.json"

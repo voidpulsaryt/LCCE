@@ -1,0 +1,7 @@
+{
+  "icon": "item:minecraft:gold_ingot",
+  "sort_index": 560,
+  "loading_screen": false,
+  "click": ["command:lcce upkeep"],
+  "tooltip": [{"translate": "lcce.sidebar.balance"}]
+}

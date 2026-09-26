@@ -1,0 +1,128 @@
+plugins {
+    id "java-library"
+    // If Gradle can't resolve this plugin version, check
+    // https://projects.neoforged.net/neoforged/moddevgradle for the current release
+    // and bump it here - the moddev plugin evolves quickly.
+    id "net.neoforged.moddev" version "2.0.78"
+}
+
+version = mod_version
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(java_version)
+
+repositories {
+    mavenCentral()
+    mavenLocal()
+
+    maven {
+        name = "FTB Maven"
+        url = "https://maven.ftb.dev/releases"
+    }
+    maven {
+        name = "Architectury"
+        url = "https://maven.architectury.dev/"
+    }
+    maven {
+        name = "BlueColored (BlueMap)"
+        url = "https://repo.bluecolored.de/releases"
+    }
+    exclusiveContent {
+        forRepository {
+            maven {
+                name = "Modrinth"
+                url = "https://api.modrinth.com/maven"
+            }
+        }
+        filter {
+            includeGroup "maven.modrinth"
+        }
+    }
+}
+
+neoForge {
+    version = neoforge_version
+
+    parchment {
+        // Comment this block out if you don't want parchment mappings, or if the
+        // minecraft/mappings version pair below hasn't been published yet.
+        minecraftVersion = minecraft_version
+        mappingsVersion = "2024.11.17"
+    }
+
+    runs {
+        client {
+            client()
+            systemProperty "neoforge.enabledGameTestNamespaces", mod_id
+        }
+        server {
+            server()
+            systemProperty "neoforge.enabledGameTestNamespaces", mod_id
+            programArgument "--nogui"
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+dependencies {
+    // Architectury's event bus classes - required transitively by the FTB Chunks/Teams API surface.
+    implementation "dev.architectury:architectury-neoforge:${architectury_api_version}"
+
+    implementation "dev.ftb.mods:ftb-library-neoforge:${ftb_library_version}"
+    implementation "dev.ftb.mods:ftb-teams-neoforge:${ftb_teams_version}"
+    implementation "dev.ftb.mods:ftb-chunks-neoforge:${ftb_chunks_version}"
+
+    // Update lightmanscurrency_version in gradle.properties to match the exact Modrinth
+    // version id/number for the release you're targeting.
+    implementation "maven.modrinth:lightmans-currency:${lightmanscurrency_version}"
+
+    // Xaero's Minimap/World Map - compileOnly, not implementation: both are optional client-side
+    // enhancements, not hard dependencies, so the mod must still load fine (server or client)
+    // without them. Every call into xaero.* classes is guarded behind a
+    // ModList.isLoaded("xaerominimap"/"xaeroworldmap") check at runtime. Referencing the jars
+    // directly rather than a Modrinth coordinate since these exact jars are what the map
+    // integration was built and checked against with javap.
+    compileOnly files("$rootDir/jars/xaerominimap-neoforge-1.21.1-26.5.0.jar")
+    compileOnly files("$rootDir/jars/xaeroworldmap-neoforge-1.21.1-1.46.0.jar")
+    // XaeroLib - the shared library both Xaero mods depend on. Not a separate download for this
+    // version: NeoForge's jar-in-jar mechanism embeds it inside the World Map jar itself
+    // (META-INF/jarjar/xaerolib-neoforge-1.21.1-1.7.3.jar) and loads it automatically at runtime,
+    // but our compileOnly file reference above doesn't reach into that nested jar, so it's
+    // extracted here as its own file for the compiler to see GuiMap's full superclass chain.
+    compileOnly files("$rootDir/jars/xaerolib-neoforge-1.21.1-1.7.3.jar")
+
+    // BlueMap - compileOnly, optional, server-side only. Guarded behind
+    // ModList.isLoaded("bluemap") at runtime.
+    compileOnly "de.bluecolored:bluemap-api:${bluemap_api_version}"
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = "UTF-8"
+}
+
+tasks.named("processResources", ProcessResources) {
+    var replaceProperties = [
+        mod_id           : mod_id,
+        mod_name         : mod_name,
+        mod_license      : mod_license,
+        mod_version      : mod_version,
+        mod_authors      : mod_authors,
+        mod_description  : mod_description,
+        neoforge_version_range   : neoforge_version_range,
+        loader_version_range     : loader_version_range,
+        minecraft_version_range  : minecraft_version_range,
+    ]
+    inputs.properties replaceProperties
+    filesMatching(["META-INF/neoforge.mods.toml"]) {
+        expand replaceProperties
+    }
+}

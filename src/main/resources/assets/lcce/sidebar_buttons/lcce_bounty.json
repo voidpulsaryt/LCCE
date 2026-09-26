@@ -1,0 +1,7 @@
+{
+  "icon": "item:minecraft:iron_sword",
+  "sort_index": 562,
+  "loading_screen": false,
+  "click": ["command:lcce bounty list"],
+  "tooltip": [{"translate": "lcce.sidebar.bounty"}]
+}
